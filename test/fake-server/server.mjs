@@ -28,6 +28,16 @@ const API_KEY = 'sk-fake';
 export function startFakeServer(port = 0) {
 	const requests = [];
 	const server = http.createServer((req, res) => {
+		// Real Ollama allows the app:// origin by default and OpenAI sends permissive
+		// CORS headers; mirror that so the renderer-side fetch in Obsidian works.
+		res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
+		res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+		if (req.method === 'OPTIONS') {
+			res.writeHead(204);
+			res.end();
+			return;
+		}
 		let body = '';
 		req.on('data', (c) => (body += c));
 		req.on('end', () => {

@@ -27,13 +27,14 @@ export function renderProposalCard(
 		e.preventDefault();
 		void app.workspace.openLinkText(proposal.path, '', false);
 	});
-	header.createSpan({ cls: `dg-proposal-status dg-status-${proposal.status}`, text: statusLabel(proposal.status) });
 
 	container.createDiv({ cls: 'dg-proposal-summary', text: proposal.summary });
 
 	const lines = core.proposals.diff(proposal);
 	const stats = diffStats(lines);
-	container.createDiv({ cls: 'dg-proposal-stats', text: `+${stats.added} −${stats.removed} lines` });
+	const statsRow = container.createDiv({ cls: 'dg-proposal-stats' });
+	statsRow.createSpan({ text: `+${stats.added} −${stats.removed} lines · ` });
+	statsRow.createSpan({ cls: `dg-proposal-status dg-status-${proposal.status}`, text: statusLabel(proposal.status) });
 
 	const diffEl = container.createEl('pre', { cls: 'dg-diff' });
 	const hunks = toHunks(lines, 3);

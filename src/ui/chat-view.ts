@@ -31,6 +31,7 @@ export class ChatView extends ItemView {
 	private statusEl!: HTMLElement;
 	private liveEl: HTMLElement | null = null;
 	private liveText = '';
+	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -114,6 +115,7 @@ export class ChatView extends ItemView {
 		modelSelect.addEventListener('change', () => void this.core.setActiveModel(modelSelect.value));
 		this.iconButton(modelRow, 'refresh-cw', 'Refresh model list', () => void this.loadModels());
 		this.statusEl = modelRow.createSpan({ cls: 'dg-status', text: '' });
+		if (this.lastStatus) this.setStatus(this.lastStatus.state, this.lastStatus.title);
 	}
 
 	private async switchProvider(id: ProviderId): Promise<void> {
@@ -143,6 +145,7 @@ export class ChatView extends ItemView {
 	}
 
 	private setStatus(state: 'ok' | 'error' | 'checking', title: string): void {
+		this.lastStatus = { state, title };
 		if (!this.statusEl) return;
 		this.statusEl.empty();
 		this.statusEl.dataset['state'] = state;

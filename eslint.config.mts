@@ -14,6 +14,7 @@ export default defineConfig(
 		'package-lock.json',
 		'tsconfig.json',
 		'test/**',
+		'scripts/**',
 		'vitest.config.ts',
 	]),
 	{
