@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, SettingDefinitionItem } from 'obsidian';
 import type DragonglassPlugin from '../main';
 import { ProviderId } from '../providers/types';
-import { DragonglassSettings } from '../settings';
+import { DragonglassSettings, MIN_NUM_CTX } from '../settings';
 
 /**
  * Declarative settings tab (Obsidian 1.13+). Keys are dotted paths into the
@@ -59,6 +59,16 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						name: 'Model',
 						desc: 'A model you have pulled, for example llama3.1 or qwen2.5. Tool calling needs a tool-capable model.',
 						control: { type: 'text', key: 'ollama.model', placeholder: 'llama3.1' },
+					},
+					{
+						name: 'Context window',
+						desc: 'Tokens of prompt plus reply per request (Ollama option num_ctx). Ollama\'s own default of 4096 cannot hold one long note and silently cuts the prompt. Larger windows use more memory. Capped at what the model supports.',
+						control: { type: 'number', key: 'ollama.numCtx', min: MIN_NUM_CTX, max: 1_048_576, step: 1024 },
+					},
+					{
+						name: 'Let thinking models think',
+						desc: 'Models such as qwen3 reason before answering, which can take a minute per turn; the reasoning is shown collapsed in the chat. Turn off for faster, direct answers.',
+						control: { type: 'toggle', key: 'ollama.think' },
 					},
 					{
 						name: 'Test Ollama connection',
@@ -150,7 +160,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Max characters per note',
-						desc: 'Longer notes are truncated before being sent, to stay within model context limits.',
+						desc: 'Longer notes are truncated before being sent. For Ollama the cap is also lowered to half the context window when that is smaller.',
 						control: { type: 'number', key: 'maxCharsPerNote', min: 1000, max: 500000, step: 1000 },
 					},
 				],

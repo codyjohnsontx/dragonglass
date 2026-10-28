@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt, formatContextBlock, toProviderMessages } from '../src/agent/context';
+import { buildSystemPrompt, formatContextBlock, noteTokenBudget, toProviderMessages } from '../src/agent/context';
 import { StoredMessage } from '../src/persistence/conversation';
+import { DEFAULT_SETTINGS } from '../src/settings';
 
 describe('context building', () => {
 	it('tells the model note content is data and that it cannot write', () => {
@@ -22,6 +23,24 @@ describe('context building', () => {
 		expect(block).toContain('[truncated: showing 10 of 50 characters]');
 		expect(block).toContain('<<<selection from="A.md">>>\nsel\n<<<end selection>>>');
 		expect(formatContextBlock([], 10)).toBe('');
+	});
+
+	it('lowers the note cap when the context window is small', () => {
+		const cap = DEFAULT_SETTINGS.maxCharsPerNote;
+		const shown = (content: string, window: number | undefined) =>
+			Number(/showing (\d+) of/.exec(formatContextBlock([{ kind: 'active', label: 'A', path: 'A.md', content }], cap, noteTokenBudget(window)))?.[1] ?? content.length);
+		const latin = 'x'.repeat(40_000);
+		expect(shown(latin, undefined)).toBe(20_000);
+		expect(shown(latin, 16_384)).toBe(20_000); // 32,768 chars would fit; the user's cap wins
+		expect(shown(latin, 4096)).toBe(8192);
+		expect(shown(latin, 1024)).toBe(2048);
+		expect(shown(latin, 100)).toBe(1000); // never below a useful minimum
+		// CJK runs about a token per character, so a 30,000-character note must not fill a 16k window.
+		const cjk = '秘密の言葉はペリカンです'.repeat(2500);
+		expect(shown(cjk, 16_384)).toBe(8192);
+		expect(shown(cjk, undefined)).toBe(20_000);
+		// Cyrillic runs about two characters per token, so more of it fits.
+		expect(shown('Привет'.repeat(5000), 16_384)).toBe(16_384);
 	});
 
 	it('prepends context only to the latest user turn and drops failed turns', () => {

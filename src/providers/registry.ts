@@ -33,7 +33,11 @@ export function createProviders(
 		return secretId ? secrets.getSecret(secretId) : null;
 	};
 	return {
-		ollama: new OllamaProvider(lazyHttp, () => ({ baseUrl: settings().ollama.baseUrl })),
+		ollama: new OllamaProvider(lazyHttp, () => ({
+			baseUrl: settings().ollama.baseUrl,
+			numCtx: settings().ollama.numCtx,
+			think: settings().ollama.think,
+		})),
 		openai: new OpenAIProvider(lazyHttp, () => ({ baseUrl: settings().openai.baseUrl, apiKey: keyFor('openai') })),
 		anthropic: new AnthropicProvider(lazyHttp, () => ({
 			baseUrl: settings().anthropic.baseUrl,

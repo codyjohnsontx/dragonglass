@@ -10,10 +10,14 @@ import { AgentTool, parseToolArguments, ToolRegistry, ToolResult, ToolValidation
 export type RunEvent =
 	| { type: 'assistant_start' }
 	| { type: 'text_delta'; delta: string }
+	/** Reasoning streamed by a thinking model before its answer. */
+	| { type: 'thinking_delta'; delta: string }
 	| { type: 'tool_call'; call: ToolCall; tool: AgentTool | undefined }
 	| { type: 'tool_result'; call: ToolCall; result: ToolResult }
-	| { type: 'assistant_end'; content: string; toolCalls: ToolCall[]; usage?: Usage }
+	| { type: 'assistant_end'; content: string; thinking: string; toolCalls: ToolCall[]; usage?: Usage; warnings: string[] }
 	| { type: 'tools_disabled'; reason: string }
+	/** A provider warning about this turn, such as a prompt cut to fit the context window. */
+	| { type: 'warning'; message: string }
 	| { type: 'error'; error: ProviderError };
 
 export interface RunOptions {
@@ -43,7 +47,9 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		yield { type: 'assistant_start' };
 
 		let content = '';
+		let thinking = '';
 		const toolCalls: ToolCall[] = [];
+		const warnings: string[] = [];
 		let usage: Usage | undefined;
 		let turnError: ProviderError | null = null;
 
@@ -59,10 +65,16 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 				if (e.type === 'text') {
 					content += e.delta;
 					yield { type: 'text_delta', delta: e.delta };
+				} else if (e.type === 'thinking') {
+					thinking += e.delta;
+					yield { type: 'thinking_delta', delta: e.delta };
 				} else if (e.type === 'tool_call') {
 					toolCalls.push(e.call);
 				} else if (e.type === 'usage') {
 					usage = e.usage;
+				} else if (e.type === 'warning') {
+					warnings.push(e.message);
+					yield { type: 'warning', message: e.message };
 				}
 			}
 		} catch (err) {
@@ -82,7 +94,7 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 				const partial: ChatMessage = { role: 'assistant', content };
 				messages.push(partial);
 				opts.onMessages?.([partial]);
-				yield { type: 'assistant_end', content, toolCalls: [], usage };
+				yield { type: 'assistant_end', content, thinking, toolCalls: [], usage, warnings };
 			}
 			yield { type: 'error', error: turnError };
 			return;
@@ -91,7 +103,7 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		const assistant: ChatMessage = { role: 'assistant', content, toolCalls: toolCalls.length ? toolCalls : undefined };
 		messages.push(assistant);
 		const added: ChatMessage[] = [assistant];
-		yield { type: 'assistant_end', content, toolCalls, usage };
+		yield { type: 'assistant_end', content, thinking, toolCalls, usage, warnings };
 
 		if (toolCalls.length === 0) {
 			opts.onMessages?.(added);

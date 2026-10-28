@@ -56,6 +56,23 @@ Obsidian request API, which bypasses CORS but does not stream.
 Models without tool support still work for plain chat; the plugin notices the
 rejection, retries without tools, and tells you.
 
+Two settings matter for local models:
+
+- **Context window** is sent as Ollama's `num_ctx` on every request (default
+  16,384 tokens). Ollama's own default is 4,096, which one long note overflows;
+  when that happens Ollama silently keeps about half the prompt and drops the
+  system prompt and your question. The value is capped at what the model
+  supports. If a prompt is still cut, the reply carries a warning saying so.
+  Note content sent to the model is also trimmed to half the window when
+  **Max characters per note** would exceed that.
+- **Let thinking models think** controls models such as qwen3 or deepseek-r1
+  that reason before answering. While they think the sidebar shows
+  "Thinking…" with the elapsed time, and the reasoning is kept in a collapsed
+  block above the reply; the usage line says how many output tokens went to
+  thinking. Turn the setting off to send `think: false` for faster, direct
+  answers. Expect 15 to 110 seconds of thinking per turn on an 8B model on a
+  laptop.
+
 ### OpenAI
 
 1. In **API key**, create a new keychain secret and paste your key. The key is
@@ -118,7 +135,10 @@ Open the sidebar with the gem icon in the ribbon or the command
   folder (last 50).
 - **Stop** cancels generation. Partial text is kept.
 - Conversations persist in the vault's plugin folder and survive switching
-  providers.
+  providers. Deleting one asks for confirmation first; there is no undo.
+- The light next to the model menu shows the last connection check. It turns
+  red when a request fails because the provider is unreachable or refuses the
+  request, and is re-checked every time you send.
 
 Token counts reported by the provider are shown under each reply and as a
 conversation total. These are counts, not bills. The optional usage warning is

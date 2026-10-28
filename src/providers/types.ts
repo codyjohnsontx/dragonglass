@@ -75,14 +75,24 @@ export interface ChatRequest {
 export interface Usage {
 	inputTokens?: number;
 	outputTokens?: number;
+	/**
+	 * Tokens the model spent on hidden reasoning. They are included in
+	 * `outputTokens`. Providers that do not report the split estimate it from
+	 * the streamed reasoning text (Ollama).
+	 */
+	reasoningTokens?: number;
 }
 
 export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'other';
 
 export type StreamEvent =
 	| { type: 'text'; delta: string }
+	/** Hidden reasoning from a thinking model. Shown to the user, never sent back. */
+	| { type: 'thinking'; delta: string }
 	| { type: 'tool_call'; call: ToolCall }
 	| { type: 'usage'; usage: Usage }
+	/** Something the user must know about this turn, such as a truncated prompt. */
+	| { type: 'warning'; message: string }
 	| { type: 'done'; finishReason: FinishReason };
 
 /**
@@ -118,6 +128,11 @@ export interface Provider {
 	listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
 	checkConnection(signal?: AbortSignal): Promise<ConnectionStatus>;
 	chat(request: ChatRequest): AsyncIterable<StreamEvent>;
+	/**
+	 * Tokens of prompt plus reply the provider will accept for `model`, when
+	 * the adapter knows it. Callers size note content to fit.
+	 */
+	contextWindow?(model: string, signal?: AbortSignal): Promise<number | undefined>;
 }
 
 export type ProviderErrorKind =
@@ -187,6 +202,44 @@ export function toProviderError(err: unknown): ProviderError {
 	}
 	if (err instanceof Error) return new ProviderError('unknown', err.message);
 	return new ProviderError('unknown', String(err));
+}
+
+/**
+ * Rough token count of text: about four characters per token for ASCII, one
+ * per character for CJK, kana and Hangul, which tokenize far more densely,
+ * and two for other scripts such as Cyrillic, Greek or Arabic. Runs of
+ * whitespace count once, since indentation and blank lines tokenize densely.
+ */
+export function estimateTokens(text: string): number {
+	const compact = text.replace(/\s+/g, ' ');
+	let weight = 0;
+	for (let i = 0; i < compact.length; i++) weight += charWeight(compact.charCodeAt(i));
+	return Math.ceil(weight / CHARS_PER_TOKEN);
+}
+
+/** Length of the longest prefix of `text` that stays within `maxTokens` at the rate `estimateTokens` uses. */
+export function prefixWithinTokens(text: string, maxTokens: number): number {
+	const limit = maxTokens * CHARS_PER_TOKEN;
+	let weight = 0;
+	for (let i = 0; i < text.length; i++) {
+		weight += charWeight(text.charCodeAt(i));
+		if (weight > limit) return i;
+	}
+	return text.length;
+}
+
+const CHARS_PER_TOKEN = 4;
+
+/** A UTF-16 code unit's share of a token, in quarters. */
+function charWeight(code: number): number {
+	if (code < 0x80) return 1;
+	const dense =
+		(code >= 0x1100 && code <= 0x11ff) || // Hangul Jamo
+		(code >= 0x2e80 && code <= 0x9fff) || // CJK radicals, punctuation, kana, ideographs
+		(code >= 0xac00 && code <= 0xd7af) || // Hangul syllables
+		(code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+		(code >= 0xff00 && code <= 0xffef); // fullwidth forms
+	return dense ? CHARS_PER_TOKEN : 2;
 }
 
 /**

@@ -3,7 +3,8 @@ import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
 import { Conversation, StoredMessage } from '../persistence/conversation';
-import { countModels, ModelInfo, PROVIDER_IDS, ProviderId } from '../providers/types';
+import { countModels, ModelInfo, PROVIDER_IDS, ProviderErrorKind, ProviderId } from '../providers/types';
+import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
 
@@ -31,6 +32,16 @@ export class ChatView extends ItemView {
 	private statusEl!: HTMLElement;
 	private liveEl: HTMLElement | null = null;
 	private liveText = '';
+	/** Live-turn feedback: a status line until the first answer token, and the thinking block. */
+	private liveStatusEl: HTMLElement | null = null;
+	private liveStatusText = '';
+	private liveThinkingEl: HTMLElement | null = null;
+	private liveThinkingBodyEl: HTMLElement | null = null;
+	private liveThinking = '';
+	private turnStartedAt = 0;
+	/** When the current thinking phase began; null once its "Thought for" label is set. */
+	private thinkingStartedAt: number | null = null;
+	private turnTimer: number | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 
 	constructor(
@@ -196,12 +207,27 @@ export class ChatView extends ItemView {
 		this.inputEl.focus();
 	}
 
-	private async deleteConversation(): Promise<void> {
-		if (!this.conv) return;
-		this.abort?.abort();
-		await this.core.store.delete(this.conv.id);
-		this.conv = null;
-		await this.openConversation(null);
+	private deleteConversation(): void {
+		const conv = this.conv;
+		if (!conv) return;
+		const n = conv.messages.length;
+		const what = n === 0 ? 'This empty conversation' : `"${conv.title}" and its ${n} message${n === 1 ? '' : 's'}`;
+		new ConfirmModal(this.app, {
+			title: 'Delete conversation?',
+			body: `${what} will be removed from this vault. This cannot be undone.`,
+			confirmText: 'Delete',
+			destructive: true,
+			onConfirm: async () => {
+				if (this.conv === conv) this.abort?.abort();
+				await this.core.store.delete(conv.id);
+				if (this.conv === conv) {
+					this.conv = null;
+					await this.openConversation(null);
+				} else {
+					await this.renderHeader();
+				}
+			},
+		}).open();
 	}
 
 	// -------------------------------------------------------------- messages
@@ -231,6 +257,7 @@ export class ChatView extends ItemView {
 				for (const a of m.context.attachments) ctx.createSpan({ cls: 'dg-chip', text: a.path });
 			}
 		} else if (m.role === 'assistant') {
+			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
 			const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
 			if (m.content) void MarkdownRenderer.render(this.app, m.content, body, '', this);
 			if (m.toolCalls?.length) {
@@ -240,11 +267,13 @@ export class ChatView extends ItemView {
 				}
 			}
 			if (m.interrupted) wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
+			for (const w of m.warnings ?? []) wrap.createDiv({ cls: 'dg-msg-warning', text: w });
 			if (m.error) wrap.createDiv({ cls: 'dg-msg-error', text: m.error });
 			if (m.usage && this.core.getSettings().showUsage && (m.usage.inputTokens || m.usage.outputTokens)) {
+				const thinking = m.usage.reasoningTokens ? ` (about ${m.usage.reasoningTokens} of them thinking)` : '';
 				wrap.createDiv({
 					cls: 'dg-msg-usage',
-					text: `${m.model ?? ''} · ${m.usage.inputTokens ?? 0} in / ${m.usage.outputTokens ?? 0} out tokens`,
+					text: `${m.model ?? ''} · ${m.usage.inputTokens ?? 0} in / ${m.usage.outputTokens ?? 0} out tokens${thinking}`,
 				});
 			}
 		} else {
@@ -260,6 +289,14 @@ export class ChatView extends ItemView {
 			}
 		}
 		return wrap;
+	}
+
+	/** Collapsed block holding a thinking model's reasoning. Returns the summary and body elements. */
+	private renderThinking(parent: HTMLElement, summary: string, text: string): { details: HTMLDetailsElement; body: HTMLElement } {
+		const details = parent.createEl('details', { cls: 'dg-thinking' });
+		details.createEl('summary', { text: summary });
+		const body = details.createDiv({ cls: 'dg-thinking-body', text });
+		return { details, body };
 	}
 
 	private renderUsage(parent: HTMLElement): void {
@@ -378,6 +415,8 @@ export class ChatView extends ItemView {
 		const context = await this.collectContext();
 		this.attachments = [];
 		this.abort = new AbortController();
+		// The header light reflects the last check; a send is the moment it matters.
+		void this.refreshStatus();
 		this.sendBtn.setText('Stop');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
@@ -392,6 +431,7 @@ export class ChatView extends ItemView {
 		} finally {
 			this.abort = null;
 			this.liveEl = null;
+			this.endLiveTurn();
 			this.sendBtn.setText('Send');
 			this.sendBtn.addClass('mod-cta');
 			this.sendBtn.removeClass('mod-warning');
@@ -413,23 +453,57 @@ export class ChatView extends ItemView {
 				}
 				const wrap = this.messagesEl.createDiv({ cls: 'dg-msg dg-msg-assistant dg-msg-live' });
 				if (last) wrap.dataset['id'] = last.id;
+				this.endLiveTurn();
+				this.liveStatusEl = wrap.createDiv({ cls: 'dg-live-status' });
 				this.liveEl = wrap.createDiv({ cls: 'dg-msg-body' });
-				this.liveEl.setText('…');
 				this.liveText = '';
+				this.liveThinking = '';
+				this.liveThinkingEl = null;
+				this.liveThinkingBodyEl = null;
+				this.thinkingStartedAt = null;
+				this.turnStartedAt = Date.now();
+				// After a tool round the model is reading the result; say so instead of going blank.
+				this.setLiveStatus(prev?.role === 'tool' ? `Reading the ${prev.toolName ?? 'tool'} result…` : 'Waiting for the model…');
+				this.turnTimer = this.registerInterval(window.setInterval(() => this.setLiveStatus(this.liveStatusText), 1000));
+				this.scrollToBottom();
+				break;
+			}
+			case 'thinking_delta': {
+				const wrap = this.liveEl?.parentElement;
+				if (!wrap) break;
+				if (!this.liveThinkingEl) {
+					const { details, body } = this.renderThinking(wrap, 'Thinking…', '');
+					wrap.insertBefore(details, this.liveEl);
+					this.liveThinkingEl = details;
+					this.liveThinkingBodyEl = body;
+					this.thinkingStartedAt = Date.now();
+				}
+				this.liveThinking += ev.delta;
+				this.liveThinkingBodyEl?.setText(this.liveThinking);
+				this.setLiveStatus('Thinking…');
 				this.scrollToBottom();
 				break;
 			}
 			case 'text_delta':
 				this.liveText += ev.delta;
+				this.endThinking();
+				this.clearLiveStatus();
 				this.liveEl?.setText(this.liveText);
 				this.scrollToBottom();
 				break;
-			case 'assistant_end':
+			case 'assistant_end': {
+				this.endThinking();
+				this.endLiveTurn();
 				if (this.liveEl) {
 					this.liveEl.empty();
 					this.liveEl.addClass('markdown-rendered');
 					if (ev.content) void MarkdownRenderer.render(this.app, ev.content, this.liveEl, '', this);
 				}
+				break;
+			}
+			case 'warning':
+				this.liveEl?.parentElement?.createDiv({ cls: 'dg-msg-warning', text: ev.message });
+				new Notice(ev.message, 12000);
 				break;
 			case 'tool_call': {
 				const el = this.messagesEl.createDiv({ cls: 'dg-msg dg-msg-tool dg-tool-running' });
@@ -451,10 +525,46 @@ export class ChatView extends ItemView {
 				break;
 			case 'error':
 				if (ev.error.kind !== 'cancelled') new Notice(ev.error.userMessage(), 8000);
+				if (CONNECTION_ERRORS.has(ev.error.kind)) this.setStatus('error', ev.error.userMessage());
 				break;
 		}
 	}
+
+	private setLiveStatus(text: string): void {
+		if (!this.liveStatusEl) return;
+		this.liveStatusText = text;
+		const seconds = Math.round((Date.now() - this.turnStartedAt) / 1000);
+		this.liveStatusEl.empty();
+		const icon = this.liveStatusEl.createSpan();
+		setIcon(icon, 'loader');
+		this.liveStatusEl.createSpan({ text: seconds >= 2 ? `${text} ${seconds}s` : text });
+	}
+
+	/** Label the thinking block with how long the model reasoned, once its answer or turn end arrives. */
+	private endThinking(): void {
+		if (this.thinkingStartedAt === null) return;
+		const seconds = Math.round((Date.now() - this.thinkingStartedAt) / 1000);
+		this.liveThinkingEl?.querySelector('summary')?.setText(`Thought for ${seconds}s`);
+		this.thinkingStartedAt = null;
+	}
+
+	private clearLiveStatus(): void {
+		this.liveStatusEl?.remove();
+		this.liveStatusEl = null;
+	}
+
+	/** Stop the live-turn timer and status line; the thinking block stays. */
+	private endLiveTurn(): void {
+		if (this.turnTimer !== null) {
+			window.clearInterval(this.turnTimer);
+			this.turnTimer = null;
+		}
+		this.clearLiveStatus();
+	}
 }
+
+/** Error kinds that mean the provider itself is unreachable or refusing us, so the header light turns red. */
+const CONNECTION_ERRORS = new Set<ProviderErrorKind>(['network', 'server', 'auth', 'rate_limit', 'model_not_found']);
 
 function argsPreview(json: string): string {
 	try {

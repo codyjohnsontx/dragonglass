@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FetchHttpClient, HttpClient, RequestUrlHttpClient } from '../src/providers/http';
-import { OllamaProvider } from '../src/providers/ollama';
+import { OllamaConfig, OllamaProvider, estimatePromptTokens, promptWasTruncated, splitReasoningTokens } from '../src/providers/ollama';
 import { OpenAIProvider } from '../src/providers/openai';
 import { AnthropicProvider, toAnthropicMessages } from '../src/providers/anthropic';
 import { GeminiProvider } from '../src/providers/gemini';
@@ -48,7 +48,9 @@ describe.each([
 	['streaming', () => new FetchHttpClient()],
 	['non-streaming', wholeBodyClient],
 ])('OllamaProvider (%s)', (_label, makeClient) => {
-	const provider = () => new OllamaProvider(makeClient(), () => ({ baseUrl: fake.baseUrl }));
+	const provider = (overrides: Partial<OllamaConfig> = {}) =>
+		new OllamaProvider(makeClient(), () => ({ baseUrl: fake.baseUrl, numCtx: 16384, think: true, ...overrides }));
+	const lastChatBody = () => fake.requests.filter((r) => r.url === '/api/chat').at(-1)!.body!;
 
 	it('checks connection and lists models', async () => {
 		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake' });
@@ -94,17 +96,130 @@ describe.each([
 	});
 
 	it('reports a network error when the server is down', async () => {
-		const down = new OllamaProvider(makeClient(), () => ({ baseUrl: 'http://127.0.0.1:1' }));
+		const down = new OllamaProvider(makeClient(), () => ({ baseUrl: 'http://127.0.0.1:1', numCtx: 16384, think: true }));
 		const status = await down.checkConnection();
 		expect(status.ok).toBe(false);
 		if (!status.ok) expect(status.error.kind).toBe('network');
 		await expect(collect(down.chat({ model: 'x', messages: [] }))).rejects.toMatchObject({ kind: 'network' });
 	});
+
+	it('sends the configured context window, capped at what /api/show says the model supports', async () => {
+		await collect(provider().chat({ model: 'fake-tools', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(lastChatBody()['options']).toEqual({ num_ctx: 16384 });
+		expect(await provider().contextWindow('fake-tools')).toBe(16384);
+
+		await collect(provider().chat({ model: 'fake-small', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(lastChatBody()['options']).toEqual({ num_ctx: 8192 });
+		expect(await provider().contextWindow('fake-small')).toBe(8192);
+
+		await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-small', messages: [{ role: 'user', content: 'hello' }], temperature: 0 }));
+		expect(lastChatBody()['options']).toEqual({ num_ctx: 4096, temperature: 0 });
+	});
+
+	it('still chats with the configured window when /api/show fails', async () => {
+		const p = provider();
+		const shows = () => fake.requests.filter((r) => r.url === '/api/show').length;
+		const before = shows();
+		await collect(p.chat({ model: '', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(lastChatBody()['options']).toEqual({ num_ctx: 16384 });
+		expect(shows()).toBe(before + 1);
+		await collect(p.chat({ model: 'fake-tools', messages: [{ role: 'user', content: 'hello' }] }));
+		await collect(p.chat({ model: 'fake-tools', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(shows()).toBe(before + 2); // one lookup per model, cached
+	});
+
+	it('streams thinking separately from the answer and estimates its share of the output tokens', async () => {
+		const events = await collect(provider().chat({ model: 'fake-think', messages: [{ role: 'user', content: 'hello' }] }));
+		const thinking = events.filter((e) => e.type === 'thinking').map((e) => (e.type === 'thinking' ? e.delta : '')).join('');
+		expect(thinking).toBe('The user greets me. A short friendly reply is enough.');
+		expect(text(events)).toBe('Hello from the fake model. I can read and edit your notes.');
+		expect(events.findIndex((e) => e.type === 'thinking')).toBeLessThan(events.findIndex((e) => e.type === 'text'));
+		const usage = events.find((e) => e.type === 'usage');
+		expect(usage).toMatchObject({ type: 'usage', usage: { inputTokens: 12, outputTokens: 21 } });
+		const reasoning = usage?.type === 'usage' ? usage.usage.reasoningTokens : undefined;
+		expect(reasoning).toBeGreaterThan(0);
+		expect(reasoning).toBeLessThan(21);
+		expect(lastChatBody()).not.toHaveProperty('think');
+	});
+
+	it('turns thinking off only for models that have it', async () => {
+		const events = await collect(provider({ think: false }).chat({ model: 'fake-think', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(events.some((e) => e.type === 'thinking')).toBe(false);
+		expect(text(events)).toMatch(/Hello/);
+		expect(lastChatBody()['think']).toBe(false);
+		expect(events.find((e) => e.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: undefined } });
+
+		await collect(provider({ think: false }).chat({ model: 'fake-tools', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(lastChatBody()).not.toHaveProperty('think');
+	});
+
+	it('warns when the prompt count says Ollama cut the prompt', async () => {
+		const long = 'word '.repeat(6000); // ~7,500 tokens by the estimate, well over a 4096 window
+		const events = await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-truncate', messages: [{ role: 'user', content: long }] }));
+		const warning = events.find((e) => e.type === 'warning');
+		expect(warning).toBeDefined();
+		if (warning?.type === 'warning') {
+			expect(warning.message).toMatch(/did not fit Ollama's 4,096-token context window/);
+			expect(warning.message).toMatch(/2,048 reached the model/);
+		}
+		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'stop' });
+
+		// A short prompt with the same reported count is not a truncation: the window was not full.
+		const ok = await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-truncate', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(ok.some((e) => e.type === 'warning')).toBe(false);
+		// A prompt that fits the window with a count that is not near half of it: dense text, not a cut.
+		const normal = await collect(provider({ numCtx: 16384 }).chat({ model: 'fake-tools', messages: [{ role: 'user', content: long }] }));
+		expect(normal.some((e) => e.type === 'warning')).toBe(false);
+	});
+});
+
+describe('Ollama context accounting', () => {
+	it('estimates prompt tokens from characters and framing, counting whitespace runs once', () => {
+		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) }], undefined)).toBe(104);
+		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) + '\n\t   '.repeat(100) }], undefined)).toBe(105);
+		expect(estimatePromptTokens([{ role: 'user', content: '' }], tools)).toBeGreaterThan(4);
+		// CJK counts about one token per character; other scripts about two characters per token.
+		expect(estimatePromptTokens([{ role: 'user', content: '秘密'.repeat(200) }], undefined)).toBe(404);
+		expect(estimatePromptTokens([{ role: 'user', content: 'слово'.repeat(80) }], undefined)).toBe(204);
+	});
+
+	it('flags both ways Ollama cuts a prompt, and nothing else', () => {
+		// One oversized message: 4096 window, 5078-token prompt, 2050 arrived (the live test's case).
+		expect(promptWasTruncated(2050, 5078, 4096)).toBe(true);
+		// Older messages dropped: a 7,500-token history came back as 1,134 tokens.
+		expect(promptWasTruncated(1134, 7500, 4096)).toBe(true);
+		// Same count, small estimate: dense text, not truncation.
+		expect(promptWasTruncated(2050, 2400, 4096)).toBe(false);
+		expect(promptWasTruncated(1134, 1200, 4096)).toBe(false);
+		// A count well above half the window with an estimate that fits means nothing was cut.
+		expect(promptWasTruncated(2775, 3000, 4096)).toBe(false);
+		// A 30,000-character Japanese note cut to half of a 16k window.
+		const cjk = estimatePromptTokens([{ role: 'user', content: '秘密の言葉はペリカンです'.repeat(2500) }], undefined);
+		expect(promptWasTruncated(8192, cjk, 16_384)).toBe(true);
+		// An 8,000-character Russian note beside 3,500 tokens of ASCII framing arrives whole (about 6,200 tokens).
+		const russian = estimatePromptTokens(
+			[
+				{ role: 'system', content: 'x'.repeat(14_000) },
+				{ role: 'user', content: 'Привет'.repeat(1333) },
+			],
+			undefined,
+		);
+		expect(promptWasTruncated(6200, russian, 16_384)).toBe(false);
+		// Tiny prompts never count, however far off the estimate is.
+		expect(promptWasTruncated(100, 500, 4096)).toBe(false);
+	});
+
+	it('splits output tokens between thinking and answer by character share', () => {
+		expect(splitReasoningTokens(181, 900, 100)).toBe(163);
+		expect(splitReasoningTokens(181, 0, 100)).toBeUndefined();
+		expect(splitReasoningTokens(undefined, 900, 100)).toBeUndefined();
+		expect(splitReasoningTokens(10, 500, 0)).toBe(10);
+	});
 });
 
 describe('OllamaProvider cancellation', () => {
 	it('stops a streaming reply when aborted', async () => {
-		const provider = new OllamaProvider(new FetchHttpClient(), () => ({ baseUrl: fake.baseUrl }));
+		const provider = new OllamaProvider(new FetchHttpClient(), () => ({ baseUrl: fake.baseUrl, numCtx: 16384, think: true }));
 		const ac = new AbortController();
 		const seen: StreamEvent[] = [];
 		await expect(

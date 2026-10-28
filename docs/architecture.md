@@ -42,6 +42,7 @@ src/
     chat-view.ts          The sidebar ItemView.
     proposal-card.ts      Diff review card with approve/reject/revert.
     note-picker.ts        Fuzzy picker for attaching notes.
+    confirm-modal.ts      Confirmation dialog for destructive actions.
     settings-tab.ts       Declarative settings tab (Obsidian 1.13+ API).
 ```
 
@@ -93,7 +94,12 @@ reports input and output tokens in separate events; Gemini uses a `model` role,
 matches tool results by name, rejects `additionalProperties` in schemas,
 requires its thought signature to be replayed with function calls, reports an
 invalid key as HTTP 400, and can stop with a safety reason and no text, which
-is surfaced as an error.
+is surfaced as an error. Ollama sends `options.num_ctx` on every request (its
+server default of 4096 silently cuts prompts that do not fit), streams a
+thinking model's reasoning as `thinking` events, and emits a `warning` event
+when `prompt_eval_count` says the prompt was cut anyway. An adapter that knows
+the model's context window exposes it through `contextWindow`, and `core`
+caps note content at an estimated half of it (`noteTokenBudget`).
 
 Conversations are provider-neutral (`ChatMessage`), so switching providers
 replays the whole history, including tool calls another provider made. The one

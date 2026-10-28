@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { buildSystemPrompt, ContextItem, formatContextBlock, toProviderMessages } from './agent/context';
+import { buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -35,6 +35,8 @@ export class DragonglassCore {
 	private readonly requestUrlClient: HttpClient;
 	private settings: DragonglassSettings;
 	private readonly saveSettings: () => Promise<void>;
+	/** Estimated tokens of note content a single read may return; see `noteTokenBudget`. */
+	private noteTokens: number | undefined;
 
 	constructor(app: App, plugin: Plugin, settings: DragonglassSettings, saveSettings: () => Promise<void>) {
 		this.settings = settings;
@@ -43,10 +45,11 @@ export class DragonglassCore {
 		this.store = new ConversationStore(this.vault);
 		this.proposals = new ProposalEngine(this.vault);
 		this.tools = new ToolRegistry();
-		for (const t of createVaultTools(this.vault, this.proposals, {
-			maxReadChars: settings.maxCharsPerNote,
+		for (const t of createVaultTools(this.vault, this.proposals, () => ({
+			maxReadChars: this.settings.maxCharsPerNote,
+			maxReadTokens: this.noteTokens,
 			maxSearchResults: 20,
-		})) {
+		}))) {
 			this.tools.register(t);
 		}
 		this.requestUrlClient = createRequestUrlClient();
@@ -96,6 +99,16 @@ export class DragonglassCore {
 		return this.provider().capabilities.remote;
 	}
 
+	/** Note tokens per prompt for this provider and model; see `noteTokenBudget` in agent/context. */
+	private async noteTokenBudget(provider: Provider, model: string, signal?: AbortSignal): Promise<number | undefined> {
+		if (!provider.contextWindow) return undefined;
+		try {
+			return noteTokenBudget(await provider.contextWindow(model, signal));
+		} catch {
+			return undefined;
+		}
+	}
+
 	/**
 	 * Send a user message in `conv`, stream the reply, and persist every
 	 * message as it is produced. Resolves when the turn is over.
@@ -122,8 +135,9 @@ export class DragonglassCore {
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
 
+		this.noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
 		const system = buildSystemPrompt({ toolsEnabled: this.settings.toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote });
-		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote);
+		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, this.noteTokens);
 		const messages = toProviderMessages(system, conv.messages, contextBlock);
 
 		let current: StoredMessage | null = null;
@@ -146,11 +160,16 @@ export class DragonglassCore {
 				case 'text_delta':
 					if (current) current.content += ev.delta;
 					break;
+				case 'thinking_delta':
+					if (current) current.thinking = (current.thinking ?? '') + ev.delta;
+					break;
 				case 'assistant_end':
 					if (current) {
 						current.content = ev.content;
+						current.thinking = ev.thinking || undefined;
 						current.toolCalls = ev.toolCalls.length ? ev.toolCalls : undefined;
 						current.usage = ev.usage;
+						current.warnings = ev.warnings.length ? ev.warnings : undefined;
 					}
 					this.store.touch(conv);
 					break;

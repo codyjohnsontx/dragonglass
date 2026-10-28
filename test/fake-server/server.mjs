@@ -23,6 +23,11 @@
  * `fake-slow` streams one word per 150 ms, `fake-overloaded` (Anthropic) sends
  * an error event mid-stream, `fake-safety` (Gemini) finishes with SAFETY and
  * no content, `fake-missing` (Gemini) -> 404, any other model behaves normally.
+ * Ollama only: `fake-think` streams `thinking` chunks before the answer unless
+ * the request says `think: false`; `fake-small` reports an 8192-token context
+ * from /api/show; `fake-truncate` reports `prompt_eval_count` of half the
+ * requested `num_ctx`, which is what a real server does after cutting a
+ * prompt that did not fit.
  *
  * Keys: OpenAI `Bearer sk-fake`, Anthropic `x-api-key: sk-ant-fake`, Gemini
  * `x-goog-api-key: gemini-fake`. The Anthropic and Gemini routes reject the
@@ -82,6 +87,7 @@ async function route(req, res, body) {
 		return json(res, 200, { models: [{ name: 'fake-tools:latest', model: 'fake-tools:latest' }, { name: 'fake-plain:latest', model: 'fake-plain:latest' }] });
 	}
 	if (req.method === 'POST' && path === '/api/chat') return ollamaChat(res, body ?? {});
+	if (req.method === 'POST' && path === '/api/show') return ollamaShow(res, body ?? {});
 	if (path.startsWith('/v1/')) {
 		const auth = req.headers['authorization'] ?? '';
 		if (auth !== `Bearer ${API_KEY}`) {
@@ -205,35 +211,65 @@ function findLastIndex(arr, pred) {
 
 function modelBehaviour(model) {
 	const m = String(model ?? '').split(':')[0];
-	return { plain: m === 'fake-plain', status: m === 'fake-429' ? 429 : m === 'fake-500' ? 500 : 0, slow: m === 'fake-slow' };
+	return {
+		plain: m === 'fake-plain',
+		status: m === 'fake-429' ? 429 : m === 'fake-500' ? 500 : 0,
+		slow: m === 'fake-slow',
+		think: m === 'fake-think',
+		small: m === 'fake-small',
+		truncate: m === 'fake-truncate',
+	};
 }
 
 // --------------------------------------------------------------------- ollama
+
+const FAKE_THINKING = 'The user greets me. A short friendly reply is enough.';
+
+function ollamaShow(res, body) {
+	const b = modelBehaviour(body.model);
+	if (!body.model) return json(res, 400, { error: 'model is required' });
+	const capabilities = ['completion', 'tools'];
+	if (b.think) capabilities.push('thinking');
+	return json(res, 200, {
+		details: { family: 'fake' },
+		model_info: { 'general.architecture': 'fake', 'fake.context_length': b.small ? 8192 : 40960 },
+		capabilities,
+	});
+}
 
 async function ollamaChat(res, body) {
 	const b = modelBehaviour(body.model);
 	if (b.status === 429) return json(res, 429, { error: 'rate limited by fake server' });
 	if (b.status === 500) return json(res, 500, { error: 'fake internal error' });
+	if (body.think === true && !b.think) return json(res, 400, { error: `registry.ollama.ai/library/${body.model} does not support thinking` });
 	const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
 	if (b.plain && hasTools) return json(res, 400, { error: `registry.ollama.ai/library/${body.model} does not support tools` });
 	const p = plan(body.messages ?? [], hasTools);
 	const base = { model: body.model, created_at: new Date().toISOString() };
+	const thinks = b.think && body.think !== false && !p.tool;
+	const numCtx = body.options?.num_ctx ?? 4096;
+	const usage = { prompt_eval_count: b.truncate ? Math.floor(numCtx / 2) : 12, eval_count: thinks ? 7 + 14 : 7 };
 	if (body.stream === false) {
 		const message = p.tool
 			? { role: 'assistant', content: '', tool_calls: [{ function: { name: p.tool.name, arguments: p.tool.args } }] }
-			: { role: 'assistant', content: p.text };
-		return json(res, 200, { ...base, message, done: true, done_reason: 'stop', prompt_eval_count: 12, eval_count: 7 });
+			: { role: 'assistant', content: p.text, ...(thinks ? { thinking: FAKE_THINKING } : {}) };
+		return json(res, 200, { ...base, message, done: true, done_reason: 'stop', ...usage });
 	}
 	res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
 	if (p.tool) {
 		res.write(JSON.stringify({ ...base, message: { role: 'assistant', content: '', tool_calls: [{ function: { name: p.tool.name, arguments: p.tool.args } }] }, done: false }) + '\n');
 	} else {
+		if (thinks) {
+			for (const word of splitWords(FAKE_THINKING)) {
+				res.write(JSON.stringify({ ...base, message: { role: 'assistant', content: '', thinking: word }, done: false }) + '\n');
+			}
+		}
 		for (const word of splitWords(p.text)) {
 			res.write(JSON.stringify({ ...base, message: { role: 'assistant', content: word }, done: false }) + '\n');
 			if (b.slow) await sleep(150);
 		}
 	}
-	res.end(JSON.stringify({ ...base, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 12, eval_count: 7 }) + '\n');
+	res.end(JSON.stringify({ ...base, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop', ...usage }) + '\n');
 }
 
 // --------------------------------------------------------------------- openai

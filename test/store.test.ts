@@ -78,10 +78,16 @@ describe('mergeSettings', () => {
 		expect(mergeSettings(null)).toEqual(DEFAULT_SETTINGS);
 		const merged = mergeSettings({ activeProvider: 'openai', ollama: { baseUrl: 'http://x:1', model: 7 }, maxToolIterations: 'lots', transport: 'requestUrl', extra: 1 });
 		expect(merged.activeProvider).toBe('openai');
-		expect(merged.ollama).toEqual({ baseUrl: 'http://x:1', model: '' });
+		expect(merged.ollama).toEqual({ baseUrl: 'http://x:1', model: '', numCtx: 16384, think: true });
 		expect(merged.maxToolIterations).toBe(DEFAULT_SETTINGS.maxToolIterations);
 		expect(merged.transport).toBe('requestUrl');
 		expect('extra' in merged).toBe(false);
+	});
+
+	it('merges the Ollama context window and thinking switch, rejecting windows too small to work', () => {
+		expect(mergeSettings({ ollama: { numCtx: 32768, think: false } }).ollama).toMatchObject({ numCtx: 32768, think: false });
+		expect(mergeSettings({ ollama: { numCtx: 512 } }).ollama.numCtx).toBe(16384);
+		expect(mergeSettings({ ollama: { numCtx: 4096.5, think: 'yes' } }).ollama).toMatchObject({ numCtx: 16384, think: true });
 	});
 
 	it('merges Anthropic and Gemini settings and keeps settings saved before they existed', () => {
