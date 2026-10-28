@@ -320,7 +320,8 @@ export class ChatView extends ItemView {
 			const details = wrap.createEl('details', { cls: `dg-tool-result${m.isError ? ' dg-tool-error' : ''}` });
 			const summary = details.createEl('summary');
 			const call = this.conv ? findToolCall(this.conv, m.toolCallId) : undefined;
-			summary.createSpan({ cls: 'dg-chip dg-chip-tool', text: `${m.toolName ?? 'tool'}${call ? argsPreview(call.argumentsJson) : ''}` });
+			const label = `${m.toolName ?? 'tool'}${call ? argsPreview(call.argumentsJson) : ''}`;
+			summary.createSpan({ cls: 'dg-chip dg-chip-tool', text: label, attr: { title: label } });
 			summary.appendText(m.isError ? ' error' : ' result');
 			details.createEl('pre', { text: m.content.length > 4000 ? `${m.content.slice(0, 4000)}…` : m.content });
 			if (m.proposalId && this.conv) {

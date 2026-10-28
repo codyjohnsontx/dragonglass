@@ -117,9 +117,11 @@
 	animation: dg-spin 1.2s linear infinite;
 }
 
+/* One line in a narrow sidebar: the chip shrinks and ellipsizes; flex drops the native marker, so draw one. */
 .dg-tool-result summary .dg-chip {
-	margin-right: var(--size-2-1);
-	vertical-align: middle;
+	display: block;
+	min-width: 0;
+	white-space: nowrap;
 }
 
 .dg-msg-body p:first-child {
@@ -248,9 +250,27 @@ button.dg-chip {
 }
 
 .dg-tool-result summary {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	list-style: none;
+	white-space: nowrap;
 	cursor: pointer;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+}
+
+.dg-tool-result summary::-webkit-details-marker {
+	display: none;
+}
+
+.dg-tool-result summary::before {
+	content: '▸';
+	flex: 0 0 auto;
+}
+
+.dg-tool-result[open] summary::before {
+	content: '▾';
 }
 
 .dg-tool-error summary {
