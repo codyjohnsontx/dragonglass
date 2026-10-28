@@ -118,6 +118,21 @@ export class ProposalEngine {
 	}
 
 	/**
+	 * Re-check a pending or stale proposal against the note as it is now and
+	 * move it between the two states: `stale` once the user edits the note,
+	 * back to `pending` if they undo that edit. Returns true when the status
+	 * changed. Other states are final and left alone.
+	 */
+	async refresh(p: ChangeProposal): Promise<boolean> {
+		if (p.status !== 'pending' && p.status !== 'stale') return false;
+		const freshness = await this.checkFreshness(p);
+		const next = freshness === 'fresh' ? 'pending' : freshness === 'stale' ? 'stale' : p.status;
+		if (next === p.status) return false;
+		p.status = next;
+		return true;
+	}
+
+	/**
 	 * Apply an approved proposal. Writes a snapshot of the prior content first
 	 * so the change can be rolled back, then writes through the vault port.
 	 * Throws ProposalError (and marks the proposal) if the note changed.

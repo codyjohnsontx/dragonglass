@@ -93,13 +93,34 @@ describe('runAgent', () => {
 		]);
 		const added: unknown[] = [];
 		const events = await collect(run(p, { onMessages: (m) => added.push(...m) }));
-		expect(events.map((e) => e.type)).toEqual(['assistant_start', 'assistant_end', 'tool_call', 'tool_result', 'assistant_start', 'text_delta', 'assistant_end']);
-		const result = events[3] as Extract<RunEvent, { type: 'tool_result' }>;
+		expect(events.map((e) => e.type)).toEqual(['assistant_start', 'tool_call_start', 'assistant_end', 'tool_call', 'tool_result', 'assistant_start', 'text_delta', 'assistant_end']);
+		const result = events[4] as Extract<RunEvent, { type: 'tool_result' }>;
 		expect(result.result.content).toBe('echo:x');
 		const second = p.requests[1]!;
 		expect(second.messages.at(-1)).toEqual({ role: 'tool', content: 'echo:x', toolCallId: 'c1', toolName: 'echo' });
 		expect(second.messages.at(-2)?.toolCalls?.[0]?.name).toBe('echo');
 		expect(added).toHaveLength(3);
+	});
+
+	it('announces each tool call as it starts, synthesizing the start for providers that report only finished calls', async () => {
+		const call = { id: 'c1', name: 'echo', argumentsJson: '{"text":"a"}' };
+		const streamed = scripted([
+			[{ type: 'tool_call_start', name: 'echo' }, { type: 'tool_call', call }, { type: 'done', finishReason: 'tool_calls' }],
+			[{ type: 'text', delta: 'done' }, { type: 'done', finishReason: 'stop' }],
+		]);
+		const events = (await collect(run(streamed))).map((e) => e.type);
+		expect(events).toEqual(['assistant_start', 'tool_call_start', 'assistant_end', 'tool_call', 'tool_result', 'assistant_start', 'text_delta', 'assistant_end']);
+
+		const whole = scripted([
+			[{ type: 'tool_call', call }, { type: 'tool_call', call: { ...call, id: 'c2', argumentsJson: '{"text":"b"}' } }, { type: 'done', finishReason: 'tool_calls' }],
+			[{ type: 'text', delta: 'done' }, { type: 'done', finishReason: 'stop' }],
+		]);
+		const synthesized = await collect(run(whole));
+		expect(synthesized.filter((e) => e.type === 'tool_call_start')).toEqual([
+			{ type: 'tool_call_start', name: 'echo' },
+			{ type: 'tool_call_start', name: 'echo' },
+		]);
+		expect(synthesized.map((e) => e.type).slice(0, 4)).toEqual(['assistant_start', 'tool_call_start', 'tool_call_start', 'assistant_end']);
 	});
 
 	it('reports unknown tools and invalid arguments to the model instead of crashing', async () => {
@@ -182,7 +203,7 @@ describe('runAgent', () => {
 			out.push(e);
 			if (e.type === 'tool_result') ac.abort();
 		}
-		expect(out.map((e) => e.type)).toEqual(['assistant_start', 'assistant_end', 'tool_call', 'tool_result', 'tool_result', 'error']);
+		expect(out.map((e) => e.type)).toEqual(['assistant_start', 'tool_call_start', 'tool_call_start', 'assistant_end', 'tool_call', 'tool_result', 'tool_result', 'error']);
 		const tools = added.filter((m) => m.role === 'tool');
 		expect(tools.map((m) => m.toolCallId)).toEqual(['a', 'b']);
 		expect(tools[1]?.content).toMatch(/Not run: generation stopped/);

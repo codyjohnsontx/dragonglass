@@ -29,14 +29,11 @@ export class DragonglassCore {
 	readonly vault: ObsidianVaultPort;
 	readonly store: ConversationStore;
 	readonly proposals: ProposalEngine;
-	readonly tools: ToolRegistry;
 	private readonly providers;
 	private readonly fetchClient = new FetchHttpClient();
 	private readonly requestUrlClient: HttpClient;
 	private settings: DragonglassSettings;
 	private readonly saveSettings: () => Promise<void>;
-	/** Estimated tokens of note content a single read may return; see `noteTokenBudget`. */
-	private noteTokens: number | undefined;
 
 	constructor(app: App, plugin: Plugin, settings: DragonglassSettings, saveSettings: () => Promise<void>) {
 		this.settings = settings;
@@ -44,14 +41,6 @@ export class DragonglassCore {
 		this.vault = new ObsidianVaultPort(app, plugin);
 		this.store = new ConversationStore(this.vault);
 		this.proposals = new ProposalEngine(this.vault);
-		this.tools = new ToolRegistry();
-		for (const t of createVaultTools(this.vault, this.proposals, () => ({
-			maxReadChars: this.settings.maxCharsPerNote,
-			maxReadTokens: this.noteTokens,
-			maxSearchResults: 20,
-		}))) {
-			this.tools.register(t);
-		}
 		this.requestUrlClient = createRequestUrlClient();
 		this.providers = createProviders(
 			() => (this.settings.transport === 'requestUrl' ? this.requestUrlClient : this.fetchClient),
@@ -110,6 +99,23 @@ export class DragonglassCore {
 	}
 
 	/**
+	 * The vault tools for one send. Each send gets its own registry so the
+	 * note budget a read tool applies is the one computed for that send's
+	 * provider and model, even when two sends overlap.
+	 */
+	private createTools(maxReadTokens: number | undefined): ToolRegistry {
+		const tools = new ToolRegistry();
+		for (const t of createVaultTools(this.vault, this.proposals, () => ({
+			maxReadChars: this.settings.maxCharsPerNote,
+			maxReadTokens,
+			maxSearchResults: 20,
+		}))) {
+			tools.register(t);
+		}
+		return tools;
+	}
+
+	/**
 	 * Send a user message in `conv`, stream the reply, and persist every
 	 * message as it is produced. Resolves when the turn is over.
 	 */
@@ -135,9 +141,9 @@ export class DragonglassCore {
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
 
-		this.noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
+		const noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
 		const system = buildSystemPrompt({ toolsEnabled: this.settings.toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote });
-		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, this.noteTokens);
+		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
 		const messages = toProviderMessages(system, conv.messages, contextBlock);
 
 		let current: StoredMessage | null = null;
@@ -145,7 +151,7 @@ export class DragonglassCore {
 			provider,
 			model,
 			messages,
-			tools: this.tools,
+			tools: this.createTools(noteTokens),
 			toolsEnabled: this.settings.toolsEnabled,
 			conversationId: conv.id,
 			signal: opts.signal,
@@ -229,6 +235,21 @@ export class DragonglassCore {
 			outputTokens += m.usage?.outputTokens ?? 0;
 		}
 		return { inputTokens, outputTokens };
+	}
+
+	/**
+	 * Re-check the conversation's open proposals against the vault, all of
+	 * them or only those for `path`. Returns the proposals whose status
+	 * changed so the view can redraw their cards.
+	 */
+	async refreshProposals(conv: Conversation, path?: string): Promise<ChangeProposal[]> {
+		const changed: ChangeProposal[] = [];
+		for (const p of Object.values(conv.proposals)) {
+			if (path !== undefined && p.path !== path) continue;
+			if (await this.proposals.refresh(p)) changed.push(p);
+		}
+		if (changed.length > 0) this.store.touch(conv);
+		return changed;
 	}
 
 	async approveProposal(conv: Conversation, p: ChangeProposal): Promise<void> {

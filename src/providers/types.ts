@@ -89,6 +89,12 @@ export type StreamEvent =
 	| { type: 'text'; delta: string }
 	/** Hidden reasoning from a thinking model. Shown to the user, never sent back. */
 	| { type: 'thinking'; delta: string }
+	/**
+	 * The model has begun a call to `name`; its arguments are still streaming.
+	 * Lets the UI show the tool while the call is produced. The matching
+	 * `tool_call` follows, in the same order, once the arguments are complete.
+	 */
+	| { type: 'tool_call_start'; name: string }
 	| { type: 'tool_call'; call: ToolCall }
 	| { type: 'usage'; usage: Usage }
 	/** Something the user must know about this turn, such as a truncated prompt. */
@@ -211,28 +217,72 @@ export function toProviderError(err: unknown): ProviderError {
  * whitespace count once, since indentation and blank lines tokenize densely.
  */
 export function estimateTokens(text: string): number {
+	return weigh(text, false);
+}
+
+/**
+ * The most tokens any tokenizer plausibly spends on `text`: one per UTF-8
+ * byte outside ASCII, which is what a vocabulary without that script falls
+ * back to (three per CJK character, two per Cyrillic or Greek one), and the
+ * usual rate for ASCII. Used to ask whether a prompt could have overflowed.
+ */
+export function estimateTokensCeiling(text: string): number {
+	return weigh(text, true);
+}
+
+function weigh(text: string, ceiling: boolean): number {
 	const compact = text.replace(/\s+/g, ' ');
 	let weight = 0;
-	for (let i = 0; i < compact.length; i++) weight += charWeight(compact.charCodeAt(i));
+	for (let i = 0; i < compact.length; i++) weight += charWeight(compact.charCodeAt(i), ceiling);
 	return Math.ceil(weight / CHARS_PER_TOKEN);
 }
 
-/** Length of the longest prefix of `text` that stays within `maxTokens` at the rate `estimateTokens` uses. */
+/**
+ * Length of the longest prefix of `text` that stays within `maxTokens` at the
+ * rate `estimateTokens` uses, so a text estimated at N tokens is kept whole by
+ * a cap of N.
+ */
 export function prefixWithinTokens(text: string, maxTokens: number): number {
 	const limit = maxTokens * CHARS_PER_TOKEN;
 	let weight = 0;
+	let inWhitespace = false;
 	for (let i = 0; i < text.length; i++) {
-		weight += charWeight(text.charCodeAt(i));
+		const code = text.charCodeAt(i);
+		const whitespace = isWhitespace(code);
+		if (!whitespace) weight += charWeight(code);
+		else if (!inWhitespace) weight += 1; // a run of whitespace counts as one plain space
+		inWhitespace = whitespace;
 		if (weight > limit) return i;
 	}
 	return text.length;
 }
 
+/** The characters `\s` matches, so `prefixWithinTokens` counts whitespace runs like `estimateTokens`. */
+function isWhitespace(code: number): boolean {
+	return (
+		(code >= 0x09 && code <= 0x0d) ||
+		code === 0x20 ||
+		code === 0xa0 ||
+		code === 0x1680 ||
+		(code >= 0x2000 && code <= 0x200a) ||
+		code === 0x2028 ||
+		code === 0x2029 ||
+		code === 0x202f ||
+		code === 0x205f ||
+		code === 0x3000 ||
+		code === 0xfeff
+	);
+}
+
 const CHARS_PER_TOKEN = 4;
 
-/** A UTF-16 code unit's share of a token, in quarters. */
-function charWeight(code: number): number {
+/**
+ * A UTF-16 code unit's share of a token, in quarters: the likely share, or
+ * with `ceiling` the byte-fallback worst case (one token per UTF-8 byte).
+ */
+function charWeight(code: number, ceiling = false): number {
 	if (code < 0x80) return 1;
+	if (ceiling) return code < 0x800 ? 2 * CHARS_PER_TOKEN : 3 * CHARS_PER_TOKEN;
 	const dense =
 		(code >= 0x1100 && code <= 0x11ff) || // Hangul Jamo
 		(code >= 0x2e80 && code <= 0x9fff) || // CJK radicals, punctuation, kana, ideographs

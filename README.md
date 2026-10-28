@@ -44,9 +44,12 @@ Open **Settings → Dragonglass AI**.
 
 1. Install [Ollama](https://ollama.com) and pull a model that supports tool
    calling, for example `ollama pull llama3.1` or `ollama pull qwen2.5`.
+   Thinking models such as `qwen3` work too, but pause for a long time
+   before answering (see "Let thinking models think" below).
 2. Leave **Server URL** at `http://127.0.0.1:11434` unless Ollama runs
    elsewhere.
-3. Enter the model name and select **Test Ollama connection**.
+3. Enter the model name and select **Test Ollama connection**. It reports
+   the server version and whether that model is installed.
 
 Ollama allows requests from Obsidian's `app://` origin by default. If you run
 an older Ollama or have set `OLLAMA_ORIGINS` yourself, either include
@@ -59,7 +62,8 @@ rejection, retries without tools, and tells you.
 Two settings matter for local models:
 
 - **Context window** is sent as Ollama's `num_ctx` on every request (default
-  16,384 tokens). Ollama's own default is 4,096, which one long note overflows;
+  16,384 tokens). Until the plugin sets it, Ollama runs at its own default of
+  4,096 tokens, which one long note overflows;
   when that happens Ollama silently keeps about half the prompt and drops the
   system prompt and your question. The value is capped at what the model
   supports. If a prompt is still cut, the reply carries a warning saying so.
@@ -164,9 +168,10 @@ vault:
 - Stale detection: a note edited after the proposal cannot be approved.
 - Conversation history persists across plugin reload.
 
-Not yet verified live: a real Ollama model and real OpenAI, Anthropic and
-Gemini keys were not available on the build machine. The wire formats are
-tested against shapes from the official API documentation. To verify live:
+Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
+Real OpenAI, Anthropic and Gemini keys were not available on the build
+machine; those wire formats are tested against shapes from the official API
+documentation. To verify live:
 
 1. Run Ollama with a tool-capable model and set it in settings; or add an
    OpenAI, Anthropic or Gemini key in the keychain.

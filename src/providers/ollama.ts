@@ -4,6 +4,7 @@ import {
 	ConnectionStatus,
 	errorFromStatus,
 	estimateTokens,
+	estimateTokensCeiling,
 	ModelInfo,
 	Provider,
 	ProviderCapabilities,
@@ -17,6 +18,8 @@ import { HttpClient, joinUrl, parseNdjson } from './http';
 
 export interface OllamaConfig {
 	baseUrl: string;
+	/** The model the user picked, or empty. The connection check confirms it is installed. */
+	model: string;
 	/** Requested context window in tokens (`options.num_ctx`), capped at the model's maximum. */
 	numCtx: number;
 	/** When false, thinking models are asked to answer directly (`think: false`). */
@@ -93,7 +96,20 @@ export class OllamaProvider implements Provider {
 				return { ok: false, error: errorFromStatus(res.status, res.text) };
 			}
 			const parsed = safeJson(res.text) as { version?: string } | null;
-			return { ok: true, detail: parsed?.version ? `Ollama ${parsed.version}` : 'Ollama reachable' };
+			const version = parsed?.version ? `Ollama ${parsed.version}` : 'Ollama reachable';
+			// A reachable server with a model that is not pulled fails on the
+			// first chat, so check the model here where the user is looking.
+			const model = this.config().model;
+			if (!model) return { ok: true, detail: version };
+			const installed = (await this.listModels(signal)).map((m) => m.id);
+			if (!installed.some((id) => id === model || id === `${model}:latest`)) {
+				const shown = installed.slice(0, 5).join(', ') + (installed.length > 5 ? ', …' : '');
+				return {
+					ok: false,
+					error: new ProviderError('model_not_found', `"${model}" is not installed on this server (installed: ${shown || 'none'})`),
+				};
+			}
+			return { ok: true, detail: `${version}, model ${model} installed` };
 		} catch (e) {
 			return { ok: false, error: toProviderError(e) };
 		}
@@ -163,6 +179,7 @@ export class OllamaProvider implements Provider {
 		// accepts `think: false` for any model, so only the opt-out is sent.
 		if (!config.think && (!info || info.capabilities.includes('thinking'))) body['think'] = false;
 		const promptEstimate = estimatePromptTokens(request.messages, request.tools);
+		const promptCeiling = estimatePromptTokens(request.messages, request.tools, estimateTokensCeiling);
 
 		let res;
 		try {
@@ -227,7 +244,7 @@ export class OllamaProvider implements Provider {
 							},
 						};
 					}
-					if (promptTokens !== undefined && promptWasTruncated(promptTokens, promptEstimate, numCtx)) {
+					if (promptTokens !== undefined && promptWasTruncated(promptTokens, promptEstimate, numCtx, promptCeiling)) {
 						yield { type: 'warning', message: truncationWarning(promptTokens, promptEstimate, numCtx) };
 					}
 					const reason = chunk.done_reason;
@@ -268,39 +285,67 @@ export function effectiveNumCtx(requested: number, info: OllamaModelInfo | undef
 }
 
 /**
- * Rough token count of a request (see `estimateTokens`), plus a few tokens of
- * framing per message. Only used to spot a prompt that came back much smaller
- * than it went out.
+ * Rough token count of a request plus a few tokens of framing per message,
+ * at the rate of `estimate` (`estimateTokens` by default, or
+ * `estimateTokensCeiling` for the most any tokenizer would spend). Only used
+ * to spot a prompt that came back much smaller than it went out.
  */
-export function estimatePromptTokens(messages: ChatMessage[], tools: ToolDefinition[] | undefined): number {
+export function estimatePromptTokens(
+	messages: ChatMessage[],
+	tools: ToolDefinition[] | undefined,
+	estimate: (text: string) => number = estimateTokens,
+): number {
 	let tokens = messages.length * 4;
 	for (const m of messages) {
-		tokens += estimateTokens(m.content);
-		for (const c of m.toolCalls ?? []) tokens += estimateTokens(c.name + c.argumentsJson);
+		tokens += estimate(m.content);
+		for (const c of m.toolCalls ?? []) tokens += estimate(c.name + c.argumentsJson);
 	}
-	if (tools) tokens += estimateTokens(JSON.stringify(tools));
+	if (tools) tokens += estimate(JSON.stringify(tools));
 	return tokens;
 }
 
 /**
- * Was the prompt cut? The count must be well under the estimate (a 40 percent
- * shortfall, far more than the estimate's own error on prose) and one of two
- * signatures must match: the estimate says the request could not have fit at
- * all, which is when Ollama drops older messages, or the count sits around
- * half the window, which is what remains after Ollama truncates a single
- * oversized message. The shortfall alone is not enough: dense text such as
- * tables or code can tokenize well under four characters per token.
+ * Was the prompt cut? Ollama cuts in two ways, with different signatures.
+ *
+ * A single message too large for the window is cut by the runner, which
+ * keeps exactly half the window plus two tokens (measured on Ollama 0.40 at
+ * 2048, 4096, 8192 and 16384). A count in that narrow band is a cut whenever
+ * `ceiling`, the most tokens any tokenizer would spend on the prompt, reaches
+ * the window; this does not depend on the estimate being right, which matters
+ * for notes in Chinese, Japanese or Korean, where tokenizers differ by a
+ * factor of three and an uncut prompt lands in the band about once in a
+ * thousand requests. An ASCII prompt the estimate puts well under the window
+ * is left alone: its ceiling is its estimate.
+ *
+ * A history too long for the window has its older messages dropped by the
+ * server until the rest fits. That leaves no signature, so it shows only as a
+ * count well under the estimate (a 40 percent shortfall, far more than the
+ * estimate's error on prose) for a prompt the estimate says could not have
+ * fit, or a count around half the window for a runner cut on an older Ollama.
+ * The shortfall alone is not enough: dense text such as tables or code can
+ * tokenize well under four characters per token.
  */
-export function promptWasTruncated(promptTokens: number, estimate: number, numCtx: number): boolean {
+export function promptWasTruncated(promptTokens: number, estimate: number, numCtx: number, ceiling = estimate): boolean {
+	const half = Math.floor(numCtx / 2);
+	if (promptTokens >= half && promptTokens <= half + RUNNER_CUT_SLACK && ceiling >= numCtx) return true;
 	if (promptTokens >= estimate * 0.6) return false;
 	const couldNotFit = estimate >= numCtx;
 	const nearHalfWindow = promptTokens >= numCtx * 0.3 && promptTokens <= numCtx * 0.6;
 	return couldNotFit || nearHalfWindow;
 }
 
+/** Tokens above half the window a runner cut may leave; two were measured, the rest is headroom for other versions. */
+const RUNNER_CUT_SLACK = 16;
+
 function truncationWarning(promptTokens: number, estimate: number, numCtx: number): string {
+	const window = numCtx.toLocaleString('en-US');
+	const reached = promptTokens.toLocaleString('en-US');
+	const counts =
+		estimate > promptTokens
+			? `about ${estimate.toLocaleString('en-US')} tokens were sent and ${reached} reached the model`
+			: `${reached} tokens reached the model, exactly the half window Ollama keeps after cutting a message that is too long`;
 	return (
-		`This prompt did not fit Ollama's ${numCtx.toLocaleString()}-token context window: about ${estimate.toLocaleString()} tokens were sent and ${promptTokens.toLocaleString()} reached the model. ` +
+		`This prompt did not fit Ollama's ${window}-token context window: ${counts}. ` +
 		'Ollama silently drops older messages and cuts long ones, so the reply may ignore earlier turns, note content or your question. ' +
 		'Raise "Context window" in the Ollama settings, attach less, or start a new conversation.'
 	);

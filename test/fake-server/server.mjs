@@ -20,7 +20,7 @@
  *
  * Models: `fake-plain` rejects tools (Ollama 400 / OpenAI works without tools),
  * `fake-429` -> 429, `fake-500` -> 500 (Anthropic: 529 overloaded),
- * `fake-slow` streams one word per 150 ms, `fake-overloaded` (Anthropic) sends
+ * `fake-slow` streams one word per 150 ms (OpenAI: and pauses 1.5 s mid tool call), `fake-overloaded` (Anthropic) sends
  * an error event mid-stream, `fake-safety` (Gemini) finishes with SAFETY and
  * no content, `fake-missing` (Gemini) -> 404, any other model behaves normally.
  * Ollama only: `fake-think` streams `thinking` chunks before the answer unless
@@ -296,6 +296,7 @@ async function openaiChat(res, body) {
 		const args = JSON.stringify(p.tool.args);
 		const half = Math.ceil(args.length / 2);
 		send({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_fake_1', type: 'function', function: { name: p.tool.name, arguments: args.slice(0, half) } }] }, finish_reason: null }] });
+		if (b.slow) await sleep(1500); // the arguments are still streaming; the UI should already name the tool
 		send({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: args.slice(half) } }] }, finish_reason: null }] });
 		send({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] });
 	} else {

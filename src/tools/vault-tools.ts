@@ -353,10 +353,17 @@ export function toEditOperations(raw: unknown): EditOperation[] {
 	});
 }
 
-export function formatNote(path: string, content: string, maxChars: number, maxTokens = Infinity): string {
-	const shown = Math.min(maxChars, prefixWithinTokens(content, maxTokens));
-	const truncated = content.length > shown;
-	const body = truncated ? content.slice(0, shown) : content;
-	const note = truncated ? `\n[truncated: showing ${shown} of ${content.length} characters]` : '';
+export function formatNote(path: string, content: string, maxChars: number, maxTokens?: number): string {
+	const { body, note } = truncateContent(content, maxChars, maxTokens);
 	return `<<<note path="${path}">>>\n${body}${note}\n<<<end note>>>`;
+}
+
+/**
+ * Cut `content` to the character cap and, when given, the token cap. `note`
+ * is the marker to append after `body` when something was cut, else empty.
+ */
+export function truncateContent(content: string, maxChars: number, maxTokens = Infinity): { body: string; note: string } {
+	const shown = Math.min(maxChars, prefixWithinTokens(content, maxTokens));
+	if (content.length <= shown) return { body: content, note: '' };
+	return { body: content.slice(0, shown), note: `\n[truncated: showing ${shown} of ${content.length} characters]` };
 }

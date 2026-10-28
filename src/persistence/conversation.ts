@@ -62,6 +62,43 @@ export function newConversation(id: string, now: number): Conversation {
 	return { id, title: 'New conversation', createdAt: now, updatedAt: now, messages: [], proposals: {} };
 }
 
+/** Token usage of one user turn: every model request it took, added up. */
+export interface TurnUsage extends Usage {
+	/** Model requests in the turn: one plus one per tool round. */
+	requests: number;
+	model?: string;
+}
+
+/**
+ * Sum usage per user turn (a user message and everything up to the next one)
+ * and key it by the assistant message that should show it: the last one in
+ * the turn, so a reply reached through tool rounds shows one line, not one
+ * per round. Turns without a reported count are left out.
+ */
+export function usageByTurn(messages: StoredMessage[]): Map<string, TurnUsage> {
+	const out = new Map<string, TurnUsage>();
+	let turn: TurnUsage | null = null;
+	let lastAssistantId: string | null = null;
+	const close = () => {
+		if (turn && lastAssistantId && (turn.inputTokens || turn.outputTokens)) out.set(lastAssistantId, turn);
+		turn = null;
+		lastAssistantId = null;
+	};
+	for (const m of messages) {
+		if (m.role === 'user') close();
+		if (m.role !== 'assistant') continue;
+		turn ??= { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, requests: 0 };
+		turn.requests++;
+		turn.inputTokens = (turn.inputTokens ?? 0) + (m.usage?.inputTokens ?? 0);
+		turn.outputTokens = (turn.outputTokens ?? 0) + (m.usage?.outputTokens ?? 0);
+		turn.reasoningTokens = (turn.reasoningTokens ?? 0) + (m.usage?.reasoningTokens ?? 0);
+		if (m.model) turn.model = m.model;
+		lastAssistantId = m.id;
+	}
+	close();
+	return out;
+}
+
 export function deriveTitle(firstUserMessage: string): string {
 	const line = firstUserMessage.split('\n').find((l) => l.trim().length > 0) ?? 'New conversation';
 	const trimmed = line.trim().replace(/\s+/g, ' ');

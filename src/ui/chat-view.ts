@@ -1,9 +1,11 @@
-import { ItemView, MarkdownRenderer, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, MarkdownRenderer, Notice, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
-import { Conversation, StoredMessage } from '../persistence/conversation';
-import { countModels, ModelInfo, PROVIDER_IDS, ProviderErrorKind, ProviderId } from '../providers/types';
+import { Conversation, StoredMessage, TurnUsage, usageByTurn } from '../persistence/conversation';
+import { ModelInfo, PROVIDER_IDS, ProviderErrorKind, ProviderId, ToolCall, toProviderError } from '../providers/types';
+import { ActiveContext } from '../vault/port';
+import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
@@ -21,6 +23,12 @@ export class ChatView extends ItemView {
 	private attachments: TFile[] = [];
 	private includeActive: boolean;
 	private includeSelection: boolean;
+	/**
+	 * The selection sent with the last message. An editor selection outlives
+	 * the message it was made for, so the same text is not attached again
+	 * unless the user asks; a new selection is included as the setting says.
+	 */
+	private sentSelection: { path: string | null; text: string } | null = null;
 	private models: ModelInfo[] = [];
 
 	private headerEl!: HTMLElement;
@@ -42,6 +50,10 @@ export class ChatView extends ItemView {
 	/** When the current thinking phase began; null once its "Thought for" label is set. */
 	private thinkingStartedAt: number | null = null;
 	private turnTimer: number | null = null;
+	/** Chips for tool calls the model has started this round, in call order, and the row holding them. */
+	private liveToolRow: HTMLElement | null = null;
+	private liveToolChips: HTMLElement[] = [];
+	private runningChip: HTMLElement | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 
 	constructor(
@@ -81,6 +93,8 @@ export class ChatView extends ItemView {
 		this.registerEvent(this.app.workspace.on('file-open', () => this.renderContextBar()));
 		// Closing the tracked note's tab or popout fires neither event above.
 		this.registerEvent(this.app.workspace.on('layout-change', () => this.renderContextBar()));
+		// A note edited behind a pending proposal makes the proposal stale; say so before Approve is clicked.
+		this.registerEvent(this.app.vault.on('modify', (file) => void this.onNoteModified(file)));
 		await this.renderHeader();
 		void this.refreshStatus();
 	}
@@ -126,7 +140,7 @@ export class ChatView extends ItemView {
 		for (const m of this.models) modelSelect.createEl('option', { text: m.label ?? m.id, value: m.id });
 		modelSelect.value = current;
 		modelSelect.addEventListener('change', () => void this.core.setActiveModel(modelSelect.value));
-		this.iconButton(modelRow, 'refresh-cw', 'Refresh model list', () => void this.loadModels());
+		this.iconButton(modelRow, 'refresh-cw', 'Refresh model list', () => void this.refreshModels());
 		this.statusEl = modelRow.createSpan({ cls: 'dg-status', text: '' });
 		if (this.lastStatus) this.setStatus(this.lastStatus.state, this.lastStatus.title);
 	}
@@ -146,15 +160,29 @@ export class ChatView extends ItemView {
 		return btn;
 	}
 
-	private async refreshStatus(): Promise<void> {
+	/**
+	 * Re-check the connection and show the result in the header light. Loads
+	 * the model list when it is empty and the server answers, including when
+	 * the configured model is missing, so the menu offers the ones it has.
+	 * With `quiet` false a failure is also raised as a Notice.
+	 */
+	private async refreshStatus(quiet = true): Promise<void> {
 		this.setStatus('checking', 'Checking connection…');
 		const status = await this.core.checkConnection();
+		const reachable = status.ok || status.error.kind === 'model_not_found';
+		if (reachable && this.models.length === 0) await this.loadModels(quiet);
 		if (status.ok) {
 			this.setStatus('ok', status.detail);
-			if (this.models.length === 0) await this.loadModels(true);
 		} else {
 			this.setStatus('error', status.error.userMessage());
+			if (!quiet) new Notice(status.error.userMessage(), 8000);
 		}
+	}
+
+	/** The refresh button: forget the cached list and check again, reporting failure as a Notice. */
+	private async refreshModels(): Promise<void> {
+		this.models = [];
+		await this.refreshStatus(false);
 	}
 
 	private setStatus(state: 'ok' | 'error' | 'checking', title: string): void {
@@ -167,14 +195,13 @@ export class ChatView extends ItemView {
 		setIcon(this.statusEl, state === 'ok' ? 'circle-check' : state === 'error' ? 'circle-alert' : 'loader');
 	}
 
-	private async loadModels(quiet = false): Promise<void> {
+	private async loadModels(quiet: boolean): Promise<void> {
 		try {
 			this.models = await this.core.listModels();
 			if (!this.core.activeModel() && this.models[0]) await this.core.setActiveModel(this.models[0].id);
 			await this.renderHeader();
-			this.setStatus('ok', `${countModels(this.models.length)} available`);
 		} catch (e) {
-			if (!quiet) new Notice(e instanceof Error ? e.message : String(e));
+			if (!quiet) new Notice(toProviderError(e).userMessage(), 8000);
 		}
 	}
 
@@ -189,6 +216,8 @@ export class ChatView extends ItemView {
 			conv = first ? await this.core.store.load(first.id) : null;
 		}
 		if (!conv) conv = this.core.store.create();
+		// Notes may have changed while this conversation was closed.
+		await this.core.refreshProposals(conv);
 		this.conv = conv;
 		this.onConversationChange(conv.id);
 		this.renderMessages();
@@ -241,54 +270,76 @@ export class ChatView extends ItemView {
 			empty.createEl('p', { text: 'Ask about your notes, or ask for an edit. Changes are shown as a diff for you to approve.' });
 			return;
 		}
-		for (const m of this.conv.messages) this.renderMessage(m, el);
+		// One usage line per user turn, on its last reply, rather than one per tool round.
+		const usage = this.core.getSettings().showUsage ? usageByTurn(this.conv.messages) : new Map<string, TurnUsage>();
+		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id));
 		this.renderUsage(el);
 		this.scrollToBottom();
 	}
 
-	private renderMessage(m: StoredMessage, parent: HTMLElement): HTMLElement {
+	/**
+	 * Render one stored message. A tool call is shown on the row of its result
+	 * (the chip in the summary), so an assistant turn that only called tools
+	 * renders as a bare step: its thinking, if any, and nothing else.
+	 */
+	private renderMessage(m: StoredMessage, parent: HTMLElement, turnUsage?: TurnUsage): HTMLElement {
 		const wrap = parent.createDiv({ cls: `dg-msg dg-msg-${m.role}` });
 		if (m.role === 'user') {
 			wrap.createDiv({ cls: 'dg-msg-body', text: m.content });
 			if (m.context && (m.context.activeNotePath || m.context.selection || m.context.attachments.length)) {
 				const ctx = wrap.createDiv({ cls: 'dg-msg-context' });
 				if (m.context.activeNotePath) ctx.createSpan({ cls: 'dg-chip', text: `Active: ${m.context.activeNotePath}` });
-				if (m.context.selection) ctx.createSpan({ cls: 'dg-chip', text: 'Selection' });
+				if (m.context.selection) ctx.createSpan({ cls: 'dg-chip', text: `Selection (${m.context.selection.length} chars)` });
 				for (const a of m.context.attachments) ctx.createSpan({ cls: 'dg-chip', text: a.path });
 			}
 		} else if (m.role === 'assistant') {
+			const toolOnly = !m.content && !m.error && !m.interrupted && (m.toolCalls?.length ?? 0) > 0;
+			if (toolOnly) wrap.addClass('dg-msg-step');
 			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
-			const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
-			if (m.content) void MarkdownRenderer.render(this.app, m.content, body, '', this);
-			if (m.toolCalls?.length) {
+			if (m.content) {
+				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
+				void MarkdownRenderer.render(this.app, m.content, body, '', this);
+			}
+			// A call whose result never arrived (the run died first) has no result row to live on.
+			const unanswered = (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
+			if (unanswered.length > 0) {
 				const calls = wrap.createDiv({ cls: 'dg-tool-calls' });
-				for (const c of m.toolCalls) {
-					calls.createSpan({ cls: 'dg-chip dg-chip-tool', text: `${c.name}${argsPreview(c.argumentsJson)}` });
-				}
+				for (const c of unanswered) calls.createSpan({ cls: 'dg-chip dg-chip-tool', text: `${c.name}${argsPreview(c.argumentsJson)} (not run)` });
 			}
 			if (m.interrupted) wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
 			for (const w of m.warnings ?? []) wrap.createDiv({ cls: 'dg-msg-warning', text: w });
 			if (m.error) wrap.createDiv({ cls: 'dg-msg-error', text: m.error });
-			if (m.usage && this.core.getSettings().showUsage && (m.usage.inputTokens || m.usage.outputTokens)) {
-				const thinking = m.usage.reasoningTokens ? ` (about ${m.usage.reasoningTokens} of them thinking)` : '';
-				wrap.createDiv({
-					cls: 'dg-msg-usage',
-					text: `${m.model ?? ''} · ${m.usage.inputTokens ?? 0} in / ${m.usage.outputTokens ?? 0} out tokens${thinking}`,
-				});
-			}
+			if (turnUsage) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
+			if (wrap.childElementCount === 0) wrap.addClass('dg-msg-hidden');
 		} else {
 			const details = wrap.createEl('details', { cls: `dg-tool-result${m.isError ? ' dg-tool-error' : ''}` });
-			details.createEl('summary', { text: `${m.isError ? 'Tool error' : 'Tool result'}: ${m.toolName ?? 'tool'}` });
+			const summary = details.createEl('summary');
+			const call = this.conv ? findToolCall(this.conv, m.toolCallId) : undefined;
+			summary.createSpan({ cls: 'dg-chip dg-chip-tool', text: `${m.toolName ?? 'tool'}${call ? argsPreview(call.argumentsJson) : ''}` });
+			summary.appendText(m.isError ? ' error' : ' result');
 			details.createEl('pre', { text: m.content.length > 4000 ? `${m.content.slice(0, 4000)}…` : m.content });
 			if (m.proposalId && this.conv) {
 				const proposal = this.conv.proposals[m.proposalId];
 				if (proposal) {
 					const card = wrap.createDiv();
+					card.dataset['proposalId'] = proposal.id;
 					renderProposalCard(this.app, this.core, this.conv, proposal, card, () => this.renderMessages());
 				}
 			}
 		}
 		return wrap;
+	}
+
+	/** Re-check proposals for an edited note and redraw their cards in place, without disturbing a live turn. */
+	private async onNoteModified(file: TAbstractFile): Promise<void> {
+		const conv = this.conv;
+		if (!conv || !(file instanceof TFile)) return;
+		const changed = await this.core.refreshProposals(conv, file.path);
+		if (this.conv !== conv) return;
+		for (const p of changed) {
+			const card = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`);
+			if (card) renderProposalCard(this.app, this.core, conv, p, card, () => this.renderMessages());
+		}
 	}
 
 	/** Collapsed block holding a thinking model's reasoning. Returns the summary and body elements. */
@@ -334,12 +385,20 @@ export class ChatView extends ItemView {
 			this.renderContextBar();
 		});
 		if (active.selection) {
+			const sent = this.selectionAlreadySent(active);
+			const from = active.path ? ` from ${baseName(active.path)}` : '';
 			const selToggle = bar.createEl('button', {
-				cls: `dg-chip dg-chip-toggle${this.includeSelection ? ' is-active' : ''}`,
-				text: `Selection (${active.selection.length} chars)`,
+				cls: `dg-chip dg-chip-toggle${this.selectionIncluded(active) ? ' is-active' : ''}`,
+				text: `Selection${from} (${active.selection.length} chars)`,
 			});
+			if (sent) selToggle.setAttribute('aria-label', 'Already sent with your previous message. Click to include it again.');
 			selToggle.addEventListener('click', () => {
-				this.includeSelection = !this.includeSelection;
+				if (sent) {
+					this.sentSelection = null;
+					this.includeSelection = true;
+				} else {
+					this.includeSelection = !this.includeSelection;
+				}
 				this.renderContextBar();
 			});
 		}
@@ -366,6 +425,14 @@ export class ChatView extends ItemView {
 		}
 	}
 
+	private selectionAlreadySent(active: ActiveContext): boolean {
+		return this.sentSelection !== null && this.sentSelection.text === active.selection && this.sentSelection.path === active.path;
+	}
+
+	private selectionIncluded(active: ActiveContext): boolean {
+		return this.includeSelection && active.selection !== null && !this.selectionAlreadySent(active);
+	}
+
 	private async collectContext(): Promise<ContextItem[]> {
 		const items: ContextItem[] = [];
 		const active = this.core.vault.getActiveContext();
@@ -373,7 +440,7 @@ export class ChatView extends ItemView {
 			const content = await this.core.vault.readNote(active.path);
 			if (content !== null) items.push({ kind: 'active', label: 'Active note', path: active.path, content });
 		}
-		if (this.includeSelection && active.selection) {
+		if (active.selection && this.selectionIncluded(active)) {
 			items.push({ kind: 'selection', label: 'Selection', path: active.path, content: active.selection });
 		}
 		for (const file of this.attachments) {
@@ -414,9 +481,12 @@ export class ChatView extends ItemView {
 		this.inputEl.value = '';
 		const context = await this.collectContext();
 		this.attachments = [];
+		const selection = context.find((c) => c.kind === 'selection');
+		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
 		this.abort = new AbortController();
-		// The header light reflects the last check; a send is the moment it matters.
-		void this.refreshStatus();
+		// The header light reflects the last check; a send is the moment it matters,
+		// and it must finish first so a failure during the send is not painted over.
+		await this.refreshStatus();
 		this.sendBtn.setText('Stop');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
@@ -450,6 +520,8 @@ export class ChatView extends ItemView {
 				const prev = conv.messages[conv.messages.length - 2];
 				if (prev?.role === 'user' && !this.messagesEl.querySelector(`[data-id="${prev.id}"]`)) {
 					this.renderMessage(prev, this.messagesEl).dataset['id'] = prev.id;
+					// The first message names the conversation; show the name now, not after the reply.
+					if (prev === conv.messages[0]) void this.renderHeader();
 				}
 				const wrap = this.messagesEl.createDiv({ cls: 'dg-msg dg-msg-assistant dg-msg-live' });
 				if (last) wrap.dataset['id'] = last.id;
@@ -493,11 +565,17 @@ export class ChatView extends ItemView {
 				break;
 			case 'assistant_end': {
 				this.endThinking();
-				this.endLiveTurn();
+				this.endLiveStatus();
 				if (this.liveEl) {
 					this.liveEl.empty();
 					this.liveEl.addClass('markdown-rendered');
-					if (ev.content) void MarkdownRenderer.render(this.app, ev.content, this.liveEl, '', this);
+					if (ev.content) {
+						void MarkdownRenderer.render(this.app, ev.content, this.liveEl, '', this);
+					} else if (ev.toolCalls.length > 0) {
+						// Tool-only round: the calls show on their result rows, so no bubble here.
+						this.liveEl.parentElement?.addClass('dg-msg-step');
+						this.liveEl.remove();
+					}
 				}
 				break;
 			}
@@ -505,14 +583,27 @@ export class ChatView extends ItemView {
 				this.liveEl?.parentElement?.createDiv({ cls: 'dg-msg-warning', text: ev.message });
 				new Notice(ev.message, 12000);
 				break;
+			case 'tool_call_start': {
+				// The model is still writing the call's arguments; show the tool now.
+				this.endLiveStatus();
+				this.liveToolChips.push(this.toolChip(`${ev.name}…`));
+				this.scrollToBottom();
+				break;
+			}
 			case 'tool_call': {
-				const el = this.messagesEl.createDiv({ cls: 'dg-msg dg-msg-tool dg-tool-running' });
-				el.createSpan({ cls: 'dg-chip dg-chip-tool', text: `Running ${ev.call.name}${argsPreview(ev.call.argumentsJson)}…` });
+				const chip = this.liveToolChips.shift() ?? this.toolChip('');
+				chip.querySelector('.dg-chip-label')?.setText(`Running ${ev.call.name}${argsPreview(ev.call.argumentsJson)}…`);
+				this.runningChip = chip;
 				this.scrollToBottom();
 				break;
 			}
 			case 'tool_result': {
-				this.messagesEl.querySelector('.dg-tool-running')?.remove();
+				this.runningChip?.remove();
+				this.runningChip = null;
+				if (this.liveToolRow?.childElementCount === 0) {
+					this.liveToolRow.remove();
+					this.liveToolRow = null;
+				}
 				const stored = conv.messages[conv.messages.length - 1];
 				if (stored?.role === 'tool') this.renderMessage(stored, this.messagesEl);
 				this.scrollToBottom();
@@ -554,17 +645,53 @@ export class ChatView extends ItemView {
 	}
 
 	/** Stop the live-turn timer and status line; the thinking block stays. */
-	private endLiveTurn(): void {
+	private endLiveStatus(): void {
 		if (this.turnTimer !== null) {
 			window.clearInterval(this.turnTimer);
 			this.turnTimer = null;
 		}
 		this.clearLiveStatus();
 	}
+
+	/** End the live turn: the status line and any tool chips still waiting for a result go. */
+	private endLiveTurn(): void {
+		this.endLiveStatus();
+		this.liveToolRow?.remove();
+		this.liveToolRow = null;
+		this.liveToolChips = [];
+		this.runningChip = null;
+	}
+
+	/** A spinning tool chip in the row below the live reply, created on first use. */
+	private toolChip(text: string): HTMLElement {
+		this.liveToolRow ??= this.messagesEl.createDiv({ cls: 'dg-msg dg-msg-tool dg-tool-running' });
+		const chip = this.liveToolRow.createSpan({ cls: 'dg-chip dg-chip-tool dg-chip-running' });
+		setIcon(chip.createSpan({ cls: 'dg-chip-icon' }), 'loader');
+		chip.createSpan({ cls: 'dg-chip-label', text });
+		return chip;
+	}
 }
 
 /** Error kinds that mean the provider itself is unreachable or refusing us, so the header light turns red. */
 const CONNECTION_ERRORS = new Set<ProviderErrorKind>(['network', 'server', 'auth', 'rate_limit', 'model_not_found']);
+
+/** The call a tool message answers, for showing its arguments on the result row. */
+function findToolCall(conv: Conversation, toolCallId: string | undefined): ToolCall | undefined {
+	if (!toolCallId) return undefined;
+	for (const m of conv.messages) {
+		const call = m.toolCalls?.find((c) => c.id === toolCallId);
+		if (call) return call;
+	}
+	return undefined;
+}
+
+/** "qwen3:8b · 3,200 in / 900 out tokens over 3 requests (about 600 of them thinking)". */
+function usageLine(u: TurnUsage, fallbackModel: string | undefined): string {
+	const requests = u.requests > 1 ? ` over ${u.requests} requests` : '';
+	const thinking = u.reasoningTokens ? ` (about ${u.reasoningTokens.toLocaleString('en-US')} of them thinking)` : '';
+	const tokens = `${(u.inputTokens ?? 0).toLocaleString('en-US')} in / ${(u.outputTokens ?? 0).toLocaleString('en-US')} out tokens`;
+	return `${u.model ?? fallbackModel ?? ''} · ${tokens}${requests}${thinking}`;
+}
 
 function argsPreview(json: string): string {
 	try {

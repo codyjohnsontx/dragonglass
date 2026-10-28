@@ -72,7 +72,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Test Ollama connection',
-						desc: 'Checks that the server answers at the URL above.',
+						desc: 'Checks that the server answers at the URL above and, when a model is set, that it is installed there.',
 						action: () => void this.test('ollama'),
 					},
 				],

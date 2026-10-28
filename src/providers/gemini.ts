@@ -164,6 +164,8 @@ export class GeminiProvider implements Provider {
 					};
 					if (part.thoughtSignature) call.signature = part.thoughtSignature;
 					calls.push(call);
+					// Gemini sends a call whole, but the stream may go on; say so now.
+					yield { type: 'tool_call_start', name: call.name };
 				}
 			}
 			if (candidate?.finishReason) {

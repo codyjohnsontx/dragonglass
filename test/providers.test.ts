@@ -6,7 +6,7 @@ import { AnthropicProvider, toAnthropicMessages } from '../src/providers/anthrop
 import { GeminiProvider } from '../src/providers/gemini';
 import { createProviders } from '../src/providers/registry';
 import { mergeSettings } from '../src/settings';
-import { ChatMessage, ProviderError, StreamEvent, ToolDefinition } from '../src/providers/types';
+import { ChatMessage, estimateTokens, estimateTokensCeiling, prefixWithinTokens, ProviderError, StreamEvent, ToolDefinition } from '../src/providers/types';
 // @ts-expect-error plain JS module
 import { startFakeServer } from './fake-server/server.mjs';
 
@@ -36,6 +36,13 @@ function text(events: StreamEvent[]): string {
 	return events.map((e) => (e.type === 'text' ? e.delta : '')).join('');
 }
 
+/** One start per call, each before its finished call, so the view can show the tool while its arguments stream. */
+function expectStartBeforeCall(events: StreamEvent[], name: string): void {
+	const starts = events.filter((e) => e.type === 'tool_call_start');
+	expect(starts).toEqual([{ type: 'tool_call_start', name }]);
+	expect(events.findIndex((e) => e.type === 'tool_call_start')).toBeLessThan(events.findIndex((e) => e.type === 'tool_call'));
+}
+
 /** Non-streaming client that goes over real HTTP, like Obsidian's requestUrl would. */
 function wholeBodyClient(): HttpClient {
 	return new RequestUrlHttpClient(async (req) => {
@@ -49,12 +56,25 @@ describe.each([
 	['non-streaming', wholeBodyClient],
 ])('OllamaProvider (%s)', (_label, makeClient) => {
 	const provider = (overrides: Partial<OllamaConfig> = {}) =>
-		new OllamaProvider(makeClient(), () => ({ baseUrl: fake.baseUrl, numCtx: 16384, think: true, ...overrides }));
+		new OllamaProvider(makeClient(), () => ({ baseUrl: fake.baseUrl, model: '', numCtx: 16384, think: true, ...overrides }));
 	const lastChatBody = () => fake.requests.filter((r) => r.url === '/api/chat').at(-1)!.body!;
 
 	it('checks connection and lists models', async () => {
 		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake' });
 		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-tools:latest', 'fake-plain:latest']);
+	});
+
+	it('confirms the configured model is installed as part of the connection check', async () => {
+		expect(await provider({ model: 'fake-tools:latest' }).checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake, model fake-tools:latest installed' });
+		// A bare name means the :latest tag, as it does for Ollama itself.
+		expect(await provider({ model: 'fake-tools' }).checkConnection()).toMatchObject({ ok: true });
+		const missing = await provider({ model: 'nonexistent:latest' }).checkConnection();
+		expect(missing).toMatchObject({ ok: false, error: { kind: 'model_not_found' } });
+		if (!missing.ok) {
+			expect(missing.error.userMessage()).toBe(
+				'Model not found: "nonexistent:latest" is not installed on this server (installed: fake-tools:latest, fake-plain:latest). Pick a different model in settings.',
+			);
+		}
 	});
 
 	it('streams text and usage', async () => {
@@ -96,7 +116,7 @@ describe.each([
 	});
 
 	it('reports a network error when the server is down', async () => {
-		const down = new OllamaProvider(makeClient(), () => ({ baseUrl: 'http://127.0.0.1:1', numCtx: 16384, think: true }));
+		const down = new OllamaProvider(makeClient(), () => ({ baseUrl: 'http://127.0.0.1:1', model: '', numCtx: 16384, think: true }));
 		const status = await down.checkConnection();
 		expect(status.ok).toBe(false);
 		if (!status.ok) expect(status.error.kind).toBe('network');
@@ -196,6 +216,28 @@ describe('Ollama context accounting', () => {
 		// A 30,000-character Japanese note cut to half of a 16k window.
 		const cjk = estimatePromptTokens([{ role: 'user', content: '秘密の言葉はペリカンです'.repeat(2500) }], undefined);
 		expect(promptWasTruncated(8192, cjk, 16_384)).toBe(true);
+		// Ollama 0.40 leaves exactly half the window plus two tokens after cutting one oversized message.
+		// A Japanese note trimmed to the 8192-token budget by the estimate, beside 1,300 tokens of framing,
+		// overflowed a 16k window on a tokenizer that spends more per character than the estimate
+		// assumes: the count sits in the band, and the ceiling estimate says it could have overflowed.
+		const trimmed: ChatMessage[] = [
+			{ role: 'system', content: 'x'.repeat(5200) },
+			{ role: 'user', content: '秘密の言葉はペリカンです'.repeat(683) },
+		];
+		const likely = estimatePromptTokens(trimmed, undefined);
+		const ceiling = estimatePromptTokens(trimmed, undefined, estimateTokensCeiling);
+		expect(likely).toBeLessThan(16_384);
+		expect(ceiling).toBeGreaterThan(16_384);
+		expect(promptWasTruncated(8194, likely, 16_384)).toBe(false); // the estimate alone misses it
+		expect(promptWasTruncated(8194, likely, 16_384, ceiling)).toBe(true);
+		expect(promptWasTruncated(8192, likely, 16_384, ceiling)).toBe(true);
+		expect(promptWasTruncated(8208, likely, 16_384, ceiling)).toBe(true);
+		// Outside the band the count is just what a dense tokenizer produced.
+		expect(promptWasTruncated(8191, likely, 16_384, ceiling)).toBe(false);
+		expect(promptWasTruncated(8300, likely, 16_384, ceiling)).toBe(false);
+		// The same count on an ASCII prompt the estimate puts well under the window is a coincidence, not a cut.
+		const ascii = estimatePromptTokens([{ role: 'user', content: 'word '.repeat(6400) }], undefined);
+		expect(promptWasTruncated(8194, ascii, 16_384, estimatePromptTokens([{ role: 'user', content: 'word '.repeat(6400) }], undefined, estimateTokensCeiling))).toBe(false);
 		// An 8,000-character Russian note beside 3,500 tokens of ASCII framing arrives whole (about 6,200 tokens).
 		const russian = estimatePromptTokens(
 			[
@@ -209,6 +251,20 @@ describe('Ollama context accounting', () => {
 		expect(promptWasTruncated(100, 500, 4096)).toBe(false);
 	});
 
+	it('bounds what any tokenizer could spend, one token per UTF-8 byte outside ASCII', () => {
+		expect(estimateTokensCeiling('x'.repeat(400))).toBe(100);
+		expect(estimateTokensCeiling('秘密'.repeat(200))).toBe(1200);
+		expect(estimateTokensCeiling('слово'.repeat(80))).toBe(800);
+		expect(estimateTokensCeiling('a  \n\n b')).toBe(estimateTokens('a  \n\n b'));
+	});
+
+	it('keeps a text within the token cap its own estimate gives it', () => {
+		for (const text of ['word \n\t  '.repeat(500), '秘密の言葉　　はペリカン'.repeat(100), 'plain prose with  double  spaces']) {
+			expect(prefixWithinTokens(text, estimateTokens(text))).toBe(text.length);
+			expect(prefixWithinTokens(text, estimateTokens(text) - 2)).toBeLessThan(text.length);
+		}
+	});
+
 	it('splits output tokens between thinking and answer by character share', () => {
 		expect(splitReasoningTokens(181, 900, 100)).toBe(163);
 		expect(splitReasoningTokens(181, 0, 100)).toBeUndefined();
@@ -219,7 +275,7 @@ describe('Ollama context accounting', () => {
 
 describe('OllamaProvider cancellation', () => {
 	it('stops a streaming reply when aborted', async () => {
-		const provider = new OllamaProvider(new FetchHttpClient(), () => ({ baseUrl: fake.baseUrl, numCtx: 16384, think: true }));
+		const provider = new OllamaProvider(new FetchHttpClient(), () => ({ baseUrl: fake.baseUrl, model: '', numCtx: 16384, think: true }));
 		const ac = new AbortController();
 		const seen: StreamEvent[] = [];
 		await expect(
@@ -264,6 +320,7 @@ describe.each([
 
 	it('reassembles tool call argument deltas and round-trips tool results', async () => {
 		const events = await collect(provider().chat({ model: 'fake-gpt', messages: [{ role: 'user', content: 'read A.md' }], tools }));
+		if (_label === 'streaming') expectStartBeforeCall(events, 'read_note');
 		expect(events.find((e) => e.type === 'tool_call')).toEqual({
 			type: 'tool_call',
 			call: { id: 'call_fake_1', name: 'read_note', argumentsJson: '{"path":"A.md"}' },
@@ -336,6 +393,7 @@ describe.each([
 	it('reassembles tool_use input deltas and round-trips tool results', async () => {
 		const events = await collect(provider().chat({ model: 'fake-claude', messages: [{ role: 'user', content: 'read A.md' }], tools }));
 		expect(text(events)).toBe('Let me check. ');
+		if (_label === 'streaming') expectStartBeforeCall(events, 'read_note');
 		expect(events.filter((e) => e.type === 'tool_call')).toEqual([
 			{ type: 'tool_call', call: { id: 'toolu_fake_1', name: 'read_note', argumentsJson: '{"path":"A.md"}' } },
 		]);
@@ -476,6 +534,7 @@ describe.each([
 	it('emits function calls with their thought signature and replays both', async () => {
 		const strictTools: ToolDefinition[] = [{ ...tools[0]!, parameters: { ...tools[0]!.parameters, additionalProperties: false } }];
 		const events = await collect(provider().chat({ model: 'fake-gemini', messages: [{ role: 'user', content: 'read A.md' }], tools: strictTools }));
+		expectStartBeforeCall(events, 'read_note'); // Gemini sends calls whole, so both modes announce the start
 		const call = events.find((e) => e.type === 'tool_call');
 		expect(call).toMatchObject({ type: 'tool_call', call: { name: 'read_note', argumentsJson: '{"path":"A.md"}', signature: 'sig-fake-1' } });
 		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'tool_calls' });
