@@ -447,8 +447,10 @@ describe('switching providers mid-conversation', () => {
 	it('replays tool history to Gemini as text once vault tools are off', async () => {
 		const p = new GeminiProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => 'gemini-fake' }));
 		expect(text(await collect(p.chat({ model: 'fake-gemini', messages: history })))).toMatch(/^Hello/);
-		const { contents } = toGeminiContents(history, false);
-		expect(contents.flatMap((c) => c.parts).every((part) => typeof part['text'] === 'string')).toBe(true);
+		const sent = fake.requests.at(-1)!.body as { contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> };
+		expect(sent.contents.flatMap((c) => c.parts).every((part) => typeof part['text'] === 'string')).toBe(true);
+		expect(sent.contents[1]).toEqual({ role: 'model', parts: [{ text: '[Called tool read_note with {"path":"A.md"}]' }] });
+		expect(sent.contents[2]!.parts[0]!['text']).toContain('[Result of tool read_note]\n<<<note path="A.md">>>');
 	});
 });
 
