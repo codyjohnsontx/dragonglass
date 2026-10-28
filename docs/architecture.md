@@ -100,7 +100,9 @@ replays the whole history, including tool calls another provider made. The one
 piece of provider state kept on a message is `ToolCall.signature` (Gemini's
 thought signature); other adapters ignore it. When a request declares no tools
 (vault tools turned off), the Anthropic and Gemini adapters replay earlier tool
-calls and results as plain text, since Anthropic rejects tool blocks then.
+calls and results as plain text. Anthropic requires this: its API rejects tool
+blocks in a request without tools. For Gemini it is a precaution that has not
+been confirmed against the live API.
 
 Adapters depend on an `HttpClient` rather than `fetch` directly. The streaming
 client uses `fetch`; the fallback wraps Obsidian's `requestUrl` (no CORS

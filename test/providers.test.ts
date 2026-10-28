@@ -3,7 +3,7 @@ import { FetchHttpClient, HttpClient, RequestUrlHttpClient } from '../src/provid
 import { OllamaProvider } from '../src/providers/ollama';
 import { OpenAIProvider } from '../src/providers/openai';
 import { AnthropicProvider, toAnthropicMessages } from '../src/providers/anthropic';
-import { GeminiProvider, toGeminiContents } from '../src/providers/gemini';
+import { GeminiProvider } from '../src/providers/gemini';
 import { createProviders } from '../src/providers/registry';
 import { mergeSettings } from '../src/settings';
 import { ChatMessage, ProviderError, StreamEvent, ToolDefinition } from '../src/providers/types';
@@ -440,8 +440,13 @@ describe('switching providers mid-conversation', () => {
 	it('replays OpenAI tool history to Gemini with the placeholder signature', async () => {
 		const p = new GeminiProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => 'gemini-fake' }));
 		expect(text(await collect(p.chat({ model: 'fake-gemini', messages: history, tools })))).toMatch(/^Hello/);
-		const { contents } = toGeminiContents(history, true);
-		expect(contents[1]!.parts[0]).toMatchObject({ thoughtSignature: 'skip_thought_signature_validator' });
+		const sent = fake.requests.at(-1)!.body as { contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> };
+		expect(sent.contents[1]).toEqual({ role: 'model', parts: [
+			{ functionCall: { name: 'read_note', args: { path: 'A.md' } }, thoughtSignature: 'skip_thought_signature_validator' },
+		] });
+		expect(sent.contents[2]!.parts[0]).toEqual({
+			functionResponse: { name: 'read_note', response: { result: '<<<note path="A.md">>>\n# Title line\n<<<end note>>>' } },
+		});
 	});
 
 	it('replays tool history to Gemini as text once vault tools are off', async () => {
