@@ -116,8 +116,10 @@ wrote it.
 ### Context
 
 By default the active note and any selected text are attached to each message.
-The active note is the Markdown note you last focused in any window, so it
-stays attached while you type in the sidebar or have a Canvas or PDF open.
+A selection is attached once: if it is still selected at the next message its
+chip is no longer highlighted, and clicking it sends it again. The active
+note is the Markdown note you last focused in any window, so it stays attached
+while you type in the sidebar or have a Canvas or PDF open.
 Toggle them per message in the sidebar, or attach other notes with
 **Attach note…**. When a cloud provider is active the sidebar says so, and
 highlighted chips are exactly what gets sent.
@@ -131,8 +133,9 @@ Open the sidebar with the gem icon in the ribbon or the command
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
   The model reads the note, proposes a change, and a card with the diff
   appears. Select **Approve** to apply or **Reject** to discard.
-- If you edit the note yourself after a proposal was made, approval is blocked
-  and the card says the proposal is out of date. Ask again.
+- If you edit the note yourself after a proposal was made, the card switches
+  to out of date and approval is blocked; undoing your edit makes it
+  approvable again. Otherwise ask again.
 - **Revert** on an applied edit restores the snapshot taken before it was
   applied. It is refused if the note changed after the edit was applied, so
   later edits are never overwritten. Snapshots are kept under the plugin
@@ -144,9 +147,9 @@ Open the sidebar with the gem icon in the ribbon or the command
   red when a request fails because the provider is unreachable or refuses the
   request, and is re-checked every time you send.
 
-Token counts reported by the provider are shown under each reply and as a
-conversation total. These are counts, not bills. The optional usage warning is
-a reminder, not a spending limit.
+Token counts reported by the provider are shown under each reply, summed over
+every tool round of that turn, and as a conversation total. These are counts,
+not bills. The optional usage warning is a reminder, not a spending limit.
 
 ## What works
 
