@@ -232,6 +232,7 @@ button.dg-chip {
 }
 
 .dg-proposal[data-status='rejected'],
+.dg-proposal[data-status='reverted'],
 .dg-proposal[data-status='failed'] {
 	border-left-color: var(--text-faint);
 	opacity: 0.8;
