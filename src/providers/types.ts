@@ -189,6 +189,18 @@ export function toProviderError(err: unknown): ProviderError {
 	return new ProviderError('unknown', String(err));
 }
 
+/**
+ * Plain-text stand-ins for tool history, for requests that declare no tools:
+ * Anthropic rejects tool blocks then, and Gemini gets the same treatment.
+ */
+export function toolCallText(call: ToolCall): string {
+	return `[Called tool ${call.name} with ${call.argumentsJson || '{}'}]`;
+}
+
+export function toolResultText(m: ChatMessage): string {
+	return `[Result of tool ${m.toolName ?? 'unknown'}]\n${m.content}`;
+}
+
 /** Map an HTTP status plus the error body to a ProviderError. */
 export function errorFromStatus(status: number, bodyText: string): ProviderError {
 	const detail = extractErrorMessage(bodyText);

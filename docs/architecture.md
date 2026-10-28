@@ -98,7 +98,9 @@ is surfaced as an error.
 Conversations are provider-neutral (`ChatMessage`), so switching providers
 replays the whole history, including tool calls another provider made. The one
 piece of provider state kept on a message is `ToolCall.signature` (Gemini's
-thought signature); other adapters ignore it.
+thought signature); other adapters ignore it. When a request declares no tools
+(vault tools turned off), the Anthropic and Gemini adapters replay earlier tool
+calls and results as plain text, since Anthropic rejects tool blocks then.
 
 Adapters depend on an `HttpClient` rather than `fetch` directly. The streaming
 client uses `fetch`; the fallback wraps Obsidian's `requestUrl` (no CORS

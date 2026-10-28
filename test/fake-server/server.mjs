@@ -276,7 +276,7 @@ async function openaiChat(res, body) {
 // ------------------------------------------------------------------ anthropic
 
 /** Validate like the Messages API does and flatten to plan()'s message shape. */
-function anthropicToPlan(body) {
+function anthropicToPlan(body, hasTools) {
 	if (typeof body.max_tokens !== 'number') return { error: 'max_tokens: Field required' };
 	if (body.messages?.some((m) => m.role === 'system')) return { error: 'messages: Unexpected role "system". Use the top-level system parameter.' };
 	const out = [];
@@ -295,14 +295,16 @@ function anthropicToPlan(body) {
 		const toolCalls = [];
 		for (const b of blocks) {
 			if (b.type === 'text') {
-				if (!b.text) return { error: `messages.${i}: text content blocks must be non-empty` };
+				if (!b.text?.trim()) return { error: `messages.${i}: text content blocks must contain non-whitespace text` };
 				sawNonResult = true;
 				text.push(b.text);
 			} else if (b.type === 'tool_use') {
+				if (!hasTools) return { error: 'Requests which include `tool_use` or `tool_result` blocks must define tools.' };
 				if (!/^[a-zA-Z0-9_-]+$/.test(b.id ?? '')) return { error: `messages.${i}: tool_use.id: String should match pattern` };
 				toolUseIds.add(b.id);
 				toolCalls.push({ id: b.id, name: b.name, args: b.input });
 			} else if (b.type === 'tool_result') {
+				if (!hasTools) return { error: 'Requests which include `tool_use` or `tool_result` blocks must define tools.' };
 				if (msg.role !== 'user') return { error: `messages.${i}: tool_result only allowed in user messages` };
 				if (sawNonResult) return { error: `messages.${i}: tool_result blocks must come first` };
 				if (!prevToolUseIds.has(b.tool_use_id)) return { error: `messages.${i}: unexpected tool_use_id found in tool_result blocks: ${b.tool_use_id}` };
@@ -325,9 +327,9 @@ async function anthropicChat(res, body) {
 	const b = modelBehaviour(body.model);
 	if (b.status === 429) return json(res, 429, { type: 'error', error: { type: 'rate_limit_error', message: 'Number of request tokens has exceeded your rate limit' } });
 	if (b.status === 500) return json(res, 529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } });
-	const flat = anthropicToPlan(body);
-	if (flat.error) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: flat.error } });
 	const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+	const flat = anthropicToPlan(body, hasTools);
+	if (flat.error) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: flat.error } });
 	if (hasTools && body.tools.some((t) => !t.input_schema)) return json(res, 400, { type: 'error', error: { type: 'invalid_request_error', message: 'tools.0.input_schema: Field required' } });
 	const p = plan(flat.messages, hasTools);
 	const id = `msg_fake_${Date.now()}`;

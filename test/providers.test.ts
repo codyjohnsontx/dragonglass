@@ -291,19 +291,19 @@ describe('AnthropicProvider streaming specifics', () => {
 });
 
 describe('toAnthropicMessages', () => {
-	it('merges tool results into one user turn, drops empty turns, and sanitizes foreign ids', () => {
+	it('merges tool results into one user turn, drops blank text, and sanitizes foreign ids', () => {
 		const { system, messages } = toAnthropicMessages([
 			{ role: 'system', content: 'sys' },
 			{ role: 'user', content: 'do two things' },
 			{ role: 'assistant', content: '' }, // a stopped turn with nothing to replay
-			{ role: 'assistant', content: '', toolCalls: [
+			{ role: 'assistant', content: '\n\n', toolCalls: [
 				{ id: 'call.1', name: 'list_files', argumentsJson: '{}' },
 				{ id: 'call.2', name: 'read_note', argumentsJson: 'not json' },
 			] },
 			{ role: 'tool', content: 'a', toolCallId: 'call.1', toolName: 'list_files' },
 			{ role: 'tool', content: 'b', toolCallId: 'call.2', toolName: 'read_note' },
 			{ role: 'user', content: 'thanks' },
-		]);
+		], true);
 		expect(system).toBe('sys');
 		expect(messages).toEqual([
 			{ role: 'user', content: [{ type: 'text', text: 'do two things' }] },
@@ -428,11 +428,27 @@ describe('switching providers mid-conversation', () => {
 		expect(text(await collect(p.chat({ model: 'fake-claude', messages: history, tools })))).toMatch(/^Hello/);
 	});
 
+	it('replays tool history to Anthropic as text once vault tools are off', async () => {
+		const p = new AnthropicProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/anthropic/v1`, apiKey: () => 'sk-ant-fake', maxTokens: 1024 }));
+		expect(text(await collect(p.chat({ model: 'fake-claude', messages: history })))).toMatch(/^Hello/);
+		const sent = fake.requests.at(-1)!.body as { messages: Array<{ role: string; content: Array<{ type: string; text?: string }> }> };
+		expect(sent.messages.flatMap((m) => m.content.map((b) => b.type))).not.toContain('tool_use');
+		expect(sent.messages[1]).toEqual({ role: 'assistant', content: [{ type: 'text', text: '[Called tool read_note with {"path":"A.md"}]' }] });
+		expect(sent.messages[2]!.content[0]!.text).toContain('[Result of tool read_note]\n<<<note path="A.md">>>');
+	});
+
 	it('replays OpenAI tool history to Gemini with the placeholder signature', async () => {
 		const p = new GeminiProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => 'gemini-fake' }));
 		expect(text(await collect(p.chat({ model: 'fake-gemini', messages: history, tools })))).toMatch(/^Hello/);
-		const { contents } = toGeminiContents(history);
+		const { contents } = toGeminiContents(history, true);
 		expect(contents[1]!.parts[0]).toMatchObject({ thoughtSignature: 'skip_thought_signature_validator' });
+	});
+
+	it('replays tool history to Gemini as text once vault tools are off', async () => {
+		const p = new GeminiProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => 'gemini-fake' }));
+		expect(text(await collect(p.chat({ model: 'fake-gemini', messages: history })))).toMatch(/^Hello/);
+		const { contents } = toGeminiContents(history, false);
+		expect(contents.flatMap((c) => c.parts).every((part) => typeof part['text'] === 'string')).toBe(true);
 	});
 });
 

@@ -13,6 +13,8 @@ import {
 	ProviderError,
 	StreamEvent,
 	ToolCall,
+	toolCallText,
+	toolResultText,
 	toProviderError,
 	Usage,
 } from './types';
@@ -102,7 +104,7 @@ export class GeminiProvider implements Provider {
 	async *chat(request: ChatRequest): AsyncIterable<StreamEvent> {
 		const headers = this.headers();
 		const streaming = this.http.supportsStreaming;
-		const { systemInstruction, contents } = toGeminiContents(request.messages);
+		const { systemInstruction, contents } = toGeminiContents(request.messages, (request.tools?.length ?? 0) > 0);
 		const body: Record<string, unknown> = { contents };
 		if (systemInstruction) body['systemInstruction'] = systemInstruction;
 		if (request.tools && request.tools.length > 0) {
@@ -294,8 +296,9 @@ interface GeminiContent {
  * Map provider-agnostic messages to Gemini contents. System messages become
  * `systemInstruction`; tool results become `functionResponse` parts in a user
  * turn; empty text parts are dropped; adjacent same-role turns are merged.
+ * Without tools, tool history is replayed as text.
  */
-export function toGeminiContents(messages: ChatMessage[]): {
+export function toGeminiContents(messages: ChatMessage[], withTools: boolean): {
 	systemInstruction: { parts: Array<{ text: string }> } | null;
 	contents: GeminiContent[];
 } {
@@ -318,6 +321,10 @@ export function toGeminiContents(messages: ChatMessage[]): {
 			case 'assistant': {
 				const parts: GeminiOutPart[] = m.content ? [{ text: m.content }] : [];
 				for (const [i, c] of (m.toolCalls ?? []).entries()) {
+					if (!withTools) {
+						parts.push({ text: toolCallText(c) });
+						continue;
+					}
 					const part: GeminiOutPart = { functionCall: { name: c.name, args: parseArgs(c.argumentsJson) } };
 					// Only the first call of a step carries Gemini's signature; a call
 					// from another provider gets the documented placeholder instead.
@@ -329,7 +336,7 @@ export function toGeminiContents(messages: ChatMessage[]): {
 				break;
 			}
 			case 'tool':
-				push('user', [{ functionResponse: { name: m.toolName ?? '', response: { result: m.content } } }]);
+				push('user', [withTools ? { functionResponse: { name: m.toolName ?? '', response: { result: m.content } } } : { text: toolResultText(m) }]);
 				break;
 		}
 	}

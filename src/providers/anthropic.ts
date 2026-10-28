@@ -12,6 +12,8 @@ import {
 	ProviderErrorKind,
 	StreamEvent,
 	ToolCall,
+	toolCallText,
+	toolResultText,
 	toProviderError,
 	Usage,
 } from './types';
@@ -101,7 +103,7 @@ export class AnthropicProvider implements Provider {
 	async *chat(request: ChatRequest): AsyncIterable<StreamEvent> {
 		const headers = this.headers();
 		const streaming = this.http.supportsStreaming;
-		const { system, messages } = toAnthropicMessages(request.messages);
+		const { system, messages } = toAnthropicMessages(request.messages, (request.tools?.length ?? 0) > 0);
 		const body: Record<string, unknown> = {
 			model: request.model,
 			max_tokens: this.config().maxTokens,
@@ -284,10 +286,12 @@ interface AnthropicTurn {
 
 /**
  * Map provider-agnostic messages to Anthropic turns. System messages are
- * lifted out; tool results join the following user turn; empty text blocks
+ * lifted out; tool results join the following user turn; blank text blocks
  * (which the API rejects) are dropped; adjacent same-role turns are merged.
+ * Without tools, tool history is replayed as text because the API rejects
+ * tool blocks in a request that declares no tools.
  */
-export function toAnthropicMessages(messages: ChatMessage[]): { system: string; messages: AnthropicTurn[] } {
+export function toAnthropicMessages(messages: ChatMessage[], withTools: boolean): { system: string; messages: AnthropicTurn[] } {
 	const system: string[] = [];
 	const turns: AnthropicTurn[] = [];
 	const push = (role: AnthropicTurn['role'], blocks: AnthropicBlock[]) => {
@@ -296,24 +300,27 @@ export function toAnthropicMessages(messages: ChatMessage[]): { system: string; 
 		if (last && last.role === role) last.content.push(...blocks);
 		else turns.push({ role, content: blocks });
 	};
+	const text = (s: string): AnthropicBlock[] => (s.trim() ? [{ type: 'text', text: s }] : []);
 	for (const m of messages) {
 		switch (m.role) {
 			case 'system':
 				if (m.content) system.push(m.content);
 				break;
 			case 'user':
-				push('user', m.content ? [{ type: 'text', text: m.content }] : []);
+				push('user', text(m.content));
 				break;
 			case 'assistant': {
-				const blocks: AnthropicBlock[] = m.content ? [{ type: 'text', text: m.content }] : [];
+				const blocks = text(m.content);
 				for (const c of m.toolCalls ?? []) {
-					blocks.push({ type: 'tool_use', id: toolUseId(c.id), name: c.name, input: parseArgs(c.argumentsJson) });
+					if (withTools) blocks.push({ type: 'tool_use', id: toolUseId(c.id), name: c.name, input: parseArgs(c.argumentsJson) });
+					else blocks.push(...text(toolCallText(c)));
 				}
 				push('assistant', blocks);
 				break;
 			}
 			case 'tool':
-				push('user', [{ type: 'tool_result', tool_use_id: toolUseId(m.toolCallId ?? ''), content: m.content }]);
+				if (withTools) push('user', [{ type: 'tool_result', tool_use_id: toolUseId(m.toolCallId ?? ''), content: m.content }]);
+				else push('user', text(toolResultText(m)));
 				break;
 		}
 	}
