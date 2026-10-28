@@ -22,8 +22,11 @@ the only test dependency.
 
 Obsidian's `requestUrl` bypasses CORS but returns whole bodies, so it cannot
 stream. Streaming matters for a chat UI, so the default transport is `fetch`.
-Ollama allows the `app://` origin by default and OpenAI sends permissive CORS
-headers, so this works out of the box. Users behind a stricter Ollama config
+Ollama allows the `app://` origin by default and OpenAI and Gemini send
+permissive CORS headers, so this works out of the box. Anthropic allows
+browser-origin requests only with the `anthropic-dangerous-direct-browser-access`
+header; the plugin sends it because the key is the user's own and never
+leaves their machine except to Anthropic. Users behind a stricter Ollama config
 can switch to the `requestUrl` transport in settings and lose streaming only.
 
 ## 4. Secrets in Obsidian SecretStorage
@@ -72,6 +75,24 @@ that would go stale.
 ## 10. Fake provider server for tests and in-app checks
 
 Adapters are tested over real HTTP against a small Node server that speaks the
-Ollama and OpenAI wire formats with scripted behaviour. The same server backs
+Ollama, OpenAI, Anthropic and Gemini wire formats with scripted behaviour, and
+rejects the request shapes the real Anthropic and Gemini APIs reject. The same server backs
 the in-app end-to-end check, so the chat, tool loop, diff and apply path were
 exercised in a real Obsidian instance without a live model.
+
+## 11. Provider differences live in adapters, history stays neutral
+
+Anthropic and Gemini were added without changing the runtime or the stored
+conversation format. Each adapter converts the neutral `ChatMessage` history
+to its wire format on every request (merging turns, moving the system prompt,
+sanitizing foreign tool-call ids, stripping unsupported schema keys), so a
+conversation can move between providers at any point. The only provider state
+stored on a message is Gemini's thought signature on `ToolCall.signature`;
+for tool calls another provider made, the Gemini adapter sends Google's
+documented placeholder signature (`skip_thought_signature_validator`).
+
+## 12. Anthropic output cap is a setting
+
+The Messages API requires `max_tokens` on every request and the right value
+depends on the model. It is a user setting (default 8192) rather than a
+hardcoded per-model table that would go stale. Gemini and OpenAI need no cap.

@@ -11,7 +11,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 ## Testing
 
 - Unit tests run in Node with `obsidian` aliased to `test/obsidian-stub.ts` (see `vitest.config.ts`); keep Obsidian-API code in `src/vault/obsidian-port.ts`, `src/providers/obsidian-http.ts` and `src/ui/` so everything else stays testable against `test/memory-vault.ts`.
-- Adapter tests hit `test/fake-server/server.mjs` over real HTTP; it scripts both the Ollama and OpenAI wire formats and must send CORS headers or in-app fetch from the `app://obsidian.md` origin fails.
+- Adapter tests hit `test/fake-server/server.mjs` over real HTTP; it scripts the Ollama, OpenAI, Anthropic and Gemini wire formats (keys in its header comment) and must send CORS headers or in-app fetch from the `app://obsidian.md` origin fails.
 - In-app check without a real model: build, run the fake server, `node scripts/e2e-vault.mjs <dir>`, launch Obsidian with `--user-data-dir=<dir>/userdata --remote-debugging-port=9333`, then drive it with `CHROME_DEVTOOLS_AXI_BROWSER_URL=http://127.0.0.1:9333 chrome-devtools-axi selectpage 1` and `eval`. A fresh vault opens in Restricted mode; `await app.plugins.setEnable(true); await app.plugins.enablePluginAndSave('dragonglass-ai')` clears it. The settings modal does not appear in devtools screenshots; verify settings via DOM queries on `app.setting.activeTab.containerEl`.
 
 ## Sharp edges

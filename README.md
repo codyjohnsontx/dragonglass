@@ -5,9 +5,9 @@ agentic assistant that lives in a sidebar, understands your vault as a linked
 knowledge base, and proposes every change as a diff you approve before it is
 written.
 
-- **Bring your own model.** Local models through Ollama, or OpenAI with your
-  own API key. Anthropic, Gemini and custom OpenAI-compatible endpoints are
-  next on the [roadmap](docs/roadmap.md). No subscription, no account, no
+- **Bring your own model.** Local models through Ollama, or OpenAI, Anthropic
+  or Google Gemini with your own API key. Custom OpenAI-compatible endpoints
+  are next on the [roadmap](docs/roadmap.md). No subscription, no account, no
   proxy; cloud usage is billed to you by the provider.
 - **Local-first and private.** Nothing leaves your machine except the message
   you type, the context you choose to attach, and the results of the tools
@@ -63,6 +63,35 @@ rejection, retries without tools, and tells you.
    never in plugin files or notes.
 2. Enter a model such as `gpt-4o-mini` and select **Test OpenAI connection**.
 
+### Anthropic
+
+1. In the **Anthropic** group, create a keychain secret holding your Anthropic
+   API key (from the Anthropic Console). It is sent only to Anthropic.
+2. Enter a model such as `claude-sonnet-4-5`, or pick one from the model menu
+   in the sidebar once the key works, and select **Test Anthropic connection**.
+3. **Max output tokens** caps each reply (Anthropic requires a cap). Raise it
+   if long answers or drafted notes are cut off.
+
+Anthropic only accepts requests from a browser context such as Obsidian's when
+the client opts in, so the plugin sends the
+`anthropic-dangerous-direct-browser-access` header. Your key still goes only
+from your machine to Anthropic.
+
+### Google Gemini
+
+1. In the **Google Gemini** group, create a keychain secret holding a Gemini
+   API key from Google AI Studio. It is sent only to Google, in a request
+   header rather than the URL.
+2. Enter a model such as `gemini-2.5-flash`, or pick one from the sidebar model
+   menu, and select **Test Gemini connection**.
+
+### Switching providers
+
+Switch providers from the sidebar at any time. The conversation stays as it
+is, including earlier tool calls, and the next message goes to the new
+provider with the whole history. Each reply is labelled with the model that
+wrote it.
+
 ### Context
 
 By default the active note and any selected text are attached to each message.
@@ -97,14 +126,16 @@ a reminder, not a spending limit.
 
 ## What works
 
-Verified by automated tests against a fake Ollama/OpenAI server and by driving
+Verified by automated tests against a fake provider server and by driving
 a real Obsidian 1.14.5 instance with the plugin installed in a disposable
 vault:
 
 - Plugin loads, sidebar opens, settings tab renders.
-- Streaming chat over the Ollama wire format and the OpenAI wire format,
+- Streaming chat over the Ollama, OpenAI, Anthropic and Gemini wire formats,
   including tool calls, tool results, usage, cancellation, and error mapping
   (bad key, rate limit, server error, unreachable server, model without tools).
+- Switching providers mid-conversation, including replaying tool calls made
+  by one provider to another.
 - Read tools: list, read, search, metadata with links and backlinks, active
   note and selection.
 - Edit flow end to end: ask for a change, model reads the note, proposes a
@@ -113,14 +144,14 @@ vault:
 - Stale detection: a note edited after the proposal cannot be approved.
 - Conversation history persists across plugin reload.
 
-Not yet verified live: a real Ollama model and a real OpenAI key were not
-available on the build machine. The wire formats are tested against recorded
-shapes from the official API documentation. To verify live:
+Not yet verified live: a real Ollama model and real OpenAI, Anthropic and
+Gemini keys were not available on the build machine. The wire formats are
+tested against shapes from the official API documentation. To verify live:
 
 1. Run Ollama with a tool-capable model and set it in settings; or add an
-   OpenAI key in the keychain.
+   OpenAI, Anthropic or Gemini key in the keychain.
 2. Select **Test … connection**: it should report the Ollama version or the
-   number of OpenAI models.
+   number of models your key can use.
 3. In a scratch vault, create `Projects/Launch.md` containing
    `Launch date: November 1.` and send
    "Change the launch date in Projects/Launch.md to November 15".
@@ -128,8 +159,7 @@ shapes from the official API documentation. To verify live:
 
 ## Known limitations
 
-- Only Ollama and OpenAI are implemented. Anthropic, Gemini and custom
-  endpoints are designed for but not built.
+- Custom OpenAI-compatible endpoints are designed for but not built.
 - One proposal per card; multi-file changes are reviewed one card at a time.
 - No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
   yet.
@@ -153,7 +183,7 @@ For a disposable in-app check without a real model:
 
 ```sh
 npm run build
-node test/fake-server/server.mjs 11435 &   # fake Ollama + OpenAI on :11435
+node test/fake-server/server.mjs 11435 &   # fake Ollama, OpenAI, Anthropic, Gemini on :11435
 node scripts/e2e-vault.mjs .e2e            # builds .e2e/vault and .e2e/userdata
 /Applications/Obsidian.app/Contents/MacOS/Obsidian \
   --user-data-dir="$PWD/.e2e/userdata" --remote-debugging-port=9333
@@ -162,8 +192,9 @@ node scripts/e2e-vault.mjs .e2e            # builds .e2e/vault and .e2e/userdata
 The isolated user-data directory means this Obsidian instance never sees your
 real vaults or settings. The fake server answers scripted prompts such as
 `hello`, `read Projects/Launch.md`, and
-`edit Projects/Launch.md replace "November 1" with "November 15"`; the OpenAI
-side accepts the key `sk-fake`.
+`edit Projects/Launch.md replace "November 1" with "November 15"`. Cloud
+providers need a keychain secret holding the fake key: `sk-fake` for OpenAI,
+`sk-ant-fake` for Anthropic, `gemini-fake` for Gemini.
 
 Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 [decision record](docs/decisions.md).

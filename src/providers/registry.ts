@@ -1,4 +1,6 @@
 import { DragonglassSettings } from '../settings';
+import { AnthropicProvider } from './anthropic';
+import { GeminiProvider } from './gemini';
 import { HttpClient } from './http';
 import { OllamaProvider } from './ollama';
 import { OpenAIProvider } from './openai';
@@ -24,18 +26,28 @@ export function createProviders(
 		request: (req) => http().request(req),
 		stream: (req) => http().stream(req),
 	};
+	// Each cloud provider reads only its own secret, so a key is never sent to
+	// another provider.
+	const keyFor = (id: 'openai' | 'anthropic' | 'gemini') => () => {
+		const secretId = settings()[id].apiKeySecretId;
+		return secretId ? secrets.getSecret(secretId) : null;
+	};
 	return {
 		ollama: new OllamaProvider(lazyHttp, () => ({ baseUrl: settings().ollama.baseUrl })),
-		openai: new OpenAIProvider(lazyHttp, () => ({
-			baseUrl: settings().openai.baseUrl,
-			apiKey: () => {
-				const id = settings().openai.apiKeySecretId;
-				return id ? secrets.getSecret(id) : null;
-			},
+		openai: new OpenAIProvider(lazyHttp, () => ({ baseUrl: settings().openai.baseUrl, apiKey: keyFor('openai') })),
+		anthropic: new AnthropicProvider(lazyHttp, () => ({
+			baseUrl: settings().anthropic.baseUrl,
+			apiKey: keyFor('anthropic'),
+			maxTokens: settings().anthropic.maxTokens,
 		})),
+		gemini: new GeminiProvider(lazyHttp, () => ({ baseUrl: settings().gemini.baseUrl, apiKey: keyFor('gemini') })),
 	};
 }
 
 export function modelFor(settings: DragonglassSettings, id: ProviderId): string {
-	return id === 'ollama' ? settings.ollama.model : settings.openai.model;
+	return settings[id].model;
+}
+
+export function setModelFor(settings: DragonglassSettings, id: ProviderId, model: string): void {
+	settings[id].model = model;
 }

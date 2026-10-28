@@ -1,5 +1,6 @@
 import { App, Notice, PluginSettingTab, SettingDefinitionItem } from 'obsidian';
 import type DragonglassPlugin from '../main';
+import { ProviderId } from '../providers/types';
 import { DragonglassSettings } from '../settings';
 
 /**
@@ -32,7 +33,12 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				control: {
 					type: 'dropdown',
 					key: 'activeProvider',
-					options: { ollama: 'Ollama (local)', openai: 'OpenAI (cloud, billed to your account)' },
+					options: {
+						ollama: 'Ollama (local)',
+						openai: 'OpenAI (cloud, billed to your account)',
+						anthropic: 'Anthropic (cloud, billed to your account)',
+						gemini: 'Google Gemini (cloud, billed to your account)',
+					},
 				},
 			},
 			{
@@ -79,6 +85,53 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						name: 'Test OpenAI connection',
 						desc: 'Lists models with your key. Makes one small request to OpenAI.',
 						action: () => void this.test('openai'),
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Anthropic',
+				items: [
+					{
+						name: 'API key',
+						desc: 'Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to Anthropic.',
+						control: { type: 'secret', key: 'anthropic.apiKeySecretId' },
+					},
+					{
+						name: 'Model',
+						desc: 'For example claude-sonnet-4-5 or claude-haiku-4-5. The chat sidebar lists the models your key can use.',
+						control: { type: 'text', key: 'anthropic.model', placeholder: 'claude-sonnet-4-5' },
+					},
+					{
+						name: 'Max output tokens',
+						desc: 'Anthropic requires a cap on each reply. Raise it if long answers or note drafts get cut off; it must not exceed what the model allows.',
+						control: { type: 'number', key: 'anthropic.maxTokens', min: 256, max: 128000, step: 256 },
+					},
+					{
+						name: 'Test Anthropic connection',
+						desc: 'Lists models with your key. Makes one small request to Anthropic.',
+						action: () => void this.test('anthropic'),
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Google Gemini',
+				items: [
+					{
+						name: 'API key',
+						desc: 'A Gemini API key from Google AI Studio. Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to Google.',
+						control: { type: 'secret', key: 'gemini.apiKeySecretId' },
+					},
+					{
+						name: 'Model',
+						desc: 'For example gemini-2.5-flash or gemini-2.5-pro. The chat sidebar lists the models your key can use.',
+						control: { type: 'text', key: 'gemini.model', placeholder: 'gemini-2.5-flash' },
+					},
+					{
+						name: 'Test Gemini connection',
+						desc: 'Lists models with your key. Makes one small request to Google.',
+						action: () => void this.test('gemini'),
 					},
 				],
 			},
@@ -161,7 +214,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 		];
 	}
 
-	private async test(id: 'ollama' | 'openai'): Promise<void> {
+	private async test(id: ProviderId): Promise<void> {
 		const status = await this.plugin.core.checkConnection(id);
 		new Notice(status.ok ? `Connected: ${status.detail}` : status.error.userMessage(), 8000);
 	}

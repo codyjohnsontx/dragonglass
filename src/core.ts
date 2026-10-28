@@ -6,7 +6,7 @@ import { Conversation, deriveTitle, StoredMessage } from './persistence/conversa
 import { ConversationStore } from './persistence/store';
 import { FetchHttpClient, HttpClient } from './providers/http';
 import { createRequestUrlClient } from './providers/obsidian-http';
-import { createProviders, modelFor } from './providers/registry';
+import { createProviders, modelFor, setModelFor } from './providers/registry';
 import { ConnectionStatus, ModelInfo, Provider, ProviderError, ProviderId, Usage } from './providers/types';
 import { DragonglassSettings } from './settings';
 import { createVaultTools } from './tools/vault-tools';
@@ -79,8 +79,7 @@ export class DragonglassCore {
 	}
 
 	async setActiveModel(model: string): Promise<void> {
-		if (this.settings.activeProvider === 'ollama') this.settings.ollama.model = model;
-		else this.settings.openai.model = model;
+		setModelFor(this.settings, this.settings.activeProvider, model);
 		await this.saveSettings();
 	}
 
