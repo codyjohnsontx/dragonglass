@@ -68,6 +68,8 @@ export class ChatView extends ItemView {
 		await this.openConversation(this.core.getSettings().lastConversationId);
 		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.renderContextBar()));
 		this.registerEvent(this.app.workspace.on('file-open', () => this.renderContextBar()));
+		// Closing the tracked note's tab or popout fires neither event above.
+		this.registerEvent(this.app.workspace.on('layout-change', () => this.renderContextBar()));
 		await this.renderHeader();
 		void this.refreshStatus();
 	}
