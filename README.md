@@ -66,6 +66,8 @@ rejection, retries without tools, and tells you.
 ### Context
 
 By default the active note and any selected text are attached to each message.
+The active note is the Markdown note you last focused in any window, so it
+stays attached while you type in the sidebar or have a Canvas or PDF open.
 Toggle them per message in the sidebar, or attach other notes with
 **Attach note…**. When a cloud provider is active the sidebar says so, and
 highlighted chips are exactly what gets sent.
