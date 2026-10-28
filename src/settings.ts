@@ -5,6 +5,14 @@ export type Transport = 'fetch' | 'requestUrl';
 export interface OllamaSettings {
 	baseUrl: string;
 	model: string;
+	/**
+	 * Context window requested from Ollama (`options.num_ctx`). Ollama's own
+	 * default is 4096, which one note read overflows; the server then cuts the
+	 * prompt silently. Capped at what the model supports.
+	 */
+	numCtx: number;
+	/** Let thinking models (qwen3, deepseek-r1) reason before answering. Off sends `think: false`. */
+	think: boolean;
 }
 
 export interface OpenAISettings {
@@ -52,9 +60,12 @@ export interface DragonglassSettings {
 	lastConversationId: string | null;
 }
 
+/** Smallest context Ollama is asked for; below this even the system prompt and tool schemas do not fit. */
+export const MIN_NUM_CTX = 2048;
+
 export const DEFAULT_SETTINGS: DragonglassSettings = {
 	activeProvider: 'ollama',
-	ollama: { baseUrl: 'http://127.0.0.1:11434', model: '' },
+	ollama: { baseUrl: 'http://127.0.0.1:11434', model: '', numCtx: 16_384, think: true },
 	openai: { apiKeySecretId: '', model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
 	anthropic: { apiKeySecretId: '', model: 'claude-sonnet-4-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 8192 },
 	gemini: { apiKeySecretId: '', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
@@ -79,6 +90,9 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 	if (ollama && typeof ollama === 'object') {
 		if (typeof ollama['baseUrl'] === 'string') out.ollama.baseUrl = ollama['baseUrl'];
 		if (typeof ollama['model'] === 'string') out.ollama.model = ollama['model'];
+		const numCtx = ollama['numCtx'];
+		if (typeof numCtx === 'number' && Number.isInteger(numCtx) && numCtx >= MIN_NUM_CTX) out.ollama.numCtx = numCtx;
+		if (typeof ollama['think'] === 'boolean') out.ollama.think = ollama['think'];
 	}
 	for (const id of ['openai', 'anthropic', 'gemini'] as const) {
 		const cloud = r[id] as Record<string, unknown> | undefined;

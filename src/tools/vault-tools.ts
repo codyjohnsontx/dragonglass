@@ -18,17 +18,22 @@ export interface VaultToolOptions {
 
 export const DEFAULT_TOOL_OPTIONS: VaultToolOptions = { maxReadChars: 24_000, maxSearchResults: 20 };
 
+/**
+ * Tools read their options on every call so a settings change, or a provider
+ * with a smaller context window, takes effect without re-registering.
+ */
 export function createVaultTools(
 	vault: VaultPort,
 	proposals: ProposalEngine,
-	options: VaultToolOptions = DEFAULT_TOOL_OPTIONS,
+	options: VaultToolOptions | (() => VaultToolOptions) = DEFAULT_TOOL_OPTIONS,
 ): AgentTool[] {
+	const opts = typeof options === 'function' ? options : () => options;
 	return [
 		listFilesTool(vault),
-		readNoteTool(vault, options),
-		searchNotesTool(vault, options),
+		readNoteTool(vault, opts),
+		searchNotesTool(vault, opts),
 		getNoteMetadataTool(vault),
-		getActiveNoteTool(vault, options),
+		getActiveNoteTool(vault, opts),
 		proposeCreateNoteTool(proposals),
 		proposeEditNoteTool(proposals),
 	];
@@ -86,7 +91,7 @@ function listFilesTool(vault: VaultPort): AgentTool {
 	};
 }
 
-function readNoteTool(vault: VaultPort, options: VaultToolOptions): AgentTool {
+function readNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
 	return {
 		name: 'read_note',
 		description:
@@ -104,7 +109,7 @@ function readNoteTool(vault: VaultPort, options: VaultToolOptions): AgentTool {
 				const path = validateVaultPath(args['path'], { configDir: vault.configDir });
 				const content = await vault.readNote(path);
 				if (content === null) return fail(`Error: no note at ${path}. Use list_files or search_notes to find the right path.`);
-				return ok(formatNote(path, content, options.maxReadChars));
+				return ok(formatNote(path, content, options().maxReadChars));
 			} catch (e) {
 				return wrapError(e);
 			}
@@ -112,7 +117,7 @@ function readNoteTool(vault: VaultPort, options: VaultToolOptions): AgentTool {
 	};
 }
 
-function searchNotesTool(vault: VaultPort, options: VaultToolOptions): AgentTool {
+function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
 	return {
 		name: 'search_notes',
 		description:
@@ -132,7 +137,7 @@ function searchNotesTool(vault: VaultPort, options: VaultToolOptions): AgentTool
 				const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
 				if (!query) return fail('Error: query must not be empty.');
 				const folder = validateVaultPath(args['folder'] ?? '', { markdown: false, allowRoot: true, configDir: vault.configDir });
-				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : options.maxSearchResults, 100);
+				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : options().maxSearchResults, 100);
 				const results = await searchVault(vault, query, folder, limit);
 				if (results.length === 0) return ok(`No notes matched "${query}".`);
 				return ok(results.map((r) => `${r.path} (score ${r.score})\n  ${r.excerpt}`).join('\n'));
@@ -225,7 +230,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 	};
 }
 
-function getActiveNoteTool(vault: VaultPort, options: VaultToolOptions): AgentTool {
+function getActiveNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
 	return {
 		name: 'get_active_note',
 		description: 'Read the note the user currently has open in Obsidian, plus any selected text.',
@@ -235,7 +240,7 @@ function getActiveNoteTool(vault: VaultPort, options: VaultToolOptions): AgentTo
 			const ctx = vault.getActiveContext();
 			if (!ctx.path) return ok('No note is currently open.');
 			const content = await vault.readNote(ctx.path);
-			const body = formatNote(ctx.path, content ?? '', options.maxReadChars);
+			const body = formatNote(ctx.path, content ?? '', options().maxReadChars);
 			const sel = ctx.selection ? `\n\nSelected text:\n<<<selection>>>\n${ctx.selection}\n<<<end selection>>>` : '';
 			return ok(body + sel);
 		},

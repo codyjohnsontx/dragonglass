@@ -75,14 +75,24 @@ export interface ChatRequest {
 export interface Usage {
 	inputTokens?: number;
 	outputTokens?: number;
+	/**
+	 * Tokens the model spent on hidden reasoning. They are included in
+	 * `outputTokens`. Providers that do not report the split estimate it from
+	 * the streamed reasoning text (Ollama).
+	 */
+	reasoningTokens?: number;
 }
 
 export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'other';
 
 export type StreamEvent =
 	| { type: 'text'; delta: string }
+	/** Hidden reasoning from a thinking model. Shown to the user, never sent back. */
+	| { type: 'thinking'; delta: string }
 	| { type: 'tool_call'; call: ToolCall }
 	| { type: 'usage'; usage: Usage }
+	/** Something the user must know about this turn, such as a truncated prompt. */
+	| { type: 'warning'; message: string }
 	| { type: 'done'; finishReason: FinishReason };
 
 /**
@@ -118,6 +128,11 @@ export interface Provider {
 	listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
 	checkConnection(signal?: AbortSignal): Promise<ConnectionStatus>;
 	chat(request: ChatRequest): AsyncIterable<StreamEvent>;
+	/**
+	 * Tokens of prompt plus reply the provider will accept for `model`, when
+	 * the adapter knows it. Callers size note content to fit.
+	 */
+	contextWindow?(model: string, signal?: AbortSignal): Promise<number | undefined>;
 }
 
 export type ProviderErrorKind =

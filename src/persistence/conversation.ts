@@ -30,6 +30,10 @@ export interface StoredMessage {
 	isError?: boolean;
 	proposalId?: string;
 	usage?: Usage;
+	/** Reasoning a thinking model streamed before the answer. Shown collapsed, never replayed. */
+	thinking?: string;
+	/** Provider warnings for this turn, for example a prompt cut to fit the context window. */
+	warnings?: string[];
 	/** Provider + model that produced an assistant message. */
 	provider?: string;
 	model?: string;

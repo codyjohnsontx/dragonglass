@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt, formatContextBlock, toProviderMessages } from '../src/agent/context';
+import { buildSystemPrompt, formatContextBlock, noteCharBudget, toProviderMessages } from '../src/agent/context';
 import { StoredMessage } from '../src/persistence/conversation';
 
 describe('context building', () => {
@@ -22,6 +22,15 @@ describe('context building', () => {
 		expect(block).toContain('[truncated: showing 10 of 50 characters]');
 		expect(block).toContain('<<<selection from="A.md">>>\nsel\n<<<end selection>>>');
 		expect(formatContextBlock([], 10)).toBe('');
+	});
+
+	it('lowers the note cap when the context window is small', () => {
+		expect(noteCharBudget(20_000, undefined)).toBe(20_000);
+		expect(noteCharBudget(20_000, 16_384)).toBe(20_000); // 26,214 chars would fit; the user's cap wins
+		expect(noteCharBudget(20_000, 4096)).toBe(6553);
+		expect(noteCharBudget(20_000, 1024)).toBe(1638);
+		expect(noteCharBudget(20_000, 100)).toBe(1000); // never below a useful minimum
+		expect(noteCharBudget(5000, 40_960)).toBe(5000);
 	});
 
 	it('prepends context only to the latest user turn and drops failed turns', () => {

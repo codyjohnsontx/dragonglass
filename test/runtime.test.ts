@@ -65,6 +65,27 @@ describe('runAgent', () => {
 		expect(p.requests[0]?.tools?.map((t) => t.name)).toEqual(['echo']);
 	});
 
+	it('passes thinking and warnings through and keeps both on the finished turn', async () => {
+		const p = scripted([
+			[
+				{ type: 'thinking', delta: 'hmm ' },
+				{ type: 'thinking', delta: 'ok' },
+				{ type: 'text', delta: 'Hi' },
+				{ type: 'warning', message: 'prompt was cut' },
+				{ type: 'usage', usage: { inputTokens: 2050, outputTokens: 20, reasoningTokens: 15 } },
+				{ type: 'done', finishReason: 'stop' },
+			],
+		]);
+		const events = await collect(run(p));
+		expect(events.map((e) => e.type)).toEqual(['assistant_start', 'thinking_delta', 'thinking_delta', 'text_delta', 'warning', 'assistant_end']);
+		const end = events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>;
+		expect(end).toMatchObject({ content: 'Hi', thinking: 'hmm ok', warnings: ['prompt was cut'], usage: { reasoningTokens: 15 } });
+		// Thinking is shown to the user but never replayed to the model.
+		const added: unknown[] = [];
+		await collect(run(scripted([[{ type: 'thinking', delta: 'x' }, { type: 'done', finishReason: 'stop' }]]), { onMessages: (m) => added.push(...m) }));
+		expect(added).toEqual([{ role: 'assistant', content: '', toolCalls: undefined }]);
+	});
+
 	it('executes tool calls and feeds results back', async () => {
 		const p = scripted([
 			[{ type: 'tool_call', call: { id: 'c1', name: 'echo', argumentsJson: '{"text":"x"}' } }, { type: 'done', finishReason: 'tool_calls' }],

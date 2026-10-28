@@ -45,6 +45,16 @@ describe('vault tools', () => {
 		expect(r.content).toContain('[truncated: showing 10 of 100 characters]');
 	});
 
+	it('reads its options on every call so a changed cap applies at once', async () => {
+		const vault = new MemoryVaultPort({ 'Big.md': 'x'.repeat(100) });
+		const registry = new ToolRegistry();
+		let maxReadChars = 100;
+		for (const t of createVaultTools(vault, new ProposalEngine(vault), () => ({ maxReadChars, maxSearchResults: 5 }))) registry.register(t);
+		expect((await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx)).content).not.toContain('[truncated');
+		maxReadChars = 10;
+		expect((await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx)).content).toContain('[truncated: showing 10 of 100 characters]');
+	});
+
 	it('searches names and content, ranking name hits higher', async () => {
 		const { vault, registry } = setup();
 		const hits = await searchVault(vault, 'launch', '', 10);

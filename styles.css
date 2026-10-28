@@ -115,6 +115,51 @@
 	margin-top: var(--size-2-2);
 }
 
+.dg-msg-warning {
+	color: var(--text-warning);
+	font-size: var(--font-ui-small);
+	margin-top: var(--size-2-2);
+}
+
+/* Live turn: what the model is doing before any answer text arrives. */
+.dg-live-status {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.dg-live-status svg {
+	animation: dg-spin 1.2s linear infinite;
+}
+
+@keyframes dg-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Reasoning streamed by a thinking model, collapsed by default. */
+.dg-thinking {
+	margin-bottom: var(--size-2-3);
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.dg-thinking summary {
+	cursor: pointer;
+}
+
+.dg-thinking-body {
+	margin-top: var(--size-2-2);
+	max-height: 16em;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	border-left: 2px solid var(--background-modifier-border);
+	padding-left: var(--size-4-2);
+}
+
 .dg-conv-usage {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
