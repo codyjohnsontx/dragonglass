@@ -18,6 +18,9 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 				if (leaf?.view instanceof MarkdownView) this.lastMarkdownLeaf = leaf;
 			}),
 		);
+		app.workspace.onLayoutReady(() => {
+			if (!this.lastMarkdownLeaf) this.lastMarkdownLeaf = app.workspace.getActiveViewOfType(MarkdownView)?.leaf ?? null;
+		});
 	}
 
 	listMarkdownFiles(): VaultFileInfo[] {
