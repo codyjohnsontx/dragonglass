@@ -81,6 +81,7 @@ export class ConversationStore {
 
 	/** Mark updated and schedule a debounced write. */
 	touch(conv: Conversation): void {
+		if (!this.cache.has(conv.id)) return;
 		conv.updatedAt = this.now();
 		this.touchIndex(conv);
 		const existing = this.pendingSaves.get(conv.id);

@@ -128,7 +128,6 @@ export class DragonglassCore {
 		const messages = toProviderMessages(system, conv.messages, contextBlock);
 
 		let current: StoredMessage | null = null;
-		let lastUsage: Usage | undefined;
 		const events = runAgent({
 			provider,
 			model,
@@ -153,9 +152,12 @@ export class DragonglassCore {
 						current.content = ev.content;
 						current.toolCalls = ev.toolCalls.length ? ev.toolCalls : undefined;
 						current.usage = ev.usage;
-						lastUsage = ev.usage;
 					}
 					this.store.touch(conv);
+					break;
+				case 'tools_disabled':
+					if (current) conv.messages.splice(conv.messages.indexOf(current), 1);
+					current = null;
 					break;
 				case 'tool_result': {
 					const toolMsg: StoredMessage = {
@@ -197,7 +199,6 @@ export class DragonglassCore {
 			}
 			opts.onEvent(ev);
 		}
-		void lastUsage;
 		this.store.touch(conv);
 	}
 

@@ -99,14 +99,18 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		}
 
 		for (const call of toolCalls) {
-			const tool = opts.tools.get(call.name);
-			yield { type: 'tool_call', call, tool };
-			const result = await executeTool(tool, call, opts);
+			let result: ToolResult;
+			if (opts.signal.aborted) {
+				result = { content: 'Not run: generation stopped.', isError: true };
+			} else {
+				const tool = opts.tools.get(call.name);
+				yield { type: 'tool_call', call, tool };
+				result = await executeTool(tool, call, opts);
+			}
 			const toolMsg: ChatMessage = { role: 'tool', content: result.content, toolCallId: call.id, toolName: call.name };
 			messages.push(toolMsg);
 			added.push(toolMsg);
 			yield { type: 'tool_result', call, result };
-			if (opts.signal.aborted) break;
 		}
 		opts.onMessages?.(added);
 		if (opts.signal.aborted) {

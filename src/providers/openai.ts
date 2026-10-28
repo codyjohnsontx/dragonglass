@@ -115,7 +115,6 @@ export class OpenAIProvider implements Provider {
 
 		const pending = new Map<number, { id: string; name: string; args: string }>();
 		let finish: FinishReason | null = null;
-		let usageSeen = false;
 		try {
 			for await (const data of parseSse(res.chunks)) {
 				if (data.trim() === '[DONE]') break;
@@ -141,7 +140,6 @@ export class OpenAIProvider implements Provider {
 					finish = mapFinish(choice.finish_reason);
 				}
 				if (chunk.usage) {
-					usageSeen = true;
 					yield {
 						type: 'usage',
 						usage: { inputTokens: chunk.usage.prompt_tokens, outputTokens: chunk.usage.completion_tokens },
@@ -164,7 +162,6 @@ export class OpenAIProvider implements Provider {
 				},
 			};
 		}
-		void usageSeen;
 		yield { type: 'done', finishReason: finish ?? (pending.size > 0 ? 'tool_calls' : 'other') };
 	}
 

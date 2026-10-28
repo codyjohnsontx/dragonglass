@@ -31,6 +31,7 @@ describe('context building', () => {
 			{ id: '3', role: 'user', content: 'second', createdAt: 3 },
 			{ id: '4', role: 'assistant', content: '', createdAt: 4, toolCalls: [{ id: 'c', name: 't', argumentsJson: '{}' }] },
 			{ id: '5', role: 'tool', content: 'r', createdAt: 5, toolCallId: 'c', toolName: 't' },
+			{ id: '6', role: 'assistant', content: '', createdAt: 6, interrupted: true },
 		];
 		const msgs = toProviderMessages('sys', stored, 'CTX');
 		expect(msgs.map((m) => m.role)).toEqual(['system', 'user', 'user', 'assistant', 'tool']);

@@ -443,6 +443,8 @@ export class ChatView extends ItemView {
 				break;
 			}
 			case 'tools_disabled':
+				this.liveEl?.parentElement?.remove();
+				this.liveEl = null;
 				new Notice(`Model does not support tools; retrying without them. (${ev.reason})`);
 				break;
 			case 'error':

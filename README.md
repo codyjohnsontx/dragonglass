@@ -82,7 +82,9 @@ Open the sidebar with the gem icon in the ribbon or the command
 - If you edit the note yourself after a proposal was made, approval is blocked
   and the card says the proposal is out of date. Ask again.
 - **Revert** on an applied edit restores the snapshot taken before it was
-  applied. Snapshots are kept under the plugin folder (last 50).
+  applied. It is refused if the note changed after the edit was applied, so
+  later edits are never overwritten. Snapshots are kept under the plugin
+  folder (last 50).
 - **Stop** cancels generation. Partial text is kept.
 - Conversations persist in the vault's plugin folder and survive switching
   providers.

@@ -105,7 +105,18 @@ describe('ProposalEngine', () => {
 		expect(vault.files.get('A.md')).toBe('v3\n');
 		await e.revert(q);
 		expect(vault.files.get('A.md')).toBe('v1\n');
-		expect(q.status).toBe('rejected');
+		expect(q.status).toBe('reverted');
+	});
+
+	it('refuses to revert over edits made after apply', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'v1\n' });
+		const e = engine(vault);
+		const p = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'v2\n' }], 'rewrite');
+		await e.apply(p);
+		vault.files.set('A.md', 'v2\nuser typed more\n');
+		await expect(e.revert(p)).rejects.toThrow(/changed after this edit was applied/);
+		expect(vault.files.get('A.md')).toBe('v2\nuser typed more\n');
+		expect(p.status).toBe('applied');
 	});
 
 	it('rejects no-op edits and missing notes', async () => {

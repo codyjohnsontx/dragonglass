@@ -145,4 +145,25 @@ describe('runAgent', () => {
 		expect((out.at(-1) as Extract<RunEvent, { type: 'error' }>).error.kind).toBe('cancelled');
 		expect((out[2] as Extract<RunEvent, { type: 'assistant_end' }>).content).toBe('partial ');
 	});
+
+	it('answers every requested tool call when stopped mid-round', async () => {
+		const ac = new AbortController();
+		const p = scripted([
+			[
+				{ type: 'tool_call', call: { id: 'a', name: 'echo', argumentsJson: '{"text":"1"}' } },
+				{ type: 'tool_call', call: { id: 'b', name: 'echo', argumentsJson: '{"text":"2"}' } },
+				{ type: 'done', finishReason: 'tool_calls' },
+			],
+		]);
+		const added: { role: string; toolCallId?: string; content: string }[] = [];
+		const out: RunEvent[] = [];
+		for await (const e of run(p, { signal: ac.signal, onMessages: (m) => added.push(...m) })) {
+			out.push(e);
+			if (e.type === 'tool_result') ac.abort();
+		}
+		expect(out.map((e) => e.type)).toEqual(['assistant_start', 'assistant_end', 'tool_call', 'tool_result', 'tool_result', 'error']);
+		const tools = added.filter((m) => m.role === 'tool');
+		expect(tools.map((m) => m.toolCallId)).toEqual(['a', 'b']);
+		expect(tools[1]?.content).toMatch(/Not run: generation stopped/);
+	});
 });

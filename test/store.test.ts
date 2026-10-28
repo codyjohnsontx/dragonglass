@@ -28,6 +28,20 @@ describe('ConversationStore', () => {
 		expect(await fresh.listConversations()).toEqual([]);
 	});
 
+	it('does not resurrect a conversation touched after delete', async () => {
+		const backend = new MemoryVaultPort();
+		const store = new ConversationStore(backend, () => 1, 0, nodeTimers);
+		await store.listConversations();
+		const a = store.create();
+		store.touch(a);
+		await store.flush();
+		await store.delete(a.id);
+		store.touch(a);
+		await store.flush();
+		expect(backend.pluginFiles.size).toBe(0);
+		expect(await store.listConversations()).toEqual([]);
+	});
+
 	it('ignores corrupt files', async () => {
 		const backend = new MemoryVaultPort();
 		backend.pluginFiles.set('conversations/bad.json', '{not json');

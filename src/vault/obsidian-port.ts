@@ -86,7 +86,8 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	}
 
 	getActiveContext(): ActiveContext {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const leaf = this.app.workspace.getMostRecentLeaf();
+		const view = leaf?.view instanceof MarkdownView ? leaf.view : null;
 		const file = view?.file ?? this.app.workspace.getActiveFile();
 		const selection = view?.editor.getSelection() ?? '';
 		return { path: file instanceof TFile ? file.path : null, selection: selection.length > 0 ? selection : null };

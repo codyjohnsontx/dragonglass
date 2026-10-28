@@ -20,7 +20,7 @@ export interface ChangeProposal {
 	/** SHA-256 of `before`, null for create. */
 	baseHash: string | null;
 	summary: string;
-	status: 'pending' | 'applied' | 'rejected' | 'stale' | 'failed';
+	status: 'pending' | 'applied' | 'rejected' | 'reverted' | 'stale' | 'failed';
 	createdAt: number;
 	resolvedAt?: number;
 	/** Plugin-relative path of the pre-change snapshot written on apply. */
@@ -147,13 +147,11 @@ export class ProposalEngine {
 			} else {
 				const snapshotPath = await this.writeSnapshot(p);
 				p.snapshotPath = snapshotPath;
-				const expected = p.baseHash;
 				await this.vault.processNote(p.path, (current) => {
 					// Final guard inside the atomic write: compare content directly.
 					if (current !== p.before) {
 						throw new ProposalError('The note changed while applying. Nothing was written.');
 					}
-					void expected;
 					return p.after;
 				});
 			}
@@ -188,8 +186,13 @@ export class ProposalEngine {
 		const snapshot = p.snapshotPath ? await this.vault.readPluginFile(p.snapshotPath) : null;
 		const restore = snapshot ?? p.before;
 		if (restore === null) throw new ProposalError('No snapshot available to revert to.');
-		await this.vault.processNote(p.path, () => restore);
-		p.status = 'rejected';
+		await this.vault.processNote(p.path, (current) => {
+			if (current !== p.after) {
+				throw new ProposalError('The note changed after this edit was applied. Reverting would overwrite those changes, so nothing was written.');
+			}
+			return restore;
+		});
+		p.status = 'reverted';
 		p.resolvedAt = this.now();
 	}
 

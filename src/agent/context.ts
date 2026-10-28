@@ -68,7 +68,7 @@ export function toProviderMessages(system: string, stored: StoredMessage[], cont
 				break;
 			}
 			case 'assistant':
-				if (m.error && !m.content && !m.toolCalls?.length) break; // failed turn, nothing to replay
+				if (!m.content && !m.toolCalls?.length) break; // failed, stopped or retried turn, nothing to replay
 				out.push({ role: 'assistant', content: m.content, toolCalls: m.toolCalls });
 				break;
 			case 'tool':

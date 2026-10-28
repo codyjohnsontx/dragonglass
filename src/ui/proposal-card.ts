@@ -90,6 +90,8 @@ function statusLabel(status: ChangeProposal['status']): string {
 			return 'Applied';
 		case 'rejected':
 			return 'Rejected';
+		case 'reverted':
+			return 'Reverted';
 		case 'stale':
 			return 'Out of date';
 		case 'failed':
