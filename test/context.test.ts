@@ -37,6 +37,8 @@ describe('context building', () => {
 		const cjk = '秘密の言葉はペリカンです'.repeat(2500);
 		expect(shown(cjk, 16_384)).toBe(8192);
 		expect(shown(cjk, undefined)).toBe(30_000);
+		// Cyrillic runs about two characters per token, so more of it fits.
+		expect(shown('Привет'.repeat(5000), 16_384)).toBe(16_384);
 	});
 
 	it('prepends context only to the latest user turn and drops failed turns', () => {

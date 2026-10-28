@@ -205,15 +205,16 @@ export function toProviderError(err: unknown): ProviderError {
 }
 
 /**
- * Rough token count of text: about four characters per token for ASCII and
- * one per character otherwise, since CJK and most other scripts tokenize far
- * more densely than English. Runs of whitespace count once, since indentation
- * and blank lines tokenize densely.
+ * Rough token count of text: about four characters per token for ASCII, one
+ * per character for CJK, kana and Hangul, which tokenize far more densely,
+ * and two for other scripts such as Cyrillic, Greek or Arabic. Runs of
+ * whitespace count once, since indentation and blank lines tokenize densely.
  */
 export function estimateTokens(text: string): number {
 	const compact = text.replace(/\s+/g, ' ');
-	const nonAscii = compact.match(/[\u0080-\uffff]/g)?.length ?? 0;
-	return Math.ceil((compact.length + nonAscii * (CHARS_PER_TOKEN - 1)) / CHARS_PER_TOKEN);
+	let weight = 0;
+	for (let i = 0; i < compact.length; i++) weight += charWeight(compact.charCodeAt(i));
+	return Math.ceil(weight / CHARS_PER_TOKEN);
 }
 
 /** Length of the longest prefix of `text` that stays within `maxTokens` at the rate `estimateTokens` uses. */
@@ -221,13 +222,25 @@ export function prefixWithinTokens(text: string, maxTokens: number): number {
 	const limit = maxTokens * CHARS_PER_TOKEN;
 	let weight = 0;
 	for (let i = 0; i < text.length; i++) {
-		weight += text.charCodeAt(i) < 0x80 ? 1 : CHARS_PER_TOKEN;
+		weight += charWeight(text.charCodeAt(i));
 		if (weight > limit) return i;
 	}
 	return text.length;
 }
 
 const CHARS_PER_TOKEN = 4;
+
+/** A UTF-16 code unit's share of a token, in quarters. */
+function charWeight(code: number): number {
+	if (code < 0x80) return 1;
+	const dense =
+		(code >= 0x1100 && code <= 0x11ff) || // Hangul Jamo
+		(code >= 0x2e80 && code <= 0x9fff) || // CJK radicals, punctuation, kana, ideographs
+		(code >= 0xac00 && code <= 0xd7af) || // Hangul syllables
+		(code >= 0xf900 && code <= 0xfaff) || // CJK compatibility ideographs
+		(code >= 0xff00 && code <= 0xffef); // fullwidth forms
+	return dense ? CHARS_PER_TOKEN : 2;
+}
 
 /**
  * Plain-text stand-ins for tool history, for requests that declare no tools:

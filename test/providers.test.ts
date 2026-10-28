@@ -178,8 +178,9 @@ describe('Ollama context accounting', () => {
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) }], undefined)).toBe(104);
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) + '\n\t   '.repeat(100) }], undefined)).toBe(105);
 		expect(estimatePromptTokens([{ role: 'user', content: '' }], tools)).toBeGreaterThan(4);
-		// CJK and other non-ASCII text count about one token per character.
+		// CJK counts about one token per character; other scripts about two characters per token.
 		expect(estimatePromptTokens([{ role: 'user', content: '秘密'.repeat(200) }], undefined)).toBe(404);
+		expect(estimatePromptTokens([{ role: 'user', content: 'слово'.repeat(80) }], undefined)).toBe(204);
 	});
 
 	it('flags both ways Ollama cuts a prompt, and nothing else', () => {
@@ -195,6 +196,15 @@ describe('Ollama context accounting', () => {
 		// A 30,000-character Japanese note cut to half of a 16k window.
 		const cjk = estimatePromptTokens([{ role: 'user', content: '秘密の言葉はペリカンです'.repeat(2500) }], undefined);
 		expect(promptWasTruncated(8192, cjk, 16_384)).toBe(true);
+		// An 8,000-character Russian note beside 3,500 tokens of ASCII framing arrives whole (about 6,200 tokens).
+		const russian = estimatePromptTokens(
+			[
+				{ role: 'system', content: 'x'.repeat(14_000) },
+				{ role: 'user', content: 'Привет'.repeat(1333) },
+			],
+			undefined,
+		);
+		expect(promptWasTruncated(6200, russian, 16_384)).toBe(false);
 		// Tiny prompts never count, however far off the estimate is.
 		expect(promptWasTruncated(100, 500, 4096)).toBe(false);
 	});
