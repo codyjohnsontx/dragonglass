@@ -205,6 +205,31 @@ export function toProviderError(err: unknown): ProviderError {
 }
 
 /**
+ * Rough token count of text: about four characters per token for ASCII and
+ * one per character otherwise, since CJK and most other scripts tokenize far
+ * more densely than English. Runs of whitespace count once, since indentation
+ * and blank lines tokenize densely.
+ */
+export function estimateTokens(text: string): number {
+	const compact = text.replace(/\s+/g, ' ');
+	const nonAscii = compact.match(/[\u0080-\uffff]/g)?.length ?? 0;
+	return Math.ceil((compact.length + nonAscii * (CHARS_PER_TOKEN - 1)) / CHARS_PER_TOKEN);
+}
+
+/** Length of the longest prefix of `text` that stays within `maxTokens` at the rate `estimateTokens` uses. */
+export function prefixWithinTokens(text: string, maxTokens: number): number {
+	const limit = maxTokens * CHARS_PER_TOKEN;
+	let weight = 0;
+	for (let i = 0; i < text.length; i++) {
+		weight += text.charCodeAt(i) < 0x80 ? 1 : CHARS_PER_TOKEN;
+		if (weight > limit) return i;
+	}
+	return text.length;
+}
+
+const CHARS_PER_TOKEN = 4;
+
+/**
  * Plain-text stand-ins for tool history, for requests that declare no tools:
  * Anthropic rejects tool blocks then, and Gemini gets the same treatment.
  */

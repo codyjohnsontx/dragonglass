@@ -178,6 +178,8 @@ describe('Ollama context accounting', () => {
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) }], undefined)).toBe(104);
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) + '\n\t   '.repeat(100) }], undefined)).toBe(105);
 		expect(estimatePromptTokens([{ role: 'user', content: '' }], tools)).toBeGreaterThan(4);
+		// CJK and other non-ASCII text count about one token per character.
+		expect(estimatePromptTokens([{ role: 'user', content: '秘密'.repeat(200) }], undefined)).toBe(404);
 	});
 
 	it('flags both ways Ollama cuts a prompt, and nothing else', () => {
@@ -190,6 +192,9 @@ describe('Ollama context accounting', () => {
 		expect(promptWasTruncated(1134, 1200, 4096)).toBe(false);
 		// A count well above half the window with an estimate that fits means nothing was cut.
 		expect(promptWasTruncated(2775, 3000, 4096)).toBe(false);
+		// A 30,000-character Japanese note cut to half of a 16k window.
+		const cjk = estimatePromptTokens([{ role: 'user', content: '秘密の言葉はペリカンです'.repeat(2500) }], undefined);
+		expect(promptWasTruncated(8192, cjk, 16_384)).toBe(true);
 		// Tiny prompts never count, however far off the estimate is.
 		expect(promptWasTruncated(100, 500, 4096)).toBe(false);
 	});

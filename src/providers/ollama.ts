@@ -3,6 +3,7 @@ import {
 	ChatRequest,
 	ConnectionStatus,
 	errorFromStatus,
+	estimateTokens,
 	ModelInfo,
 	Provider,
 	ProviderCapabilities,
@@ -267,23 +268,18 @@ export function effectiveNumCtx(requested: number, info: OllamaModelInfo | undef
 }
 
 /**
- * Rough token count of a request: about four characters per token for prose,
- * with runs of whitespace counted once since indentation and blank lines
- * tokenize densely, plus a few tokens of framing per message. Only used to
- * spot a prompt that came back much smaller than it went out.
+ * Rough token count of a request (see `estimateTokens`), plus a few tokens of
+ * framing per message. Only used to spot a prompt that came back much smaller
+ * than it went out.
  */
 export function estimatePromptTokens(messages: ChatMessage[], tools: ToolDefinition[] | undefined): number {
-	let chars = 0;
+	let tokens = messages.length * 4;
 	for (const m of messages) {
-		chars += compactLength(m.content);
-		for (const c of m.toolCalls ?? []) chars += c.name.length + compactLength(c.argumentsJson);
+		tokens += estimateTokens(m.content);
+		for (const c of m.toolCalls ?? []) tokens += estimateTokens(c.name + c.argumentsJson);
 	}
-	if (tools) chars += JSON.stringify(tools).length;
-	return Math.ceil(chars / 4) + messages.length * 4;
-}
-
-function compactLength(text: string): number {
-	return text.replace(/\s+/g, ' ').length;
+	if (tools) tokens += estimateTokens(JSON.stringify(tools));
+	return tokens;
 }
 
 /**

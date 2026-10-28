@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { buildSystemPrompt, ContextItem, formatContextBlock, noteCharBudget, toProviderMessages } from './agent/context';
+import { buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -35,8 +35,8 @@ export class DragonglassCore {
 	private readonly requestUrlClient: HttpClient;
 	private settings: DragonglassSettings;
 	private readonly saveSettings: () => Promise<void>;
-	/** Characters of note content a single read may return; see `noteCharBudget`. */
-	private noteChars: number;
+	/** Estimated tokens of note content a single read may return; see `noteTokenBudget`. */
+	private noteTokens: number | undefined;
 
 	constructor(app: App, plugin: Plugin, settings: DragonglassSettings, saveSettings: () => Promise<void>) {
 		this.settings = settings;
@@ -45,9 +45,9 @@ export class DragonglassCore {
 		this.store = new ConversationStore(this.vault);
 		this.proposals = new ProposalEngine(this.vault);
 		this.tools = new ToolRegistry();
-		this.noteChars = settings.maxCharsPerNote;
 		for (const t of createVaultTools(this.vault, this.proposals, () => ({
-			maxReadChars: this.noteChars,
+			maxReadChars: this.settings.maxCharsPerNote,
+			maxReadTokens: this.noteTokens,
 			maxSearchResults: 20,
 		}))) {
 			this.tools.register(t);
@@ -99,14 +99,13 @@ export class DragonglassCore {
 		return this.provider().capabilities.remote;
 	}
 
-	/** Note characters per prompt for this provider and model; see `noteCharBudget` in agent/context. */
-	private async noteCharBudget(provider: Provider, model: string, signal?: AbortSignal): Promise<number> {
-		const cap = this.settings.maxCharsPerNote;
-		if (!provider.contextWindow) return cap;
+	/** Note tokens per prompt for this provider and model; see `noteTokenBudget` in agent/context. */
+	private async noteTokenBudget(provider: Provider, model: string, signal?: AbortSignal): Promise<number | undefined> {
+		if (!provider.contextWindow) return undefined;
 		try {
-			return noteCharBudget(cap, await provider.contextWindow(model, signal));
+			return noteTokenBudget(await provider.contextWindow(model, signal));
 		} catch {
-			return cap;
+			return undefined;
 		}
 	}
 
@@ -136,9 +135,9 @@ export class DragonglassCore {
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
 
-		this.noteChars = await this.noteCharBudget(provider, model, opts.signal);
-		const system = buildSystemPrompt({ toolsEnabled: this.settings.toolsEnabled, maxCharsPerNote: this.noteChars });
-		const contextBlock = formatContextBlock(opts.context, this.noteChars);
+		this.noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
+		const system = buildSystemPrompt({ toolsEnabled: this.settings.toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote });
+		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, this.noteTokens);
 		const messages = toProviderMessages(system, conv.messages, contextBlock);
 
 		let current: StoredMessage | null = null;

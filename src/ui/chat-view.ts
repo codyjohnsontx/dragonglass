@@ -39,6 +39,8 @@ export class ChatView extends ItemView {
 	private liveThinkingBodyEl: HTMLElement | null = null;
 	private liveThinking = '';
 	private turnStartedAt = 0;
+	/** When the current thinking phase began; null once its "Thought for" label is set. */
+	private thinkingStartedAt: number | null = null;
 	private turnTimer: number | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 
@@ -458,6 +460,7 @@ export class ChatView extends ItemView {
 				this.liveThinking = '';
 				this.liveThinkingEl = null;
 				this.liveThinkingBodyEl = null;
+				this.thinkingStartedAt = null;
 				this.turnStartedAt = Date.now();
 				// After a tool round the model is reading the result; say so instead of going blank.
 				this.setLiveStatus(prev?.role === 'tool' ? `Reading the ${prev.toolName ?? 'tool'} result…` : 'Waiting for the model…');
@@ -473,6 +476,7 @@ export class ChatView extends ItemView {
 					wrap.insertBefore(details, this.liveEl);
 					this.liveThinkingEl = details;
 					this.liveThinkingBodyEl = body;
+					this.thinkingStartedAt = Date.now();
 				}
 				this.liveThinking += ev.delta;
 				this.liveThinkingBodyEl?.setText(this.liveThinking);
@@ -482,13 +486,13 @@ export class ChatView extends ItemView {
 			}
 			case 'text_delta':
 				this.liveText += ev.delta;
+				this.endThinking();
 				this.clearLiveStatus();
 				this.liveEl?.setText(this.liveText);
 				this.scrollToBottom();
 				break;
 			case 'assistant_end': {
-				const seconds = Math.round((Date.now() - this.turnStartedAt) / 1000);
-				this.liveThinkingEl?.querySelector('summary')?.setText(`Thought for ${seconds}s`);
+				this.endThinking();
 				this.endLiveTurn();
 				if (this.liveEl) {
 					this.liveEl.empty();
@@ -534,6 +538,14 @@ export class ChatView extends ItemView {
 		const icon = this.liveStatusEl.createSpan();
 		setIcon(icon, 'loader');
 		this.liveStatusEl.createSpan({ text: seconds >= 2 ? `${text} ${seconds}s` : text });
+	}
+
+	/** Label the thinking block with how long the model reasoned, once its answer or turn end arrives. */
+	private endThinking(): void {
+		if (this.thinkingStartedAt === null) return;
+		const seconds = Math.round((Date.now() - this.thinkingStartedAt) / 1000);
+		this.liveThinkingEl?.querySelector('summary')?.setText(`Thought for ${seconds}s`);
+		this.thinkingStartedAt = null;
 	}
 
 	private clearLiveStatus(): void {
