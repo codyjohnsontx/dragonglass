@@ -48,6 +48,8 @@ const SNAPSHOT_DIR = 'snapshots';
 const MAX_SNAPSHOTS = 50;
 
 export class ProposalEngine {
+	private readonly applying = new Set<ChangeProposal>();
+
 	constructor(
 		private readonly vault: VaultPort,
 		private readonly now: () => number = () => Date.now(),
@@ -124,12 +126,17 @@ export class ProposalEngine {
 	 * changed. Other states are final and left alone.
 	 */
 	async refresh(p: ChangeProposal): Promise<boolean> {
-		if (p.status !== 'pending' && p.status !== 'stale') return false;
+		if (!this.refreshable(p)) return false;
 		const freshness = await this.checkFreshness(p);
+		if (!this.refreshable(p)) return false;
 		const next = freshness === 'fresh' ? 'pending' : freshness === 'stale' ? 'stale' : p.status;
 		if (next === p.status) return false;
 		p.status = next;
 		return true;
+	}
+
+	private refreshable(p: ChangeProposal): boolean {
+		return !this.applying.has(p) && (p.status === 'pending' || p.status === 'stale');
 	}
 
 	/**
@@ -141,6 +148,15 @@ export class ProposalEngine {
 		if (p.status !== 'pending' && p.status !== 'stale') {
 			throw new ProposalError(`Proposal is already ${p.status}.`);
 		}
+		this.applying.add(p);
+		try {
+			return await this.write(p);
+		} finally {
+			this.applying.delete(p);
+		}
+	}
+
+	private async write(p: ChangeProposal): Promise<ApplyResult> {
 		const freshness = await this.checkFreshness(p);
 		if (freshness === 'stale') {
 			p.status = 'stale';

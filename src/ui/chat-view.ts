@@ -166,9 +166,14 @@ export class ChatView extends ItemView {
 	 * the configured model is missing, so the menu offers the ones it has.
 	 * With `quiet` false a failure is also raised as a Notice.
 	 */
-	private async refreshStatus(quiet = true): Promise<void> {
+	private async refreshStatus(quiet = true, signal?: AbortSignal): Promise<void> {
+		const prior = this.lastStatus;
 		this.setStatus('checking', 'Checking connection…');
-		const status = await this.core.checkConnection();
+		const status = await this.core.checkConnection(undefined, signal);
+		if (signal?.aborted) {
+			if (prior) this.setStatus(prior.state, prior.title);
+			return;
+		}
 		const reachable = status.ok || status.error.kind === 'model_not_found';
 		if (reachable && this.models.length === 0) await this.loadModels(quiet);
 		if (status.ok) {
@@ -484,12 +489,12 @@ export class ChatView extends ItemView {
 		const selection = context.find((c) => c.kind === 'selection');
 		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
 		this.abort = new AbortController();
-		// The header light reflects the last check; a send is the moment it matters,
-		// and it must finish first so a failure during the send is not painted over.
-		await this.refreshStatus();
 		this.sendBtn.setText('Stop');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
+		// The header light reflects the last check; a send is the moment it matters,
+		// and it must finish first so a failure during the send is not painted over.
+		await this.refreshStatus(true, this.abort.signal);
 		if (this.messagesEl.querySelector('.dg-empty')) this.messagesEl.empty();
 		try {
 			await this.core.send(conv, {

@@ -76,6 +76,17 @@ describe('context building', () => {
 		);
 		expect(shown(lopsided)).toEqual(['8184/40000']);
 		expect(lopsided).toContain('<<<selection from="A.md">>>\nshort\n<<<end selection>>>');
+		// Shares are sized after the character cap: a 60,000-character note capped at 20,000 characters
+		// uses 5,000 of the 16,384 tokens, leaving the 9,000-token attachment room to stay whole.
+		const capped = formatContextBlock(
+			[
+				{ kind: 'active', label: 'A', path: 'A.md', content: 'x'.repeat(60_000) },
+				{ kind: 'attachment', label: 'B', path: 'B.md', content: '漢'.repeat(9000) },
+			],
+			20_000,
+			noteTokenBudget(32_768),
+		);
+		expect(shown(capped)).toEqual(['20000/60000']);
 		// The character cap applies to selections as well.
 		expect(shown(formatContextBlock([{ kind: 'selection', label: 'S', path: null, content: selection }], 1000))).toEqual(['1000/40000']);
 		// A note whose estimate equals its share is kept whole, whitespace runs and all.
