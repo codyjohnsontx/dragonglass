@@ -73,8 +73,7 @@ export const DEFAULT_SETTINGS: DragonglassSettings = {
 	includeSelection: true,
 	toolsEnabled: true,
 	maxToolIterations: 8,
-	/** Half the default Ollama window at four characters per token; see `noteTokenBudget`. */
-	maxCharsPerNote: 32_000,
+	maxCharsPerNote: 20_000,
 	transport: 'fetch',
 	showUsage: true,
 	usageWarningTokens: 0,
