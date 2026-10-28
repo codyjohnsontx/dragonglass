@@ -160,7 +160,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Max characters per note',
-						desc: 'Longer notes are truncated before being sent, to stay within model context limits.',
+						desc: 'Longer notes are truncated before being sent. For Ollama the cap is also lowered to half the context window when that is smaller.',
 						control: { type: 'number', key: 'maxCharsPerNote', min: 1000, max: 500000, step: 1000 },
 					},
 				],

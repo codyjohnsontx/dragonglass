@@ -46,8 +46,8 @@ export function buildSystemPrompt(opts: PromptOptions): string {
 /**
  * How many characters of one note may go into a prompt: the user's cap,
  * lowered when the provider's context window for the model is small. A note
- * gets about 40 percent of the window (at roughly four characters per token)
- * so the system prompt, tool schemas, history and reply still fit beside it.
+ * gets half the window (at roughly four characters per token) so the system
+ * prompt, tool schemas, history and reply still fit beside it.
  */
 export function noteCharBudget(maxCharsPerNote: number, contextWindow: number | undefined): number {
 	if (!contextWindow || contextWindow <= 0) return maxCharsPerNote;
@@ -55,7 +55,7 @@ export function noteCharBudget(maxCharsPerNote: number, contextWindow: number | 
 }
 
 const CHARS_PER_TOKEN = 4;
-const NOTE_SHARE_OF_CONTEXT = 0.4;
+const NOTE_SHARE_OF_CONTEXT = 0.5;
 const MIN_NOTE_CHARS = 1000;
 
 export function formatContextBlock(items: ContextItem[], maxCharsPerNote: number): string {

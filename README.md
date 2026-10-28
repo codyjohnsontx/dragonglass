@@ -63,8 +63,8 @@ Two settings matter for local models:
   when that happens Ollama silently keeps about half the prompt and drops the
   system prompt and your question. The value is capped at what the model
   supports. If a prompt is still cut, the reply carries a warning saying so.
-  Note content sent to the model is also trimmed to fit about 40 percent of
-  the window.
+  Note content sent to the model is also trimmed to half the window when
+  **Max characters per note** would exceed that.
 - **Let thinking models think** controls models such as qwen3 or deepseek-r1
   that reason before answering. While they think the sidebar shows
   "Thinking…" with the elapsed time, and the reasoning is kept in a collapsed

@@ -159,7 +159,7 @@ describe.each([
 		const warning = events.find((e) => e.type === 'warning');
 		expect(warning).toBeDefined();
 		if (warning?.type === 'warning') {
-			expect(warning.message).toMatch(/cut this prompt to fit its 4,096-token context window/);
+			expect(warning.message).toMatch(/did not fit Ollama's 4,096-token context window/);
 			expect(warning.message).toMatch(/2,048 reached the model/);
 		}
 		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'stop' });
@@ -167,23 +167,28 @@ describe.each([
 		// A short prompt with the same reported count is not a truncation: the window was not full.
 		const ok = await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-truncate', messages: [{ role: 'user', content: 'hello' }] }));
 		expect(ok.some((e) => e.type === 'warning')).toBe(false);
-		const normal = await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-tools', messages: [{ role: 'user', content: long }] }));
+		// A prompt that fits the window with a count that is not near half of it: dense text, not a cut.
+		const normal = await collect(provider({ numCtx: 16384 }).chat({ model: 'fake-tools', messages: [{ role: 'user', content: long }] }));
 		expect(normal.some((e) => e.type === 'warning')).toBe(false);
 	});
 });
 
 describe('Ollama context accounting', () => {
-	it('estimates prompt tokens from characters and framing', () => {
+	it('estimates prompt tokens from characters and framing, counting whitespace runs once', () => {
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) }], undefined)).toBe(104);
+		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) + '\n\t   '.repeat(100) }], undefined)).toBe(105);
 		expect(estimatePromptTokens([{ role: 'user', content: '' }], tools)).toBeGreaterThan(4);
 	});
 
-	it('flags a count near half the window that is far below the estimate, and nothing else', () => {
-		// The live case: 4096 window, 5078-token prompt, 2050 arrived.
+	it('flags both ways Ollama cuts a prompt, and nothing else', () => {
+		// One oversized message: 4096 window, 5078-token prompt, 2050 arrived (the live test's case).
 		expect(promptWasTruncated(2050, 5078, 4096)).toBe(true);
+		// Older messages dropped: a 7,500-token history came back as 1,134 tokens.
+		expect(promptWasTruncated(1134, 7500, 4096)).toBe(true);
 		// Same count, small estimate: dense text, not truncation.
 		expect(promptWasTruncated(2050, 2400, 4096)).toBe(false);
-		// A count well above half the window means nothing was cut.
+		expect(promptWasTruncated(1134, 1200, 4096)).toBe(false);
+		// A count well above half the window with an estimate that fits means nothing was cut.
 		expect(promptWasTruncated(2775, 3000, 4096)).toBe(false);
 		// Tiny prompts never count, however far off the estimate is.
 		expect(promptWasTruncated(100, 500, 4096)).toBe(false);

@@ -37,11 +37,13 @@ export interface OllamaModelInfo {
  * support and that is surfaced as `unsupported_tools`.
  *
  * Every chat request carries `options.num_ctx`. Without it Ollama runs at its
- * 4096-token default and, when a prompt does not fit, silently keeps about
- * half of it: the system prompt, the tools and the user's question are gone
- * and the model answers nonsense. The adapter also compares the reported
- * `prompt_eval_count` with an estimate of what it sent and emits a `warning`
- * event when the numbers say the prompt was cut anyway.
+ * 4096-token default, and a prompt that does not fit is cut silently in one
+ * of two ways: older messages are dropped until the rest fits (a tool result
+ * or the whole history vanishes), and a single message still too large is
+ * truncated to about half the window (the system prompt, tools and question
+ * go with it). Neither is reported. The adapter therefore compares the
+ * reported `prompt_eval_count` with an estimate of what it sent and emits a
+ * `warning` event when the numbers say the prompt was cut anyway.
  */
 export class OllamaProvider implements Provider {
 	readonly id = 'ollama' as const;
@@ -206,6 +208,7 @@ export class OllamaProvider implements Provider {
 							name: fn.name,
 							argumentsJson: typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
 						};
+						contentChars += tc.name.length + tc.argumentsJson.length; // answer tokens, not thinking
 						yield { type: 'tool_call', call: tc };
 					}
 				}
@@ -264,36 +267,45 @@ export function effectiveNumCtx(requested: number, info: OllamaModelInfo | undef
 }
 
 /**
- * Rough token count of a request: about four characters per token for prose
- * plus a few tokens of framing per message. Only used to spot a prompt that
- * came back much smaller than it went out.
+ * Rough token count of a request: about four characters per token for prose,
+ * with runs of whitespace counted once since indentation and blank lines
+ * tokenize densely, plus a few tokens of framing per message. Only used to
+ * spot a prompt that came back much smaller than it went out.
  */
 export function estimatePromptTokens(messages: ChatMessage[], tools: ToolDefinition[] | undefined): number {
 	let chars = 0;
 	for (const m of messages) {
-		chars += m.content.length;
-		for (const c of m.toolCalls ?? []) chars += c.name.length + c.argumentsJson.length;
+		chars += compactLength(m.content);
+		for (const c of m.toolCalls ?? []) chars += c.name.length + compactLength(c.argumentsJson);
 	}
 	if (tools) chars += JSON.stringify(tools).length;
 	return Math.ceil(chars / 4) + messages.length * 4;
 }
 
+function compactLength(text: string): number {
+	return text.replace(/\s+/g, ' ').length;
+}
+
 /**
- * When a prompt is at least `num_ctx` tokens Ollama keeps roughly half of it
- * and reports that half as `prompt_eval_count`. So a count sitting around
- * half the window while the estimate says far more was sent means the prompt
- * was cut. Both conditions are required: a count far below the estimate on
- * its own also happens with whitespace-heavy text, which tokenizes densely.
+ * Was the prompt cut? The count must be well under the estimate (a 40 percent
+ * shortfall, far more than the estimate's own error on prose) and one of two
+ * signatures must match: the estimate says the request could not have fit at
+ * all, which is when Ollama drops older messages, or the count sits around
+ * half the window, which is what remains after Ollama truncates a single
+ * oversized message. The shortfall alone is not enough: dense text such as
+ * tables or code can tokenize well under four characters per token.
  */
 export function promptWasTruncated(promptTokens: number, estimate: number, numCtx: number): boolean {
+	if (promptTokens >= estimate * 0.6) return false;
+	const couldNotFit = estimate >= numCtx;
 	const nearHalfWindow = promptTokens >= numCtx * 0.3 && promptTokens <= numCtx * 0.6;
-	return nearHalfWindow && promptTokens < estimate * 0.6;
+	return couldNotFit || nearHalfWindow;
 }
 
 function truncationWarning(promptTokens: number, estimate: number, numCtx: number): string {
 	return (
-		`Ollama cut this prompt to fit its ${numCtx.toLocaleString()}-token context window: about ${estimate.toLocaleString()} tokens were sent and ${promptTokens.toLocaleString()} reached the model, ` +
-		'so it did not see the whole conversation, likely not the system prompt or your question. ' +
+		`This prompt did not fit Ollama's ${numCtx.toLocaleString()}-token context window: about ${estimate.toLocaleString()} tokens were sent and ${promptTokens.toLocaleString()} reached the model. ` +
+		'Ollama silently drops older messages and cuts long ones, so the reply may ignore earlier turns, note content or your question. ' +
 		'Raise "Context window" in the Ollama settings, attach less, or start a new conversation.'
 	);
 }
