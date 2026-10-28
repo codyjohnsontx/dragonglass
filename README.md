@@ -68,7 +68,7 @@ Two settings matter for local models:
 - **Let thinking models think** controls models such as qwen3 or deepseek-r1
   that reason before answering. While they think the sidebar shows
   "Thinking…" with the elapsed time, and the reasoning is kept in a collapsed
-  block under the reply; the usage line says how many output tokens went to
+  block above the reply; the usage line says how many output tokens went to
   thinking. Turn the setting off to send `think: false` for faster, direct
   answers. Expect 15 to 110 seconds of thinking per turn on an 8B model on a
   laptop.

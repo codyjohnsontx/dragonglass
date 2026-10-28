@@ -42,6 +42,7 @@ src/
     chat-view.ts          The sidebar ItemView.
     proposal-card.ts      Diff review card with approve/reject/revert.
     note-picker.ts        Fuzzy picker for attaching notes.
+    confirm-modal.ts      Confirmation dialog for destructive actions.
     settings-tab.ts       Declarative settings tab (Obsidian 1.13+ API).
 ```
 
@@ -98,7 +99,7 @@ server default of 4096 silently cuts prompts that do not fit), streams a
 thinking model's reasoning as `thinking` events, and emits a `warning` event
 when `prompt_eval_count` says the prompt was cut anyway. An adapter that knows
 the model's context window exposes it through `contextWindow`, and `core`
-lowers the note character cap to fit it.
+caps note content at an estimated half of it (`noteTokenBudget`).
 
 Conversations are provider-neutral (`ChatMessage`), so switching providers
 replays the whole history, including tool calls another provider made. The one
