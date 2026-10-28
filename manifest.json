@@ -3,7 +3,7 @@
 	"name": "Dragonglass AI",
 	"version": "0.1.0",
 	"minAppVersion": "1.13.2",
-	"description": "Bring your own LLM (Ollama, OpenAI) and chat with your vault. Reads and searches notes, proposes edits as reviewable diffs, and applies them only after you approve.",
+	"description": "Bring your own LLM (Ollama, OpenAI, Anthropic, Gemini) and chat with your vault. Reads and searches notes, proposes edits as reviewable diffs, and applies them only after you approve.",
 	"author": "Cody Johnson",
 	"authorUrl": "https://github.com/codyjohnsontx",
 	"isDesktopOnly": false
