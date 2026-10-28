@@ -1,4 +1,4 @@
-import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder } from 'obsidian';
+import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { ActiveContext, NoteMetadata, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
@@ -6,12 +6,18 @@ import { StoreBackend } from '../persistence/store';
 /** VaultPort backed by the live Obsidian App. Thin by design; logic lives in the port's callers. */
 export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	readonly configDir: string;
+	private lastMarkdownLeaf: WorkspaceLeaf | null = null;
 
 	constructor(
 		private readonly app: App,
 		private readonly plugin: Plugin,
 	) {
 		this.configDir = app.vault.configDir;
+		plugin.registerEvent(
+			app.workspace.on('active-leaf-change', (leaf) => {
+				if (leaf?.view instanceof MarkdownView) this.lastMarkdownLeaf = leaf;
+			}),
+		);
 	}
 
 	listMarkdownFiles(): VaultFileInfo[] {
@@ -86,8 +92,10 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	}
 
 	getActiveContext(): ActiveContext {
-		const leaf = this.app.workspace.getMostRecentLeaf();
-		const view = leaf?.view instanceof MarkdownView ? leaf.view : null;
+		const leaf = this.lastMarkdownLeaf;
+		const tracked =
+			leaf?.view instanceof MarkdownView && this.app.workspace.getLeavesOfType('markdown').includes(leaf) ? leaf.view : null;
+		const view = tracked ?? this.app.workspace.getActiveViewOfType(MarkdownView);
 		const file = view?.file ?? this.app.workspace.getActiveFile();
 		const selection = view?.editor.getSelection() ?? '';
 		return { path: file instanceof TFile ? file.path : null, selection: selection.length > 0 ? selection : null };

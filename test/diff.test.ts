@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diffLines, diffStats, formatUnified, toHunks } from '../src/vault/diff';
+import { DiffLine, diffLines, diffStats, toHunks } from '../src/vault/diff';
 
 describe('diffLines', () => {
 	it('reports no changes for identical text', () => {
@@ -10,12 +10,25 @@ describe('diffLines', () => {
 
 	it('finds a single changed line in the middle', () => {
 		const d = diffLines('one\ntwo\nthree\n', 'one\n2\nthree\n');
-		expect(formatUnified(d)).toBe(' one\n-two\n+2\n three');
+		expect(d).toEqual<DiffLine[]>([
+			{ op: 'same', text: 'one' },
+			{ op: 'del', text: 'two' },
+			{ op: 'add', text: '2' },
+			{ op: 'same', text: 'three' },
+		]);
 	});
 
 	it('handles additions and deletions at the ends', () => {
-		expect(formatUnified(diffLines('b\n', 'a\nb\nc\n'))).toBe('+a\n b\n+c');
-		expect(formatUnified(diffLines('a\nb\nc\n', 'b\n'))).toBe('-a\n b\n-c');
+		expect(diffLines('b\n', 'a\nb\nc\n')).toEqual<DiffLine[]>([
+			{ op: 'add', text: 'a' },
+			{ op: 'same', text: 'b' },
+			{ op: 'add', text: 'c' },
+		]);
+		expect(diffLines('a\nb\nc\n', 'b\n')).toEqual<DiffLine[]>([
+			{ op: 'del', text: 'a' },
+			{ op: 'same', text: 'b' },
+			{ op: 'del', text: 'c' },
+		]);
 	});
 
 	it('handles empty inputs', () => {

@@ -45,8 +45,8 @@ describe('error mapping', () => {
 		expect(errorFromStatus(429, '')).toMatchObject({ kind: 'rate_limit' });
 		expect(errorFromStatus(400, '{"error":"llama2 does not support tools"}')).toMatchObject({ kind: 'unsupported_tools' });
 		expect(errorFromStatus(404, '{"error":"model \\"x\\" not found"}')).toMatchObject({ kind: 'model_not_found' });
-		expect(errorFromStatus(503, 'oops')).toMatchObject({ kind: 'server', retryable: true });
-		expect(errorFromStatus(418, 'teapot')).toMatchObject({ kind: 'invalid_request', retryable: false });
+		expect(errorFromStatus(503, 'oops')).toMatchObject({ kind: 'server' });
+		expect(errorFromStatus(418, 'teapot')).toMatchObject({ kind: 'invalid_request' });
 	});
 
 	it('maps thrown errors', () => {

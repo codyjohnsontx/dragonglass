@@ -131,10 +131,6 @@ export class ProviderError extends Error {
 		this.status = status;
 	}
 
-	get retryable(): boolean {
-		return this.kind === 'rate_limit' || this.kind === 'network' || this.kind === 'server';
-	}
-
 	/** Human-readable guidance shown in the chat view. */
 	userMessage(): string {
 		switch (this.kind) {

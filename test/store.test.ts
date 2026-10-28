@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationStore } from '../src/persistence/store';
-import { deriveTitle, pendingProposals, sanitizeConversation } from '../src/persistence/conversation';
+import { deriveTitle, sanitizeConversation } from '../src/persistence/conversation';
 import { mergeSettings, DEFAULT_SETTINGS } from '../src/settings';
 import { MemoryVaultPort } from './memory-vault';
 
@@ -52,7 +52,7 @@ describe('ConversationStore', () => {
 });
 
 describe('conversation helpers', () => {
-	it('derives titles and finds pending proposals', () => {
+	it('derives titles and drops malformed stored records', () => {
 		const title = deriveTitle('\n\n  Fix the   launch date please, it is wrong and should be moved to November fifteenth');
 		expect(title.startsWith('Fix the launch date please,')).toBe(true);
 		expect(title.endsWith('…')).toBe(true);
@@ -68,7 +68,7 @@ describe('conversation helpers', () => {
 			},
 		})!;
 		expect(conv.messages).toHaveLength(1);
-		expect(pendingProposals(conv).map((p) => p.id)).toEqual(['p1']);
+		expect(Object.keys(conv.proposals)).toEqual(['p1', 'p2']);
 		expect(sanitizeConversation(null)).toBeNull();
 	});
 });

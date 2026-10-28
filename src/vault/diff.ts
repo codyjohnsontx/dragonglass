@@ -129,10 +129,3 @@ export function toHunks(lines: DiffLine[], context = 3): DiffHunk[] {
 	}
 	return hunks;
 }
-
-/** Render a unified-style text diff, used for tests and copy-to-clipboard. */
-export function formatUnified(lines: DiffLine[]): string {
-	return lines
-		.map((l) => (l.op === 'add' ? `+${l.text}` : l.op === 'del' ? `-${l.text}` : ` ${l.text}`))
-		.join('\n');
-}

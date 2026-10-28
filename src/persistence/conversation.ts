@@ -64,12 +64,6 @@ export function deriveTitle(firstUserMessage: string): string {
 	return trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
 }
 
-export function pendingProposals(c: Conversation): ChangeProposal[] {
-	return Object.values(c.proposals)
-		.filter((p) => p.status === 'pending' || p.status === 'stale')
-		.sort((a, b) => a.createdAt - b.createdAt);
-}
-
 /** Runtime validation for data read from disk. Drops anything malformed. */
 export function sanitizeConversation(raw: unknown): Conversation | null {
 	if (!raw || typeof raw !== 'object') return null;
