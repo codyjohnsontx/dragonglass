@@ -1,0 +1,332 @@
+/* Dragonglass AI: chat sidebar styles. Uses Obsidian CSS variables only. */
+
+.dragonglass-view {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+}
+
+.dg-header {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-2);
+	padding: var(--size-4-2) var(--size-4-2) var(--size-2-2);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.dg-header-row {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.dg-header-row select {
+	flex: 1;
+	min-width: 0;
+}
+
+.dg-icon-btn {
+	flex: 0 0 auto;
+}
+
+.dg-status {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.dg-status[data-state='ok'] {
+	color: var(--color-green);
+}
+
+.dg-status[data-state='error'] {
+	color: var(--color-red);
+}
+
+.dg-messages {
+	flex: 1;
+	overflow-y: auto;
+	padding: var(--size-4-2);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+}
+
+.dg-empty {
+	color: var(--text-muted);
+	text-align: center;
+	padding: var(--size-4-8) var(--size-4-2);
+}
+
+.dg-msg {
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2) var(--size-4-3);
+	max-width: 100%;
+	overflow-wrap: anywhere;
+}
+
+.dg-msg-user {
+	background-color: var(--background-modifier-hover);
+	align-self: flex-end;
+	white-space: pre-wrap;
+}
+
+.dg-msg-assistant {
+	background-color: var(--background-secondary);
+}
+
+.dg-msg-live .dg-msg-body {
+	white-space: pre-wrap;
+}
+
+.dg-msg-tool {
+	padding: 0;
+	background: none;
+}
+
+.dg-msg-body p:first-child {
+	margin-top: 0;
+}
+
+.dg-msg-body p:last-child {
+	margin-bottom: 0;
+}
+
+.dg-msg-context,
+.dg-tool-calls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-1);
+	margin-top: var(--size-2-2);
+}
+
+.dg-msg-note,
+.dg-msg-usage {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-top: var(--size-2-2);
+}
+
+.dg-msg-error {
+	color: var(--text-error);
+	font-size: var(--font-ui-small);
+	margin-top: var(--size-2-2);
+}
+
+.dg-conv-usage {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	text-align: center;
+}
+
+.dg-usage-warning {
+	color: var(--text-warning);
+}
+
+.dg-chip {
+	display: inline-flex;
+	align-items: center;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-l);
+	padding: 0 var(--size-2-3);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	background-color: var(--background-primary);
+	line-height: 1.8;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dg-chip.is-active {
+	color: var(--text-normal);
+	border-color: var(--interactive-accent);
+	background-color: var(--background-modifier-hover);
+}
+
+button.dg-chip {
+	cursor: pointer;
+	height: auto;
+	box-shadow: none;
+}
+
+.dg-chip-tool {
+	font-family: var(--font-monospace);
+}
+
+.dg-chip-remove {
+	cursor: pointer;
+	margin-left: var(--size-2-1);
+}
+
+.dg-tool-result summary {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.dg-tool-error summary {
+	color: var(--text-error);
+}
+
+.dg-tool-result pre {
+	font-size: var(--font-ui-smaller);
+	max-height: 240px;
+	overflow: auto;
+	white-space: pre-wrap;
+	margin: var(--size-2-2) 0 0;
+}
+
+.dg-context-bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-1);
+	padding: var(--size-2-2) var(--size-4-2);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.dg-privacy-note {
+	flex-basis: 100%;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+.dg-composer {
+	padding: var(--size-2-2) var(--size-4-2) var(--size-4-2);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-2);
+}
+
+.dg-input {
+	width: 100%;
+	resize: vertical;
+	font-family: inherit;
+}
+
+.dg-composer-row {
+	display: flex;
+	justify-content: flex-end;
+}
+
+/* Proposal cards */
+
+.dg-proposal {
+	margin-top: var(--size-2-2);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+	background-color: var(--background-primary);
+}
+
+.dg-proposal[data-status='applied'] {
+	border-left-color: var(--color-green);
+}
+
+.dg-proposal[data-status='rejected'],
+.dg-proposal[data-status='failed'] {
+	border-left-color: var(--text-faint);
+	opacity: 0.8;
+}
+
+.dg-proposal[data-status='stale'] {
+	border-left-color: var(--color-orange);
+}
+
+.dg-proposal-header {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.dg-proposal-title {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	gap: var(--size-2-2);
+	align-items: baseline;
+}
+
+.dg-proposal-kind {
+	font-weight: var(--font-semibold);
+}
+
+.dg-proposal-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dg-proposal-status {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.dg-status-applied {
+	color: var(--color-green);
+}
+
+.dg-status-stale {
+	color: var(--color-orange);
+}
+
+.dg-proposal-summary {
+	margin-top: var(--size-2-2);
+}
+
+.dg-proposal-stats {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-top: var(--size-2-1);
+}
+
+.dg-diff {
+	margin: var(--size-2-2) 0 0;
+	padding: var(--size-2-2);
+	max-height: 320px;
+	overflow: auto;
+	font-size: var(--font-ui-smaller);
+	background-color: var(--background-secondary);
+}
+
+.dg-diff-line {
+	display: flex;
+	white-space: pre-wrap;
+}
+
+.dg-diff-sign {
+	flex: 0 0 1.2em;
+	user-select: none;
+}
+
+.dg-diff-add {
+	background-color: rgba(var(--color-green-rgb), 0.15);
+}
+
+.dg-diff-del {
+	background-color: rgba(var(--color-red-rgb), 0.15);
+	text-decoration: line-through;
+	text-decoration-color: var(--text-faint);
+}
+
+.dg-diff-skip {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.dg-proposal-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--size-2-2);
+	margin-top: var(--size-4-2);
+}
+
+.dg-proposal-warning {
+	color: var(--text-warning);
+	font-size: var(--font-ui-smaller);
+}

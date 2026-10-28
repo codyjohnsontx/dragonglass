@@ -1,0 +1,220 @@
+/**
+ * Provider-agnostic chat types. Every adapter (Ollama, OpenAI, and the
+ * follow-up Anthropic / Gemini / custom OpenAI-compatible adapters) maps its
+ * wire format onto these types so the agent runtime and UI never see
+ * provider-specific shapes.
+ */
+
+export type ProviderId = 'ollama' | 'openai';
+
+export type Role = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface ToolCall {
+	/** Provider-assigned id when available, otherwise generated locally. */
+	id: string;
+	name: string;
+	/** Raw JSON text of the arguments. Parsed and validated by the tool layer. */
+	argumentsJson: string;
+}
+
+export interface ChatMessage {
+	role: Role;
+	content: string;
+	/** Present on assistant messages that requested tool calls. */
+	toolCalls?: ToolCall[];
+	/** Present on tool messages: which call this result answers. */
+	toolCallId?: string;
+	/** Present on tool messages: the tool name (some providers want it). */
+	toolName?: string;
+}
+
+/** JSON Schema subset used for tool parameters. */
+export interface JsonSchema {
+	type: 'object';
+	properties: Record<string, JsonSchemaProperty>;
+	required?: string[];
+	additionalProperties?: boolean;
+}
+
+export interface JsonSchemaProperty {
+	type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+	description?: string;
+	enum?: string[];
+	items?: JsonSchemaProperty;
+	properties?: Record<string, JsonSchemaProperty>;
+	required?: string[];
+	minimum?: number;
+	maximum?: number;
+}
+
+export interface ToolDefinition {
+	name: string;
+	description: string;
+	parameters: JsonSchema;
+}
+
+export interface ChatRequest {
+	model: string;
+	messages: ChatMessage[];
+	tools?: ToolDefinition[];
+	signal?: AbortSignal;
+	temperature?: number;
+}
+
+export interface Usage {
+	inputTokens?: number;
+	outputTokens?: number;
+}
+
+export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'other';
+
+export type StreamEvent =
+	| { type: 'text'; delta: string }
+	| { type: 'tool_call'; call: ToolCall }
+	| { type: 'usage'; usage: Usage }
+	| { type: 'done'; finishReason: FinishReason };
+
+/**
+ * What a provider can do. Anything marked `unknown` is probed at runtime and
+ * surfaced to the user as a clear error rather than assumed.
+ */
+export interface ProviderCapabilities {
+	streaming: boolean;
+	/** `unknown` means it depends on the model (Ollama). */
+	toolCalling: boolean | 'unknown';
+	usageReporting: boolean;
+	modelDiscovery: boolean;
+	/** Whether the provider is a paid cloud service billed by the user. */
+	billed: boolean;
+	/** Whether requests leave the local machine. */
+	remote: boolean;
+}
+
+export interface ModelInfo {
+	id: string;
+	label?: string;
+	contextWindow?: number;
+}
+
+export type ConnectionStatus =
+	| { ok: true; detail: string }
+	| { ok: false; error: ProviderError };
+
+export interface Provider {
+	readonly id: ProviderId;
+	readonly displayName: string;
+	readonly capabilities: ProviderCapabilities;
+	listModels(signal?: AbortSignal): Promise<ModelInfo[]>;
+	checkConnection(signal?: AbortSignal): Promise<ConnectionStatus>;
+	chat(request: ChatRequest): AsyncIterable<StreamEvent>;
+}
+
+export type ProviderErrorKind =
+	| 'auth'
+	| 'rate_limit'
+	| 'network'
+	| 'invalid_request'
+	| 'unsupported_tools'
+	| 'model_not_found'
+	| 'server'
+	| 'cancelled'
+	| 'unknown';
+
+export class ProviderError extends Error {
+	readonly kind: ProviderErrorKind;
+	readonly status?: number;
+
+	constructor(kind: ProviderErrorKind, message: string, status?: number) {
+		super(message);
+		this.name = 'ProviderError';
+		this.kind = kind;
+		this.status = status;
+	}
+
+	get retryable(): boolean {
+		return this.kind === 'rate_limit' || this.kind === 'network' || this.kind === 'server';
+	}
+
+	/** Human-readable guidance shown in the chat view. */
+	userMessage(): string {
+		switch (this.kind) {
+			case 'auth':
+				return `Authentication failed: ${this.message}. Check the API key in settings.`;
+			case 'rate_limit':
+				return `Rate limited by the provider: ${this.message}. Wait a moment and try again.`;
+			case 'network':
+				return `Could not reach the provider: ${this.message}. Check that the server is running and the URL is correct.`;
+			case 'unsupported_tools':
+				return `This model does not support tool calling: ${this.message}. Choose a tool-capable model, or ask a question that needs no vault access.`;
+			case 'model_not_found':
+				return `Model not found: ${this.message}. Pick a different model in settings.`;
+			case 'invalid_request':
+				return `The provider rejected the request: ${this.message}`;
+			case 'server':
+				return `The provider returned a server error: ${this.message}`;
+			case 'cancelled':
+				return 'Generation stopped.';
+			default:
+				return this.message;
+		}
+	}
+}
+
+export function isAbortError(err: unknown): boolean {
+	return err instanceof Error && (err.name === 'AbortError' || err.message === 'The user aborted a request.');
+}
+
+export function toProviderError(err: unknown): ProviderError {
+	if (err instanceof ProviderError) return err;
+	if (isAbortError(err)) return new ProviderError('cancelled', 'Generation stopped.');
+	if (err instanceof TypeError) {
+		// fetch rejects with TypeError on DNS failure, refused connection, CORS block.
+		return new ProviderError('network', err.message);
+	}
+	if (err instanceof Error) return new ProviderError('unknown', err.message);
+	return new ProviderError('unknown', String(err));
+}
+
+/** Map an HTTP status plus the error body to a ProviderError. */
+export function errorFromStatus(status: number, bodyText: string): ProviderError {
+	const detail = extractErrorMessage(bodyText);
+	if (status === 401 || status === 403) return new ProviderError('auth', detail || `HTTP ${status}`, status);
+	if (status === 429) return new ProviderError('rate_limit', detail || 'too many requests', status);
+	if (status === 404) {
+		if (/model/i.test(detail)) return new ProviderError('model_not_found', detail, status);
+		return new ProviderError('invalid_request', detail || 'not found (HTTP 404)', status);
+	}
+	if (status >= 400 && status < 500) {
+		if (/does not support tools|tool use|tools are not supported|function calling/i.test(detail)) {
+			return new ProviderError('unsupported_tools', detail, status);
+		}
+		if (/model .* not found|no such model|model_not_found/i.test(detail)) {
+			return new ProviderError('model_not_found', detail, status);
+		}
+		return new ProviderError('invalid_request', detail || `HTTP ${status}`, status);
+	}
+	if (status >= 500) return new ProviderError('server', detail || `HTTP ${status}`, status);
+	return new ProviderError('unknown', detail || `HTTP ${status}`, status);
+}
+
+function extractErrorMessage(bodyText: string): string {
+	const trimmed = bodyText.trim();
+	if (!trimmed) return '';
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		if (parsed && typeof parsed === 'object') {
+			const obj = parsed as Record<string, unknown>;
+			const err = obj['error'];
+			if (typeof err === 'string') return err;
+			if (err && typeof err === 'object') {
+				const msg = (err as Record<string, unknown>)['message'];
+				if (typeof msg === 'string') return msg;
+			}
+			const msg = obj['message'];
+			if (typeof msg === 'string') return msg;
+		}
+	} catch {
+		// not JSON
+	}
+	return trimmed.slice(0, 300);
+}
