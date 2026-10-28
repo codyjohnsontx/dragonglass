@@ -16,6 +16,9 @@ src/
     ollama.ts             Ollama native API (/api/chat NDJSON).
     openai.ts             OpenAI Chat Completions (SSE). Base for the planned
                           custom OpenAI-compatible adapter.
+    anthropic.ts          Anthropic Messages API (SSE, tool_use blocks).
+    gemini.ts             Gemini API (streamGenerateContent SSE,
+                          function declarations, thought signatures).
     registry.ts           Builds providers from settings; reads keys lazily.
   agent/
     runtime.ts            The agent loop: stream, validate tool calls, execute,
@@ -73,8 +76,9 @@ src/
   check inside the atomic callback. If anything changed, nothing is written and
   the proposal is marked out of date.
 - **Secrets** live in Obsidian's `SecretStorage`; settings persist only the
-  secret id. The OpenAI adapter reads the key through a closure at request
-  time and never stores it.
+  secret id. Each cloud adapter reads its own key through a closure at
+  request time and never stores it; `registry.ts` wires each provider to its
+  own secret id only, so a key cannot reach another provider.
 
 ## Provider abstraction
 
@@ -83,14 +87,31 @@ model discovery, billed, remote), `listModels`, `checkConnection`, and
 `chat` returning an async iterable of `StreamEvent`. Capability differences are
 handled explicitly: Ollama's tool support is per model, so it is `'unknown'`
 and the runtime retries once without tools when the server rejects them.
+Wire-format differences stay inside each adapter: Anthropic lifts the system
+prompt out, requires strictly alternating roles and a `max_tokens` cap, and
+reports input and output tokens in separate events; Gemini uses a `model` role,
+matches tool results by name, rejects `additionalProperties` in schemas,
+requires its thought signature to be replayed with function calls, reports an
+invalid key as HTTP 400, and can stop with a safety reason and no text, which
+is surfaced as an error.
+
+Conversations are provider-neutral (`ChatMessage`), so switching providers
+replays the whole history, including tool calls another provider made. The one
+piece of provider state kept on a message is `ToolCall.signature` (Gemini's
+thought signature); other adapters ignore it. When a request declares no tools
+(vault tools turned off), the Anthropic and Gemini adapters replay earlier tool
+calls and results as plain text. Anthropic requires this: its API rejects tool
+blocks in a request without tools. For Gemini it is a precaution that has not
+been confirmed against the live API.
 
 Adapters depend on an `HttpClient` rather than `fetch` directly. The streaming
 client uses `fetch`; the fallback wraps Obsidian's `requestUrl` (no CORS
 issues, no streaming). Tests inject real HTTP against a fake server or a
 scripted client.
 
-Adding Anthropic, Gemini, or a custom OpenAI-compatible endpoint means adding
-one adapter file plus a settings block; the runtime and UI do not change.
+Adding a provider (next: a custom OpenAI-compatible endpoint) means adding
+one adapter file, an id in `PROVIDER_IDS`, a settings block and a registry
+entry; the runtime and chat view do not change.
 
 ## Persistence
 

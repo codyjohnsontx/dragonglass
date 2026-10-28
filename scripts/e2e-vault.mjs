@@ -32,6 +32,8 @@ writeFileSync(
 			activeProvider: 'ollama',
 			ollama: { baseUrl: fakeBase, model: 'fake-tools' },
 			openai: { apiKeySecretId: '', model: 'fake-gpt', baseUrl: `${fakeBase}/v1` },
+			anthropic: { apiKeySecretId: '', model: 'fake-claude', baseUrl: `${fakeBase}/anthropic/v1`, maxTokens: 1024 },
+			gemini: { apiKeySecretId: '', model: 'fake-gemini', baseUrl: `${fakeBase}/gemini/v1beta` },
 		},
 		null,
 		2,

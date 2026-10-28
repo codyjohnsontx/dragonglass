@@ -3,7 +3,7 @@ import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
 import { Conversation, StoredMessage } from '../persistence/conversation';
-import { ModelInfo, ProviderId } from '../providers/types';
+import { countModels, ModelInfo, PROVIDER_IDS, ProviderId } from '../providers/types';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
 
@@ -102,8 +102,8 @@ export class ChatView extends ItemView {
 
 		const modelRow = h.createDiv({ cls: 'dg-header-row' });
 		const providerSelect = modelRow.createEl('select', { cls: 'dropdown dg-provider-select' });
-		for (const [id, label] of [['ollama', 'Ollama'], ['openai', 'OpenAI']] as Array<[ProviderId, string]>) {
-			const opt = providerSelect.createEl('option', { text: label, value: id });
+		for (const id of PROVIDER_IDS) {
+			const opt = providerSelect.createEl('option', { text: this.core.provider(id).displayName, value: id });
 			if (id === settings.activeProvider) opt.selected = true;
 		}
 		providerSelect.addEventListener('change', () => void this.switchProvider(providerSelect.value as ProviderId));
@@ -161,7 +161,7 @@ export class ChatView extends ItemView {
 			this.models = await this.core.listModels();
 			if (!this.core.activeModel() && this.models[0]) await this.core.setActiveModel(this.models[0].id);
 			await this.renderHeader();
-			this.setStatus('ok', `${this.models.length} models available`);
+			this.setStatus('ok', `${countModels(this.models.length)} available`);
 		} catch (e) {
 			if (!quiet) new Notice(e instanceof Error ? e.message : String(e));
 		}

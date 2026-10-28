@@ -83,4 +83,24 @@ describe('mergeSettings', () => {
 		expect(merged.transport).toBe('requestUrl');
 		expect('extra' in merged).toBe(false);
 	});
+
+	it('merges Anthropic and Gemini settings and keeps settings saved before they existed', () => {
+		const legacy = mergeSettings({ activeProvider: 'openai', openai: { apiKeySecretId: 'oa', model: 'gpt-x' } });
+		expect(legacy.anthropic).toEqual(DEFAULT_SETTINGS.anthropic);
+		expect(legacy.gemini).toEqual(DEFAULT_SETTINGS.gemini);
+		expect(legacy.openai.apiKeySecretId).toBe('oa');
+
+		const merged = mergeSettings({
+			activeProvider: 'gemini',
+			anthropic: { apiKeySecretId: 'ant', model: 'claude-x', maxTokens: 2048 },
+			gemini: { apiKeySecretId: 'gem', model: 'gemini-x', baseUrl: 'http://g' },
+		});
+		expect(merged.activeProvider).toBe('gemini');
+		expect(merged.anthropic).toEqual({ ...DEFAULT_SETTINGS.anthropic, apiKeySecretId: 'ant', model: 'claude-x', maxTokens: 2048 });
+		expect(merged.gemini).toEqual({ apiKeySecretId: 'gem', model: 'gemini-x', baseUrl: 'http://g' });
+		expect(mergeSettings({ activeProvider: 'mistral', anthropic: { maxTokens: -5 } })).toMatchObject({
+			activeProvider: DEFAULT_SETTINGS.activeProvider,
+			anthropic: { maxTokens: DEFAULT_SETTINGS.anthropic.maxTokens },
+		});
+	});
 });

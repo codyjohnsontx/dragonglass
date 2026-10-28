@@ -1,11 +1,17 @@
 /**
- * Provider-agnostic chat types. Every adapter (Ollama, OpenAI, and the
- * follow-up Anthropic / Gemini / custom OpenAI-compatible adapters) maps its
- * wire format onto these types so the agent runtime and UI never see
+ * Provider-agnostic chat types. Every adapter (Ollama, OpenAI, Anthropic,
+ * Gemini, and the follow-up custom OpenAI-compatible adapter) maps its wire
+ * format onto these types so the agent runtime and UI never see
  * provider-specific shapes.
  */
 
-export type ProviderId = 'ollama' | 'openai';
+export const PROVIDER_IDS = ['ollama', 'openai', 'anthropic', 'gemini'] as const;
+
+export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+export function isProviderId(v: unknown): v is ProviderId {
+	return typeof v === 'string' && (PROVIDER_IDS as readonly string[]).includes(v);
+}
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -15,6 +21,11 @@ export interface ToolCall {
 	name: string;
 	/** Raw JSON text of the arguments. Parsed and validated by the tool layer. */
 	argumentsJson: string;
+	/**
+	 * Opaque provider state that must be echoed back with this call (Gemini
+	 * thought signatures). Other providers ignore it.
+	 */
+	signature?: string;
 }
 
 export interface ChatMessage {
@@ -133,27 +144,34 @@ export class ProviderError extends Error {
 
 	/** Human-readable guidance shown in the chat view. */
 	userMessage(): string {
+		// Provider messages often end in a period; the templates add their own.
+		const detail = this.message.replace(/[.\s]+$/, '');
 		switch (this.kind) {
 			case 'auth':
-				return `Authentication failed: ${this.message}. Check the API key in settings.`;
+				return `Authentication failed: ${detail}. Check the API key in settings.`;
 			case 'rate_limit':
-				return `Rate limited by the provider: ${this.message}. Wait a moment and try again.`;
+				return `Rate limited by the provider: ${detail}. Wait a moment and try again.`;
 			case 'network':
-				return `Could not reach the provider: ${this.message}. Check that the server is running and the URL is correct.`;
+				return `Could not reach the provider: ${detail}. Check that the server is running and the URL is correct.`;
 			case 'unsupported_tools':
-				return `This model does not support tool calling: ${this.message}. Choose a tool-capable model, or ask a question that needs no vault access.`;
+				return `This model does not support tool calling: ${detail}. Choose a tool-capable model, or ask a question that needs no vault access.`;
 			case 'model_not_found':
-				return `Model not found: ${this.message}. Pick a different model in settings.`;
+				return `Model not found: ${detail}. Pick a different model in settings.`;
 			case 'invalid_request':
-				return `The provider rejected the request: ${this.message}`;
+				return `The provider rejected the request: ${detail}`;
 			case 'server':
-				return `The provider returned a server error: ${this.message}`;
+				return `The provider returned a server error: ${detail}`;
 			case 'cancelled':
 				return 'Generation stopped.';
 			default:
 				return this.message;
 		}
 	}
+}
+
+/** "1 model", "3 models". */
+export function countModels(n: number): string {
+	return `${n} model${n === 1 ? '' : 's'}`;
 }
 
 export function isAbortError(err: unknown): boolean {
@@ -169,6 +187,18 @@ export function toProviderError(err: unknown): ProviderError {
 	}
 	if (err instanceof Error) return new ProviderError('unknown', err.message);
 	return new ProviderError('unknown', String(err));
+}
+
+/**
+ * Plain-text stand-ins for tool history, for requests that declare no tools:
+ * Anthropic rejects tool blocks then, and Gemini gets the same treatment.
+ */
+export function toolCallText(call: ToolCall): string {
+	return `[Called tool ${call.name} with ${call.argumentsJson || '{}'}]`;
+}
+
+export function toolResultText(m: ChatMessage): string {
+	return `[Result of tool ${m.toolName ?? 'unknown'}]\n${m.content}`;
 }
 
 /** Map an HTTP status plus the error body to a ProviderError. */

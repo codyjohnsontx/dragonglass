@@ -20,24 +20,29 @@ without redesigning the provider or tool architecture.
 - Token usage display and a configurable usage warning.
 - Unit tests against an in-memory vault and a fake Ollama/OpenAI server.
 
+## Done after 0.1.0
+
+- **Anthropic adapter** (Messages API, SSE, tool use blocks).
+- **Google Gemini adapter** (streamGenerateContent, function declarations,
+  thought signatures).
+- Switching providers mid-conversation replays tool history across providers.
+
 ## Next
 
-1. **Anthropic adapter** (Messages API, SSE, tool use blocks).
-2. **Google Gemini adapter** (generateContent streaming, function declarations).
-3. **Custom OpenAI-compatible endpoint** (reuse the OpenAI adapter with
+1. **Custom OpenAI-compatible endpoint** (reuse the OpenAI adapter with
    configurable base URL, auth header, and capability overrides).
-4. **Batch review**: group proposals from one turn into a single review with
+2. **Batch review**: group proposals from one turn into a single review with
    approve-all, so multi-file changes are reviewed together.
-5. **More write tools**: create folder, move/rename note, update frontmatter
+3. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-6. **Relationship tools**: "related notes" via shared links, tags and
+4. **Relationship tools**: "related notes" via shared links, tags and
    co-citation; propose wikilinks with reasons.
-7. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-8. **Bases**: read and propose `.base` files once the format is stable.
-9. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+6. **Bases**: read and propose `.base` files once the format is stable.
+7. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    with an on-disk index; never required.
-10. **Cost estimates** for paid providers from a maintained price table,
+8. **Cost estimates** for paid providers from a maintained price table,
     clearly labelled as estimates.
-11. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+9. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
     been exercised on desktop.
