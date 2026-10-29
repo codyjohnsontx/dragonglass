@@ -53,7 +53,9 @@ src/
 2. `core` appends the user message, builds the system prompt plus provider
    messages (`agent/context.ts`), and starts `runAgent`.
 3. `runAgent` streams from the active `Provider`. Text deltas go straight to the
-   view. Tool calls are collected until the turn ends.
+   view. Tool calls are collected until the turn ends, but the view hears
+   about each one as soon as the model names it (`tool_call_start`), so the
+   running-tool chip appears while the arguments are still streaming.
 4. Each tool call is validated against the tool's JSON schema
    (`agent/tools.ts`). Only then does the tool run. Read tools return text.
    Write tools return a `ChangeProposal` and *do not write*.
@@ -97,9 +99,17 @@ invalid key as HTTP 400, and can stop with a safety reason and no text, which
 is surfaced as an error. Ollama sends `options.num_ctx` on every request (its
 server default of 4096 silently cuts prompts that do not fit), streams a
 thinking model's reasoning as `thinking` events, and emits a `warning` event
-when `prompt_eval_count` says the prompt was cut anyway. An adapter that knows
-the model's context window exposes it through `contextWindow`, and `core`
-caps note content at an estimated half of it (`noteTokenBudget`).
+when `prompt_eval_count` says the prompt was cut anyway: a count well under
+the estimate for a prompt that could not have fit, or a count of exactly half
+the window plus two tokens, which is what Ollama's runner leaves after cutting
+one oversized message (measured on 0.40) and is trusted whenever the prompt
+could have overflowed under a byte-level tokenizer, so notes in Chinese,
+Japanese or Korean are caught however their tokenizer counts. An adapter that
+knows the model's context window exposes it through `contextWindow`, and
+`core` caps note content at an estimated half of it (`noteTokenBudget`): the
+attached context shares that budget (`allocateTokens`), and each send builds
+its own tool registry so a read tool applies the budget of the send it
+belongs to.
 
 Conversations are provider-neutral (`ChatMessage`), so switching providers
 replays the whole history, including tool calls another provider made. The one

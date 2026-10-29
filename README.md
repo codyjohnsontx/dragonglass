@@ -44,9 +44,12 @@ Open **Settings → Dragonglass AI**.
 
 1. Install [Ollama](https://ollama.com) and pull a model that supports tool
    calling, for example `ollama pull llama3.1` or `ollama pull qwen2.5`.
+   Thinking models such as `qwen3` work too, but pause for a long time
+   before answering (see "Let thinking models think" below).
 2. Leave **Server URL** at `http://127.0.0.1:11434` unless Ollama runs
    elsewhere.
-3. Enter the model name and select **Test Ollama connection**.
+3. Enter the model name and select **Test Ollama connection**. It reports
+   the server version and whether that model is installed.
 
 Ollama allows requests from Obsidian's `app://` origin by default. If you run
 an older Ollama or have set `OLLAMA_ORIGINS` yourself, either include
@@ -59,7 +62,8 @@ rejection, retries without tools, and tells you.
 Two settings matter for local models:
 
 - **Context window** is sent as Ollama's `num_ctx` on every request (default
-  16,384 tokens). Ollama's own default is 4,096, which one long note overflows;
+  16,384 tokens). Until the plugin sets it, Ollama runs at its own default of
+  4,096 tokens, which one long note overflows;
   when that happens Ollama silently keeps about half the prompt and drops the
   system prompt and your question. The value is capped at what the model
   supports. If a prompt is still cut, the reply carries a warning saying so.
@@ -112,8 +116,10 @@ wrote it.
 ### Context
 
 By default the active note and any selected text are attached to each message.
-The active note is the Markdown note you last focused in any window, so it
-stays attached while you type in the sidebar or have a Canvas or PDF open.
+A selection is attached once: if it is still selected at the next message its
+chip is no longer highlighted, and clicking it sends it again. The active
+note is the Markdown note you last focused in any window, so it stays attached
+while you type in the sidebar or have a Canvas or PDF open.
 Toggle them per message in the sidebar, or attach other notes with
 **Attach note…**. When a cloud provider is active the sidebar says so, and
 highlighted chips are exactly what gets sent.
@@ -127,8 +133,9 @@ Open the sidebar with the gem icon in the ribbon or the command
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
   The model reads the note, proposes a change, and a card with the diff
   appears. Select **Approve** to apply or **Reject** to discard.
-- If you edit the note yourself after a proposal was made, approval is blocked
-  and the card says the proposal is out of date. Ask again.
+- If you edit the note yourself after a proposal was made, the card switches
+  to out of date and approval is blocked; undoing your edit makes it
+  approvable again. Otherwise ask again.
 - **Revert** on an applied edit restores the snapshot taken before it was
   applied. It is refused if the note changed after the edit was applied, so
   later edits are never overwritten. Snapshots are kept under the plugin
@@ -140,9 +147,9 @@ Open the sidebar with the gem icon in the ribbon or the command
   red when a request fails because the provider is unreachable or refuses the
   request, and is re-checked every time you send.
 
-Token counts reported by the provider are shown under each reply and as a
-conversation total. These are counts, not bills. The optional usage warning is
-a reminder, not a spending limit.
+Token counts reported by the provider are shown under each reply, summed over
+every tool round of that turn, and as a conversation total. These are counts,
+not bills. The optional usage warning is a reminder, not a spending limit.
 
 ## What works
 
@@ -164,9 +171,10 @@ vault:
 - Stale detection: a note edited after the proposal cannot be approved.
 - Conversation history persists across plugin reload.
 
-Not yet verified live: a real Ollama model and real OpenAI, Anthropic and
-Gemini keys were not available on the build machine. The wire formats are
-tested against shapes from the official API documentation. To verify live:
+Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
+Real OpenAI, Anthropic and Gemini keys were not available on the build
+machine; those wire formats are tested against shapes from the official API
+documentation. To verify live:
 
 1. Run Ollama with a tool-capable model and set it in settings; or add an
    OpenAI, Anthropic or Gemini key in the keychain.

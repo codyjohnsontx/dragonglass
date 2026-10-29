@@ -12,6 +12,13 @@ export type RunEvent =
 	| { type: 'text_delta'; delta: string }
 	/** Reasoning streamed by a thinking model before its answer. */
 	| { type: 'thinking_delta'; delta: string }
+	/**
+	 * The model has begun a call to `name` and is still producing its
+	 * arguments. One per call, in call order, before the turn's `assistant_end`;
+	 * synthesized for providers that only report finished calls.
+	 */
+	| { type: 'tool_call_start'; name: string }
+	/** A finished call about to run; `tool` is undefined for a name the registry does not know. */
 	| { type: 'tool_call'; call: ToolCall; tool: AgentTool | undefined }
 	| { type: 'tool_result'; call: ToolCall; result: ToolResult }
 	| { type: 'assistant_end'; content: string; thinking: string; toolCalls: ToolCall[]; usage?: Usage; warnings: string[] }
@@ -52,6 +59,7 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		const warnings: string[] = [];
 		let usage: Usage | undefined;
 		let turnError: ProviderError | null = null;
+		let callsStarted = 0;
 
 		try {
 			const stream = opts.provider.chat({
@@ -68,8 +76,16 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 				} else if (e.type === 'thinking') {
 					thinking += e.delta;
 					yield { type: 'thinking_delta', delta: e.delta };
+				} else if (e.type === 'tool_call_start') {
+					callsStarted++;
+					yield { type: 'tool_call_start', name: e.name };
 				} else if (e.type === 'tool_call') {
 					toolCalls.push(e.call);
+					if (toolCalls.length > callsStarted) {
+						// The provider reports only finished calls; give the view the same start signal.
+						callsStarted++;
+						yield { type: 'tool_call_start', name: e.call.name };
+					}
 				} else if (e.type === 'usage') {
 					usage = e.usage;
 				} else if (e.type === 'warning') {

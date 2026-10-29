@@ -86,6 +86,44 @@
 	background: none;
 }
 
+/* An assistant round that only called tools: the calls show on their result rows, so no bubble. */
+.dg-msg-step {
+	padding: 0;
+	background: none;
+}
+
+.dg-msg-hidden {
+	display: none;
+}
+
+.dg-tool-running {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-1);
+}
+
+.dg-chip-running {
+	gap: var(--size-2-1);
+}
+
+.dg-chip-icon {
+	display: inline-flex;
+	flex: 0 0 auto;
+}
+
+.dg-chip-icon svg {
+	width: 1em;
+	height: 1em;
+	animation: dg-spin 1.2s linear infinite;
+}
+
+/* One line in a narrow sidebar: the chip shrinks and ellipsizes; flex drops the native marker, so draw one. */
+.dg-tool-result summary .dg-chip {
+	display: block;
+	min-width: 0;
+	white-space: nowrap;
+}
+
 .dg-msg-body p:first-child {
 	margin-top: 0;
 }
@@ -212,9 +250,27 @@ button.dg-chip {
 }
 
 .dg-tool-result summary {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	list-style: none;
+	white-space: nowrap;
 	cursor: pointer;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+}
+
+.dg-tool-result summary::-webkit-details-marker {
+	display: none;
+}
+
+.dg-tool-result summary::before {
+	content: '▸';
+	flex: 0 0 auto;
+}
+
+.dg-tool-result[open] summary::before {
+	content: '▾';
 }
 
 .dg-tool-error summary {
@@ -354,17 +410,38 @@ button.dg-chip {
 	white-space: pre-wrap;
 }
 
+/* A coloured sign column with its own gutter, so "−" next to a Markdown list dash still reads as a sign. */
 .dg-diff-sign {
-	flex: 0 0 1.2em;
+	flex: 0 0 1.6em;
+	text-align: center;
+	margin-right: var(--size-2-2);
+	border-right: 1px solid var(--background-modifier-border);
+	font-weight: var(--font-bold);
 	user-select: none;
+}
+
+.dg-diff-text {
+	flex: 1;
+	min-width: 0;
 }
 
 .dg-diff-add {
 	background-color: rgba(var(--color-green-rgb), 0.15);
 }
 
+.dg-diff-add .dg-diff-sign {
+	color: var(--color-green);
+}
+
 .dg-diff-del {
 	background-color: rgba(var(--color-red-rgb), 0.15);
+}
+
+.dg-diff-del .dg-diff-sign {
+	color: var(--color-red);
+}
+
+.dg-diff-del .dg-diff-text {
 	text-decoration: line-through;
 	text-decoration-color: var(--text-faint);
 }

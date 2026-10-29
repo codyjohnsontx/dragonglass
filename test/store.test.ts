@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ConversationStore } from '../src/persistence/store';
-import { deriveTitle, sanitizeConversation } from '../src/persistence/conversation';
+import { deriveTitle, sanitizeConversation, StoredMessage, usageByTurn } from '../src/persistence/conversation';
 import { mergeSettings, DEFAULT_SETTINGS } from '../src/settings';
 import { MemoryVaultPort } from './memory-vault';
 
@@ -70,6 +70,25 @@ describe('conversation helpers', () => {
 		expect(conv.messages).toHaveLength(1);
 		expect(Object.keys(conv.proposals)).toEqual(['p1', 'p2']);
 		expect(sanitizeConversation(null)).toBeNull();
+	});
+});
+
+describe('usageByTurn', () => {
+	it('sums every request of a user turn onto its last reply and skips turns without counts', () => {
+		const msgs: StoredMessage[] = [
+			{ id: 'u1', role: 'user', content: 'read it', createdAt: 1 },
+			{ id: 'a1', role: 'assistant', content: '', createdAt: 2, model: 'qwen3:8b', usage: { inputTokens: 1000, outputTokens: 500, reasoningTokens: 400 }, toolCalls: [{ id: 'c', name: 'read_note', argumentsJson: '{}' }] },
+			{ id: 't1', role: 'tool', content: 'note', createdAt: 3, toolCallId: 'c', toolName: 'read_note' },
+			{ id: 'a2', role: 'assistant', content: 'Here it is.', createdAt: 4, model: 'qwen3:8b', usage: { inputTokens: 1600, outputTokens: 50 } },
+			{ id: 'u2', role: 'user', content: 'thanks', createdAt: 5 },
+			{ id: 'a3', role: 'assistant', content: '', createdAt: 6, error: 'boom' },
+			{ id: 'u3', role: 'user', content: 'again', createdAt: 7 },
+			{ id: 'a4', role: 'assistant', content: 'ok', createdAt: 8, model: 'other', usage: { inputTokens: 10, outputTokens: 2 } },
+		];
+		const usage = usageByTurn(msgs);
+		expect([...usage.keys()]).toEqual(['a2', 'a4']);
+		expect(usage.get('a2')).toEqual({ inputTokens: 2600, outputTokens: 550, reasoningTokens: 400, requests: 2, model: 'qwen3:8b' });
+		expect(usage.get('a4')).toEqual({ inputTokens: 10, outputTokens: 2, reasoningTokens: 0, requests: 1, model: 'other' });
 	});
 });
 

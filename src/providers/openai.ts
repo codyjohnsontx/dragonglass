@@ -132,7 +132,11 @@ export class OpenAIProvider implements Provider {
 						const idx = typeof tc.index === 'number' ? tc.index : 0;
 						const entry = pending.get(idx) ?? { id: '', name: '', args: '' };
 						if (tc.id) entry.id = tc.id;
-						if (tc.function?.name) entry.name += tc.function.name;
+						if (tc.function?.name) {
+							// The name arrives whole in the first delta; the arguments stream after it.
+							if (!entry.name) yield { type: 'tool_call_start', name: tc.function.name };
+							entry.name += tc.function.name;
+						}
 						if (tc.function?.arguments) entry.args += tc.function.arguments;
 						pending.set(idx, entry);
 					}

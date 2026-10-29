@@ -150,7 +150,9 @@ export class AnthropicProvider implements Provider {
 						break;
 					case 'content_block_start':
 						if (ev.content_block?.type === 'tool_use' && typeof ev.index === 'number') {
-							blocks.set(ev.index, { id: ev.content_block.id ?? '', name: ev.content_block.name ?? '', json: '' });
+							const name = ev.content_block.name ?? '';
+							blocks.set(ev.index, { id: ev.content_block.id ?? '', name, json: '' });
+							yield { type: 'tool_call_start', name };
 						}
 						break;
 					case 'content_block_delta': {

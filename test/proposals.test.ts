@@ -55,6 +55,54 @@ describe('ProposalEngine', () => {
 		expect(await e.checkFreshness(p)).toBe('stale');
 	});
 
+	it('refresh marks a pending proposal stale when the note changes and pending again when the change is undone', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'v1\n' });
+		const e = engine(vault);
+		const p = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'v2\n' }], 'rewrite');
+		expect(await e.refresh(p)).toBe(false);
+		expect(p.status).toBe('pending');
+		vault.files.set('A.md', 'edited by hand\n');
+		expect(await e.refresh(p)).toBe(true);
+		expect(p.status).toBe('stale');
+		expect(await e.refresh(p)).toBe(false);
+		vault.files.set('A.md', 'v1\n');
+		expect(await e.refresh(p)).toBe(true);
+		expect(p.status).toBe('pending');
+		await e.apply(p);
+		expect(p.status).toBe('applied');
+		// Final states are left alone, whatever the note does.
+		vault.files.set('A.md', 'later\n');
+		expect(await e.refresh(p)).toBe(false);
+		expect(p.status).toBe('applied');
+		const c = await e.proposeCreate('c1', 'New.md', 'x', 'make');
+		expect(await e.refresh(c)).toBe(false);
+		expect(c.status).toBe('pending');
+	});
+
+	it('a refresh started by the apply write leaves the applied proposal alone', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'v1\n' });
+		const e = engine(vault);
+		const p = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'v2\n' }], 'rewrite');
+		// Obsidian fires 'modify' during Vault.process; the view refreshes from there.
+		const refreshes: Array<Promise<boolean>> = [];
+		const original = vault.processNote.bind(vault);
+		vault.processNote = async (path, fn) => {
+			await original(path, fn);
+			refreshes.push(e.refresh(p));
+		};
+		await e.apply(p);
+		expect(await Promise.all(refreshes)).toEqual([false]);
+		expect(p.status).toBe('applied');
+		// Same when the refresh resumes while apply is still writing.
+		const q = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'v3\n' }], 'rewrite');
+		vault.processNote = async (path, fn) => {
+			await original(path, fn);
+			expect(await e.refresh(q)).toBe(false);
+		};
+		await e.apply(q);
+		expect(q.status).toBe('applied');
+	});
+
 	it('guards inside the atomic write as well', async () => {
 		const vault = new MemoryVaultPort({ 'A.md': 'v1\n' });
 		const e = engine(vault);

@@ -35,6 +35,7 @@ export function createProviders(
 	return {
 		ollama: new OllamaProvider(lazyHttp, () => ({
 			baseUrl: settings().ollama.baseUrl,
+			model: settings().ollama.model,
 			numCtx: settings().ollama.numCtx,
 			think: settings().ollama.think,
 		})),
