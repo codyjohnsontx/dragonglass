@@ -26,23 +26,25 @@ without redesigning the provider or tool architecture.
 - **Google Gemini adapter** (streamGenerateContent, function declarations,
   thought signatures).
 - Switching providers mid-conversation replays tool history across providers.
+- **Custom OpenAI-compatible endpoint**: the OpenAI adapter with a
+  configurable base URL, bearer / custom-header / no authentication, and
+  tool-calling and streaming overrides (Moonshot, OpenRouter, Groq, LM Studio,
+  vLLM, llama.cpp).
 
 ## Next
 
-1. **Custom OpenAI-compatible endpoint** (reuse the OpenAI adapter with
-   configurable base URL, auth header, and capability overrides).
-2. **Batch review**: group proposals from one turn into a single review with
+1. **Batch review**: group proposals from one turn into a single review with
    approve-all, so multi-file changes are reviewed together.
-3. **More write tools**: create folder, move/rename note, update frontmatter
+2. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-4. **Relationship tools**: "related notes" via shared links, tags and
+3. **Relationship tools**: "related notes" via shared links, tags and
    co-citation; propose wikilinks with reasons.
-5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-6. **Bases**: read and propose `.base` files once the format is stable.
-7. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+5. **Bases**: read and propose `.base` files once the format is stable.
+6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    with an on-disk index; never required.
-8. **Cost estimates** for paid providers from a maintained price table,
-    clearly labelled as estimates.
-9. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
-    been exercised on desktop.
+7. **Cost estimates** for paid providers from a maintained price table,
+   clearly labelled as estimates.
+8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+   been exercised on desktop.

@@ -9,49 +9,93 @@ import {
 	Provider,
 	ProviderCapabilities,
 	ProviderError,
+	ProviderId,
 	StreamEvent,
 	toProviderError,
 } from './types';
 import { HttpClient, joinUrl, parseSse } from './http';
 
+/**
+ * How the key is sent: `Authorization: Bearer <key>`, the bare key in a named
+ * header (`api-key: <key>`), or no credentials at all for local servers.
+ */
+export type OpenAIAuth = { kind: 'bearer' } | { kind: 'header'; name: string } | { kind: 'none' };
+
 export interface OpenAIConfig {
 	baseUrl: string;
 	/** Resolved lazily so the secret is never held on the adapter. */
 	apiKey: () => string | null;
+	/** Defaults to bearer. */
+	auth?: OpenAIAuth;
+	/** Ask for SSE when the transport streams. Off for servers that cannot stream. Defaults to true. */
+	streaming?: boolean;
+	/** Send tool definitions. Off for servers that reject or mishandle them. Defaults to true. */
+	toolCalling?: boolean;
+	/** The server runs on this machine: nothing leaves it and nothing is billed. Defaults to false. */
+	local?: boolean;
+}
+
+export interface OpenAIIdentity {
+	id: ProviderId;
+	displayName: string;
 }
 
 /**
- * OpenAI adapter using the Chat Completions API with SSE streaming. The same
- * class is the basis for the planned "custom OpenAI-compatible endpoint"
- * adapter: only `baseUrl`, the auth header and the capability flags differ.
+ * OpenAI adapter using the Chat Completions API with SSE streaming. The
+ * custom OpenAI-compatible provider is this class with its own identity,
+ * base URL, auth and capability overrides.
  */
 export class OpenAIProvider implements Provider {
-	readonly id = 'openai' as const;
-	readonly displayName = 'OpenAI';
-	readonly capabilities: ProviderCapabilities = {
-		streaming: true,
-		toolCalling: true,
-		usageReporting: true,
-		modelDiscovery: true,
-		billed: true,
-		remote: true,
-	};
+	readonly id: ProviderId;
+	readonly displayName: string;
 
 	constructor(
 		private readonly http: HttpClient,
 		private readonly config: () => OpenAIConfig,
-	) {}
+		identity: OpenAIIdentity = { id: 'openai', displayName: 'OpenAI' },
+	) {
+		this.id = identity.id;
+		this.displayName = identity.displayName;
+	}
+
+	get capabilities(): ProviderCapabilities {
+		const c = this.config();
+		return {
+			streaming: c.streaming !== false,
+			toolCalling: c.toolCalling !== false,
+			usageReporting: true,
+			modelDiscovery: true,
+			billed: !c.local,
+			remote: !c.local,
+		};
+	}
 
 	private headers(): Record<string, string> {
-		const key = this.config().apiKey();
+		const config = this.config();
+		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+		const auth = config.auth ?? { kind: 'bearer' };
+		if (auth.kind === 'none') return headers;
+		const key = config.apiKey();
 		if (!key) throw new ProviderError('auth', 'No API key configured');
-		return { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
+		if (auth.kind === 'bearer') {
+			headers['Authorization'] = `Bearer ${key}`;
+		} else {
+			if (!auth.name.trim()) throw new ProviderError('auth', 'No auth header name configured');
+			headers[auth.name.trim()] = key;
+		}
+		return headers;
+	}
+
+	private url(path: string): string {
+		const base = this.config().baseUrl.trim();
+		if (!base) throw new ProviderError('invalid_request', 'No server URL configured');
+		return joinUrl(base, path);
 	}
 
 	async listModels(signal?: AbortSignal): Promise<ModelInfo[]> {
 		const headers = this.headers();
 		const res = await this.http.request({
-			url: joinUrl(this.config().baseUrl, '/models'),
+			url: this.url('/models'),
 			method: 'GET',
 			headers,
 			signal,
@@ -70,7 +114,7 @@ export class OpenAIProvider implements Provider {
 	async checkConnection(signal?: AbortSignal): Promise<ConnectionStatus> {
 		try {
 			const models = await this.listModels(signal);
-			return { ok: true, detail: `OpenAI reachable (${countModels(models.length)})` };
+			return { ok: true, detail: `${this.displayName} reachable (${countModels(models.length)})` };
 		} catch (e) {
 			return { ok: false, error: toProviderError(e) };
 		}
@@ -78,14 +122,15 @@ export class OpenAIProvider implements Provider {
 
 	async *chat(request: ChatRequest): AsyncIterable<StreamEvent> {
 		const headers = this.headers();
-		const streaming = this.http.supportsStreaming;
+		const { capabilities } = this;
+		const streaming = this.http.supportsStreaming && capabilities.streaming;
 		const body: Record<string, unknown> = {
 			model: request.model,
 			messages: request.messages.map(toOpenAIMessage),
 			stream: streaming,
 		};
 		if (streaming) body['stream_options'] = { include_usage: true };
-		if (request.tools && request.tools.length > 0) {
+		if (capabilities.toolCalling && request.tools && request.tools.length > 0) {
 			body['tools'] = request.tools.map((t) => ({
 				type: 'function',
 				function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -96,7 +141,7 @@ export class OpenAIProvider implements Provider {
 		let res;
 		try {
 			res = await this.http.stream({
-				url: joinUrl(this.config().baseUrl, '/chat/completions'),
+				url: this.url('/chat/completions'),
 				method: 'POST',
 				headers,
 				body: JSON.stringify(body),

@@ -1,9 +1,9 @@
-import { DragonglassSettings } from '../settings';
+import { CustomSettings, DragonglassSettings } from '../settings';
 import { AnthropicProvider } from './anthropic';
 import { GeminiProvider } from './gemini';
 import { HttpClient } from './http';
 import { OllamaProvider } from './ollama';
-import { OpenAIProvider } from './openai';
+import { OpenAIAuth, OpenAIProvider } from './openai';
 import { Provider, ProviderId } from './types';
 
 export interface SecretReader {
@@ -28,7 +28,7 @@ export function createProviders(
 	};
 	// Each cloud provider reads only its own secret, so a key is never sent to
 	// another provider.
-	const keyFor = (id: 'openai' | 'anthropic' | 'gemini') => () => {
+	const keyFor = (id: 'openai' | 'anthropic' | 'gemini' | 'custom') => () => {
 		const secretId = settings()[id].apiKeySecretId;
 		return secretId ? secrets.getSecret(secretId) : null;
 	};
@@ -46,7 +46,38 @@ export function createProviders(
 			maxTokens: settings().anthropic.maxTokens,
 		})),
 		gemini: new GeminiProvider(lazyHttp, () => ({ baseUrl: settings().gemini.baseUrl, apiKey: keyFor('gemini') })),
+		custom: new OpenAIProvider(
+			lazyHttp,
+			() => {
+				const c = settings().custom;
+				return {
+					baseUrl: c.baseUrl,
+					apiKey: keyFor('custom'),
+					auth: customAuth(c),
+					streaming: c.streaming,
+					toolCalling: c.toolCalling,
+					local: isLoopbackUrl(c.baseUrl),
+				};
+			},
+			{ id: 'custom', displayName: 'Custom' },
+		),
 	};
+}
+
+function customAuth(c: CustomSettings): OpenAIAuth {
+	if (c.auth === 'header') return { kind: 'header', name: c.authHeader };
+	return { kind: c.auth };
+}
+
+/** True when `url` points at this machine (LM Studio, llama.cpp, a local vLLM). */
+export function isLoopbackUrl(url: string): boolean {
+	let host: string;
+	try {
+		host = new URL(url.trim()).hostname;
+	} catch {
+		return false;
+	}
+	return host === 'localhost' || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host);
 }
 
 export function modelFor(settings: DragonglassSettings, id: ProviderId): string {

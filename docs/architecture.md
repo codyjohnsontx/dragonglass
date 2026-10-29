@@ -14,12 +14,14 @@ src/
     http.ts               Transport: streaming fetch client, requestUrl fallback,
                           SSE and NDJSON parsers.
     ollama.ts             Ollama native API (/api/chat NDJSON).
-    openai.ts             OpenAI Chat Completions (SSE). Base for the planned
-                          custom OpenAI-compatible adapter.
+    openai.ts             OpenAI Chat Completions (SSE). Also serves the custom
+                          OpenAI-compatible provider (own id, URL, auth and
+                          capability overrides).
     anthropic.ts          Anthropic Messages API (SSE, tool_use blocks).
     gemini.ts             Gemini API (streamGenerateContent SSE,
                           function declarations, thought signatures).
-    registry.ts           Builds providers from settings; reads keys lazily.
+    registry.ts           Builds providers from settings; reads keys lazily;
+                          maps custom endpoint settings onto the OpenAI adapter.
   agent/
     runtime.ts            The agent loop: stream, validate tool calls, execute,
                           feed results back, cap iterations, handle cancel.
@@ -125,9 +127,16 @@ client uses `fetch`; the fallback wraps Obsidian's `requestUrl` (no CORS
 issues, no streaming). Tests inject real HTTP against a fake server or a
 scripted client.
 
-Adding a provider (next: a custom OpenAI-compatible endpoint) means adding
-one adapter file, an id in `PROVIDER_IDS`, a settings block and a registry
-entry; the runtime and chat view do not change.
+The custom OpenAI-compatible provider (`custom`) is a second `OpenAIProvider`
+instance with its own identity and config: the key goes as a bearer token, in
+a named header, or not at all; tool calling and streaming can be switched off,
+and the adapter then omits `tools` or asks for a whole reply; a loopback base
+URL marks it local (not remote, not billed). Its capabilities are read from
+settings on each access, so changes apply without rebuilding providers.
+
+Adding a provider means adding one adapter file (or reusing one, as `custom`
+does), an id in `PROVIDER_IDS`, a settings block and a registry entry; the
+runtime and chat view do not change.
 
 ## Persistence
 

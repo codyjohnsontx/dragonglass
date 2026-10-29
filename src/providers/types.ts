@@ -1,11 +1,11 @@
 /**
- * Provider-agnostic chat types. Every adapter (Ollama, OpenAI, Anthropic,
- * Gemini, and the follow-up custom OpenAI-compatible adapter) maps its wire
- * format onto these types so the agent runtime and UI never see
+ * Provider-agnostic chat types. Every adapter (Ollama, OpenAI and custom
+ * OpenAI-compatible endpoints, Anthropic, Gemini) maps its wire format onto
+ * these types so the agent runtime and UI never see
  * provider-specific shapes.
  */
 
-export const PROVIDER_IDS = ['ollama', 'openai', 'anthropic', 'gemini'] as const;
+export const PROVIDER_IDS = ['ollama', 'openai', 'anthropic', 'gemini', 'custom'] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
@@ -314,7 +314,8 @@ export function errorFromStatus(status: number, bodyText: string): ProviderError
 		return new ProviderError('invalid_request', detail || 'not found (HTTP 404)', status);
 	}
 	if (status >= 400 && status < 500) {
-		if (/does not support tools|tool use|tools are not supported|function calling/i.test(detail)) {
+		// The last two are vLLM without --enable-auto-tool-choice and llama.cpp without --jinja.
+		if (/does not support tools|tool use|tools are not supported|function calling|tool choice requires|tools param requires/i.test(detail)) {
 			return new ProviderError('unsupported_tools', detail, status);
 		}
 		if (/model .* not found|no such model|model_not_found/i.test(detail)) {

@@ -109,6 +109,17 @@ describe('mergeSettings', () => {
 		expect(mergeSettings({ ollama: { numCtx: 4096.5, think: 'yes' } }).ollama).toMatchObject({ numCtx: 16384, think: true });
 	});
 
+	it('merges custom endpoint settings, rejecting unknown auth kinds', () => {
+		expect(mergeSettings({ activeProvider: 'openai' }).custom).toEqual(DEFAULT_SETTINGS.custom);
+		const merged = mergeSettings({
+			activeProvider: 'custom',
+			custom: { baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKeySecretId: 'cu', auth: 'none', authHeader: 'api-key', streaming: false, toolCalling: false },
+		});
+		expect(merged.activeProvider).toBe('custom');
+		expect(merged.custom).toEqual({ baseUrl: 'http://127.0.0.1:1234/v1', model: 'm', apiKeySecretId: 'cu', auth: 'none', authHeader: 'api-key', streaming: false, toolCalling: false });
+		expect(mergeSettings({ custom: { auth: 'basic', streaming: 'no' } }).custom).toEqual(DEFAULT_SETTINGS.custom);
+	});
+
 	it('merges Anthropic and Gemini settings and keeps settings saved before they existed', () => {
 		const legacy = mergeSettings({ activeProvider: 'openai', openai: { apiKeySecretId: 'oa', model: 'gpt-x' } });
 		expect(legacy.anthropic).toEqual(DEFAULT_SETTINGS.anthropic);

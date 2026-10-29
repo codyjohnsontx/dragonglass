@@ -4,8 +4,10 @@ import { OllamaConfig, OllamaProvider, estimatePromptTokens, promptWasTruncated,
 import { OpenAIProvider } from '../src/providers/openai';
 import { AnthropicProvider, toAnthropicMessages } from '../src/providers/anthropic';
 import { GeminiProvider } from '../src/providers/gemini';
-import { createProviders } from '../src/providers/registry';
-import { mergeSettings } from '../src/settings';
+import { createProviders, isLoopbackUrl } from '../src/providers/registry';
+import { CustomSettings, mergeSettings } from '../src/settings';
+import { RunEvent, runAgent } from '../src/agent/runtime';
+import { ToolRegistry } from '../src/agent/tools';
 import { ChatMessage, estimateTokens, estimateTokensCeiling, prefixWithinTokens, ProviderError, StreamEvent, ToolDefinition } from '../src/providers/types';
 // @ts-expect-error plain JS module
 import { startFakeServer } from './fake-server/server.mjs';
@@ -355,6 +357,112 @@ describe.each([
 describe.each([
 	['streaming', () => new FetchHttpClient()],
 	['non-streaming', wholeBodyClient],
+])('custom OpenAI-compatible endpoint (%s)', (_label, makeClient) => {
+	const secrets: Record<string, string> = { cu: 'custom-fake', oa: 'sk-fake' };
+	const setup = (custom: Partial<CustomSettings>) => {
+		const settings = mergeSettings({ openai: { apiKeySecretId: 'oa' }, custom: { apiKeySecretId: 'cu', model: 'local-model', ...custom } });
+		const providers = createProviders(() => makeClient(), () => settings, { getSecret: (id) => secrets[id] ?? null });
+		return { settings, provider: providers.custom };
+	};
+	const lastHeaders = () => fake.requests.at(-1)!.headers;
+
+	it('talks to a local server with no authentication and never sends the key', async () => {
+		const { provider } = setup({ baseUrl: `${fake.baseUrl}/local/v1`, auth: 'none' });
+		expect(provider.id).toBe('custom');
+		expect(await provider.checkConnection()).toEqual({ ok: true, detail: 'Custom reachable (1 model)' });
+		expect(lastHeaders()['authorization']).toBeUndefined();
+		expect(JSON.stringify(lastHeaders())).not.toContain('custom-fake');
+		expect(provider.capabilities).toMatchObject({ remote: false, billed: false });
+		const events = await collect(provider.chat({ model: 'local-model', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(text(events)).toBe('Hello from the fake model. I can read and edit your notes.');
+		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'stop' });
+	});
+
+	it('maps a server that rejects tools to unsupported_tools, and the agent retries without them', async () => {
+		const { provider } = setup({ baseUrl: `${fake.baseUrl}/local/v1`, auth: 'none' });
+		const err = await collect(provider.chat({ model: 'local-model', messages: [{ role: 'user', content: 'read A.md' }], tools })).catch((e: unknown) => e as ProviderError);
+		expect(err).toMatchObject({ kind: 'unsupported_tools', message: 'tools param requires --jinja flag' });
+
+		const registry = new ToolRegistry().register({ ...tools[0]!, readOnly: true, execute: () => Promise.resolve({ content: '' }) });
+		const run: RunEvent[] = [];
+		for await (const ev of runAgent({
+			provider,
+			model: 'local-model',
+			messages: [{ role: 'user', content: 'read A.md' }],
+			tools: registry,
+			toolsEnabled: true,
+			conversationId: 'c',
+			signal: new AbortController().signal,
+			maxIterations: 3,
+		})) {
+			run.push(ev);
+		}
+		expect(run.some((e) => e.type === 'tools_disabled')).toBe(true);
+		expect(run.find((e) => e.type === 'assistant_end')).toMatchObject({ content: 'I cannot read A.md without tools.' });
+	});
+
+	it('sends no tools when tool calling is turned off', async () => {
+		const { provider } = setup({ baseUrl: `${fake.baseUrl}/local/v1`, auth: 'none', toolCalling: false });
+		expect(provider.capabilities.toolCalling).toBe(false);
+		const events = await collect(provider.chat({ model: 'local-model', messages: [{ role: 'user', content: 'read A.md' }], tools }));
+		expect(text(events)).toBe('I cannot read A.md without tools.');
+		expect(fake.requests.at(-1)!.body!['tools']).toBeUndefined();
+	});
+
+	it('asks for a whole reply when streaming is turned off', async () => {
+		const { provider } = setup({ baseUrl: `${fake.baseUrl}/local/v1`, auth: 'none', streaming: false });
+		expect(provider.capabilities.streaming).toBe(false);
+		const events = await collect(provider.chat({ model: 'local-model', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(text(events)).toBe('Hello from the fake model. I can read and edit your notes.');
+		expect(events.find((e) => e.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 12, outputTokens: 7 } });
+		expect(fake.requests.at(-1)!.body!['stream']).toBe(false);
+		expect(fake.requests.at(-1)!.body!['stream_options']).toBeUndefined();
+	});
+
+	it('sends the bare key in a custom header, and only its own key', async () => {
+		const { provider, settings } = setup({ baseUrl: `${fake.baseUrl}/keyed/v1`, auth: 'header', authHeader: 'api-key' });
+		expect(await provider.checkConnection()).toMatchObject({ ok: true });
+		expect(lastHeaders()['api-key']).toBe('custom-fake');
+		expect(lastHeaders()['authorization']).toBeUndefined();
+		expect(JSON.stringify(lastHeaders())).not.toContain('sk-fake');
+		expect(provider.capabilities).toMatchObject({ remote: false, billed: false });
+
+		settings.custom.authHeader = 'x-api-key';
+		expect(await provider.checkConnection()).toMatchObject({ ok: false, error: { kind: 'auth', status: 401 } });
+		settings.custom.authHeader = ' ';
+		await expect(provider.listModels()).rejects.toMatchObject({ kind: 'auth', message: 'No auth header name configured' });
+		settings.custom.authHeader = 'api-key';
+		settings.custom.apiKeySecretId = '';
+		await expect(provider.listModels()).rejects.toMatchObject({ kind: 'auth', message: 'No API key configured' });
+	});
+
+	it('defaults to a bearer token', async () => {
+		const { provider } = setup({ baseUrl: `${fake.baseUrl}/v1`, apiKeySecretId: 'oa' });
+		expect(await provider.checkConnection()).toMatchObject({ ok: true });
+		expect(lastHeaders()['authorization']).toBe('Bearer sk-fake');
+	});
+
+	it('reports a missing base URL instead of requesting a relative one', async () => {
+		const { provider } = setup({ baseUrl: '  ' });
+		expect(await provider.checkConnection()).toMatchObject({ ok: false, error: { kind: 'invalid_request', message: 'No server URL configured' } });
+		await expect(collect(provider.chat({ model: 'm', messages: [] }))).rejects.toMatchObject({ kind: 'invalid_request' });
+	});
+});
+
+describe('isLoopbackUrl', () => {
+	it('treats only this machine as local', () => {
+		for (const url of ['http://localhost:1234/v1', 'http://127.0.0.1:8080/v1', 'http://127.1.2.3/v1', 'http://[::1]:8000/v1']) {
+			expect(isLoopbackUrl(url)).toBe(true);
+		}
+		for (const url of ['https://openrouter.ai/api/v1', 'http://192.168.1.5:8000/v1', 'http://localhost.example.com/v1', '', 'not a url']) {
+			expect(isLoopbackUrl(url)).toBe(false);
+		}
+	});
+});
+
+describe.each([
+	['streaming', () => new FetchHttpClient()],
+	['non-streaming', wholeBodyClient],
 ])('AnthropicProvider (%s)', (_label, makeClient) => {
 	const provider = (key: string | null = 'sk-ant-fake') =>
 		new AnthropicProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/anthropic/v1`, apiKey: () => key, maxTokens: 1024 }));
@@ -639,11 +747,12 @@ describe('createProviders', () => {
 			openai: { apiKeySecretId: 'oa', baseUrl: `${fake.baseUrl}/v1` },
 			anthropic: { apiKeySecretId: 'ant', baseUrl: `${fake.baseUrl}/anthropic/v1` },
 			gemini: { apiKeySecretId: 'gem', baseUrl: `${fake.baseUrl}/gemini/v1beta` },
+			custom: { apiKeySecretId: 'cu', baseUrl: `${fake.baseUrl}/keyed/v1`, auth: 'header', authHeader: 'api-key' },
 		});
-		const secrets: Record<string, string> = { oa: 'sk-fake', ant: 'sk-ant-fake', gem: 'gemini-fake' };
+		const secrets: Record<string, string> = { oa: 'sk-fake', ant: 'sk-ant-fake', gem: 'gemini-fake', cu: 'custom-fake' };
 		const providers = createProviders(() => new FetchHttpClient(), () => settings, { getSecret: (id) => secrets[id] ?? null });
-		expect(Object.keys(providers).sort()).toEqual(['anthropic', 'gemini', 'ollama', 'openai']);
-		for (const id of ['openai', 'anthropic', 'gemini'] as const) {
+		expect(Object.keys(providers).sort()).toEqual(['anthropic', 'custom', 'gemini', 'ollama', 'openai']);
+		for (const id of ['openai', 'anthropic', 'gemini', 'custom'] as const) {
 			expect(await providers[id].checkConnection()).toMatchObject({ ok: true });
 			const headers = JSON.stringify(fake.requests.at(-1)!.headers);
 			for (const [secretId, key] of Object.entries(secrets)) {
