@@ -162,7 +162,7 @@ Two switches cover servers that do not support everything:
   without tools and says so.
 - **Streaming** off asks for whole replies, for servers that cannot stream.
 
-An endpoint on `localhost` or `127.0.0.1` is treated as local: the sidebar
+An endpoint on `localhost`, `127.x.x.x` or `[::1]` is treated as local: the sidebar
 does not show the cloud privacy note and token counts are not described as
 billed. Any other host is treated as a remote service. If the connection test
 cannot reach a server that answers from the command line, the server probably
