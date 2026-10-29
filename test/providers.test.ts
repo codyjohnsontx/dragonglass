@@ -388,6 +388,7 @@ describe.each([
 		for await (const ev of runAgent({
 			provider,
 			model: 'local-model',
+			system: () => 'sys',
 			messages: [{ role: 'user', content: 'read A.md' }],
 			tools: registry,
 			toolsEnabled: true,

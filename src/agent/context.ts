@@ -95,8 +95,8 @@ export function formatContextBlock(items: ContextItem[], maxCharsPerNote: number
 }
 
 /** Convert stored messages into provider messages, dropping UI-only fields. */
-export function toProviderMessages(system: string, stored: StoredMessage[], contextBlockForLast: string): ChatMessage[] {
-	const out: ChatMessage[] = [{ role: 'system', content: system }];
+export function toProviderMessages(stored: StoredMessage[], contextBlockForLast: string): ChatMessage[] {
+	const out: ChatMessage[] = [];
 	const lastUserIdx = findLastIndex(stored, (m) => m.role === 'user');
 	stored.forEach((m, i) => {
 		switch (m.role) {

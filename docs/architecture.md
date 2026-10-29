@@ -52,12 +52,15 @@ src/
 
 1. `ChatView` collects context the user chose (active note, selection,
    attachments) and calls `DragonglassCore.send`.
-2. `core` appends the user message, builds the system prompt plus provider
-   messages (`agent/context.ts`), and starts `runAgent`.
-3. `runAgent` streams from the active `Provider`. Text deltas go straight to the
-   view. Tool calls are collected until the turn ends, but the view hears
-   about each one as soon as the model names it (`tool_call_start`), so the
-   running-tool chip appears while the arguments are still streaming.
+2. `core` appends the user message, builds the provider messages
+   (`agent/context.ts`), and starts `runAgent`.
+3. `runAgent` adds the system prompt for whether tools are actually sent (the
+   setting, the provider's tool-calling capability, and the retry without tools
+   when a model rejects them), then streams from the active `Provider`. Text
+   deltas go straight to the view. Tool calls are collected until the turn
+   ends, but the view hears about each one as soon as the model names it
+   (`tool_call_start`), so the running-tool chip appears while the arguments
+   are still streaming.
 4. Each tool call is validated against the tool's JSON schema
    (`agent/tools.ts`). Only then does the tool run. Read tools return text.
    Write tools return a `ChangeProposal` and *do not write*.
