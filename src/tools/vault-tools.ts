@@ -203,35 +203,31 @@ export function searchTerms(query: string): string[] {
  * Notes matching any query term (or every term in `all` mode) at the start of
  * a word, ranked by how many distinct terms they contain, then by score: a
  * term in the note's name counts most, then in a heading, then a few
- * occurrences in the content.
+ * occurrences in the content. Frontmatter key names are not searched.
  */
 export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any'): Promise<SearchHit[]> {
 	const terms = searchTerms(query);
-	const patterns = terms.map(wordStartPattern);
 	const prefix = folder === '' ? '' : `${folder}/`;
 	const hits: SearchHit[] = [];
 	for (const file of vault.listMarkdownFiles()) {
 		if (!file.path.startsWith(prefix)) continue;
 		const nameLower = file.name.toLowerCase();
 		const content = (await vault.readNote(file.path)) ?? '';
-		const contentLower = content.toLowerCase();
+		const contentLower = withoutFrontmatterKeys(content).toLowerCase();
 		const headingsLower = headingLines(contentLower).join('\n');
 		const matched: string[] = [];
-		const matchedPatterns: RegExp[] = [];
 		let score = 0;
-		terms.forEach((term, i) => {
-			const pattern = patterns[i]!;
-			const inName = wordStarts(nameLower, pattern, 1).length > 0;
-			const count = wordStarts(contentLower, pattern, 3).length;
-			if (!inName && count === 0) return;
+		for (const term of terms) {
+			const inName = wordStarts(nameLower, term, 1).length > 0;
+			const count = wordStarts(contentLower, term, 3).length;
+			if (!inName && count === 0) continue;
 			matched.push(term);
-			matchedPatterns.push(pattern);
 			if (inName) score += 10;
-			if (wordStarts(headingsLower, pattern, 1).length > 0) score += 5;
+			if (wordStarts(headingsLower, term, 1).length > 0) score += 5;
 			if (count > 0) score += 1 + count;
-		});
+		}
 		if (matched.length === 0 || (mode === 'all' && matched.length < terms.length)) continue;
-		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, matchedPatterns) });
+		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, matched) });
 	}
 	hits.sort((a, b) => b.matched.length - a.matched.length || b.score - a.score || a.path.localeCompare(b.path));
 	return hits.slice(0, limit);
@@ -241,18 +237,34 @@ function headingLines(content: string): string[] {
 	return content.split('\n').filter((line) => /^#{1,6}\s/.test(line));
 }
 
-/** Matches `term` at the start of a word, so "risk" finds "risks" but "ai" not "email". */
-function wordStartPattern(term: string): RegExp {
-	return new RegExp(`(?<![\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gu');
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+
+/** Scripts written without spaces between words, where a word start cannot be found from the text alone. */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
+/**
+ * Offsets (at most `max`) where `term` starts a word in `text`, so "risk"
+ * finds "risks" but "ai" not "email". A term in an unspaced script such as
+ * Chinese or Thai matches anywhere.
+ */
+function wordStarts(text: string, term: string, max: number): number[] {
+	const anywhere = UNSPACED_SCRIPT.test(term);
+	const offsets: number[] = [];
+	for (let at = text.indexOf(term); at >= 0 && offsets.length < max; ) {
+		const before = [...text.slice(Math.max(0, at - 2), at)].pop() ?? '';
+		const starts = anywhere || !LETTER_OR_DIGIT.test(before);
+		if (starts) offsets.push(at);
+		at = text.indexOf(term, at + (starts ? term.length : 1));
+	}
+	return offsets;
 }
 
-/** Offsets (at most `max`) where a `wordStartPattern` matches in `text`. */
-function wordStarts(text: string, pattern: RegExp, max: number): number[] {
-	const offsets: number[] = [];
-	pattern.lastIndex = 0;
-	let m: RegExpExecArray | null;
-	while (offsets.length < max && (m = pattern.exec(text))) offsets.push(m.index);
-	return offsets;
+/** Frontmatter key names (`date:`), blanked so a query word does not match every note with that property. */
+const FRONTMATTER_KEY = /^([ \t]*)[\p{L}\p{N}_][\p{L}\p{N}_ .-]*:(?=[ \t\r]|$)/gmu;
+
+function withoutFrontmatterKeys(content: string): string {
+	const start = bodyStart(content);
+	return content.slice(0, start).replace(FRONTMATTER_KEY, '$1') + content.slice(start);
 }
 
 /** Offset where the note body starts, after a leading YAML frontmatter block. */
@@ -266,12 +278,12 @@ function bodyStart(content: string): number {
  * most distinct matched terms sit close together, so a multi-word query shows
  * the passage that is about all of them rather than the first stray hit.
  */
-function bestExcerpt(content: string, patterns: RegExp[], radius = 80): string {
+function bestExcerpt(content: string, terms: string[], radius = 80): string {
 	const body = content.slice(bodyStart(content));
 	const lower = body.toLowerCase();
 	const hits: Array<{ at: number; term: number }> = [];
-	patterns.forEach((pattern, i) => {
-		for (const at of wordStarts(lower, pattern, 50)) hits.push({ at, term: i });
+	terms.forEach((term, i) => {
+		for (const at of wordStarts(lower, term, 50)) hits.push({ at, term: i });
 	});
 	if (hits.length === 0) return clip(body, 0, radius * 2);
 	hits.sort((a, b) => a.at - b.at);

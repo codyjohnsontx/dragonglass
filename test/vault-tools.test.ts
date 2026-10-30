@@ -125,6 +125,42 @@ describe('vault tools', () => {
 			expect((await searchVault(vault, 'risk', '', 20)).map((h) => h.path)).toEqual(['AI risks.md', 'Plain.md']);
 		});
 
+		it('decides word starts from the preceding character', async () => {
+			const vault = new MemoryVaultPort({
+				'Starts.md': '(ai) and _ai and 🙂ai',
+				'Inside.md': 'said 2ai éai 𝒳ai',
+			});
+			const hits = await searchVault(vault, 'ai', '', 20);
+			expect(hits.map((h) => h.path)).toEqual(['Starts.md']);
+			expect(hits[0]!.score).toBe(4);
+		});
+
+		it('matches terms in scripts without spaces between words anywhere', async () => {
+			const vault = new MemoryVaultPort({
+				'Journal/今天.md': '今天的会议记录',
+				'Notes/项目会议.md': '没有内容',
+				'Thai.md': 'บันทึกการประชุมโครงการ',
+				'Mail.md': 'Send the email again.',
+			});
+			const hits = await searchVault(vault, '会议', '', 20);
+			expect(hits.map((h) => h.path)).toEqual(['Notes/项目会议.md', 'Journal/今天.md']);
+			expect(hits[1]!.excerpt).toBe('今天的会议记录');
+			expect((await searchVault(vault, 'โครงการ', '', 20)).map((h) => h.path)).toEqual(['Thai.md']);
+			expect(await searchVault(vault, 'ai', '', 20)).toEqual([]);
+		});
+
+		it('does not match frontmatter key names but does match their values', async () => {
+			const notes: Record<string, string> = {
+				'Notes/Sync.md': 'Weekly meeting notes.',
+				'Notes/Moved.md': 'The date moved again.',
+				'Notes/Typed.md': '---\ntype: meeting\ndate: 2024-10-01\n---\nAgenda.',
+			};
+			for (let i = 0; i < 25; i++) notes[`Daily/${i}.md`] = `---\ndate: 2024-10-${i}\nDue date: soon\n---\nGroceries.`;
+			const vault = new MemoryVaultPort(notes);
+			const hits = await searchVault(vault, 'meeting date', '', 20);
+			expect(hits.map((h) => h.path)).toEqual(['Notes/Moved.md', 'Notes/Sync.md', 'Notes/Typed.md']);
+		});
+
 		it('trims punctuation around query words but keeps it inside them', async () => {
 			const { vault } = searchSetup();
 			expect(searchTerms('"Project meeting" risks, action items? (c++) c# 2024-10.')).toEqual([

@@ -109,7 +109,13 @@ words such as "and" or "the" are dropped unless nothing else is left: under
 any-word matching they would otherwise match almost every note. A word matches
 only at the start of a word in the note, so "risk" finds "risks" but "ai" does
 not find "email" or "said"; the same rule applies to names, headings, body
-counts and excerpt placement. Results rank by how many distinct words a note
+counts and excerpt placement. The word start is found by checking the
+preceding character in code rather than with a regex lookbehind, which older
+mobile WebViews cannot parse. Words in scripts written without spaces (Chinese,
+Japanese, Korean, Thai and similar) match anywhere, since there is no word
+start to find: "会议" must find "今天的会议记录". Frontmatter key names such as
+`date:` or `tags:` are not searched, so "date" does not match every note with a
+date property; their values still are. Results rank by how many distinct words a note
 contains, then by a score that weighs a word in the note's name over one in a
 heading over occurrences in the body, which count at most three times so a
 repeated word cannot bury a note that matches more of the query. Each
