@@ -187,16 +187,23 @@ const STOPWORDS = new Set([
 	'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it', 'my', 'of', 'on', 'or', 'the', 'to', 'with',
 ]);
 
+/**
+ * Lowercased query words with surrounding punctuation trimmed, so `"project`
+ * and `items?` match like the bare words; inner characters stay ("2024-10"),
+ * as does a trailing + or # ("c++", "c#").
+ */
 export function searchTerms(query: string): string[] {
-	const words = [...new Set(query.toLowerCase().split(/\s+/).filter((t) => t.length > 0))];
+	const trimmed = query.toLowerCase().split(/\s+/).map((t) => t.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}+#]+$/u, ''));
+	const words = [...new Set(trimmed.filter((t) => t.length > 0))];
 	const meaningful = words.filter((t) => !STOPWORDS.has(t));
 	return meaningful.length > 0 ? meaningful : words;
 }
 
 /**
- * Notes matching any query term (or every term in `all` mode), ranked by how
- * many distinct terms they contain, then by score: a term in the note's name
- * counts most, then in a heading, then each occurrence in the content.
+ * Notes matching any query term (or every term in `all` mode) at the start of
+ * a word, ranked by how many distinct terms they contain, then by score: a
+ * term in the note's name counts most, then in a heading, then a few
+ * occurrences in the content.
  */
 export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any'): Promise<SearchHit[]> {
 	const terms = searchTerms(query);
@@ -207,17 +214,17 @@ export async function searchVault(vault: VaultPort, query: string, folder: strin
 		const nameLower = file.name.toLowerCase();
 		const content = (await vault.readNote(file.path)) ?? '';
 		const contentLower = content.toLowerCase();
-		const headingsLower = headingLines(contentLower);
+		const headingsLower = headingLines(contentLower).join('\n');
 		const matched: string[] = [];
 		let score = 0;
 		for (const term of terms) {
-			const inName = nameLower.includes(term);
-			const count = countOccurrences(contentLower, term);
+			const inName = wordStarts(nameLower, term, 1).length > 0;
+			const count = wordStarts(contentLower, term, 3).length;
 			if (!inName && count === 0) continue;
 			matched.push(term);
 			if (inName) score += 10;
-			if (headingsLower.some((h) => h.includes(term))) score += 5;
-			if (count > 0) score += 1 + Math.min(count, 10);
+			if (wordStarts(headingsLower, term, 1).length > 0) score += 5;
+			if (count > 0) score += 1 + count;
 		}
 		if (matched.length === 0 || (mode === 'all' && matched.length < terms.length)) continue;
 		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, matched) });
@@ -230,14 +237,15 @@ function headingLines(content: string): string[] {
 	return content.split('\n').filter((line) => /^#{1,6}\s/.test(line));
 }
 
-function countOccurrences(haystack: string, needle: string): number {
-	let count = 0;
-	let idx = 0;
-	while ((idx = haystack.indexOf(needle, idx)) >= 0) {
-		count++;
-		idx += needle.length;
+/** Offsets (at most `max`) where `term` starts a word in `text`, so "risk" finds "risks" but "ai" not "email". */
+function wordStarts(text: string, term: string, max: number): number[] {
+	const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gu');
+	const offsets: number[] = [];
+	for (const m of text.matchAll(pattern)) {
+		offsets.push(m.index ?? 0);
+		if (offsets.length >= max) break;
 	}
-	return count;
+	return offsets;
 }
 
 /** Offset where the note body starts, after a leading YAML frontmatter block. */
@@ -256,8 +264,7 @@ function bestExcerpt(content: string, terms: string[], radius = 80): string {
 	const lower = body.toLowerCase();
 	const hits: Array<{ at: number; term: number }> = [];
 	terms.forEach((term, i) => {
-		let idx = 0;
-		for (let n = 0; n < 50 && (idx = lower.indexOf(term, idx)) >= 0; n++, idx += term.length) hits.push({ at: idx, term: i });
+		for (const at of wordStarts(lower, term, 50)) hits.push({ at, term: i });
 	});
 	if (hits.length === 0) return clip(body, 0, radius * 2);
 	hits.sort((a, b) => a.at - b.at);

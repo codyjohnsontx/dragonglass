@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ToolRegistry, parseToolArguments } from '../src/agent/tools';
-import { createVaultTools, searchVault } from '../src/tools/vault-tools';
+import { createVaultTools, searchTerms, searchVault } from '../src/tools/vault-tools';
 import { ProposalEngine } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 
@@ -109,7 +109,36 @@ describe('vault tools', () => {
 		it('ignores stopwords unless the query has nothing else', async () => {
 			const { vault } = searchSetup();
 			expect((await searchVault(vault, 'risks and action items', '', 20)).map((h) => h.path)).not.toContain('Recipes.md');
-			expect((await searchVault(vault, 'and', '', 20)).map((h) => h.path)).toEqual(['Meetings/Standup.md', 'Recipes.md']);
+			expect((await searchVault(vault, 'and', '', 20)).map((h) => h.path)).toEqual(['Recipes.md']);
+		});
+
+		it('matches terms only at the start of a word and ranks coverage over repetition', async () => {
+			const vault = new MemoryVaultPort({
+				'Mail.md': 'Send the email again. '.repeat(10) + 'Detail: maintain what was said.',
+				'Chat.md': 'AI chat. '.repeat(10),
+				'AI risks.md': 'Notes on safety.',
+				'Plain.md': 'Mentions risks once.',
+			});
+			const hits = await searchVault(vault, 'AI risks', '', 20);
+			expect(hits.map((h) => h.path)).toEqual(['AI risks.md', 'Chat.md', 'Plain.md']);
+			expect(hits[1]!.score).toBe(4);
+			expect((await searchVault(vault, 'risk', '', 20)).map((h) => h.path)).toEqual(['AI risks.md', 'Plain.md']);
+		});
+
+		it('trims punctuation around query words but keeps it inside them', async () => {
+			const { vault } = searchSetup();
+			expect(searchTerms('"Project meeting" risks, action items? (c++) c# 2024-10.')).toEqual([
+				'project', 'meeting', 'risks', 'action', 'items', 'c++', 'c#', '2024-10',
+			]);
+			expect(searchTerms('?! "and"')).toEqual(['and']);
+			expect(searchTerms('?!')).toEqual([]);
+			expect((await searchVault(vault, '"project meeting"', '', 20)).map((h) => h.path)).toEqual(
+				(await searchVault(vault, 'project meeting', '', 20)).map((h) => h.path),
+			);
+			expect((await searchVault(vault, 'risks, action items?', '', 20))[0]!.matched).toEqual(['risks', 'action', 'items']);
+			const notes = new MemoryVaultPort({ 'Lang.md': 'Notes on C++ and the 2024-10 release.', 'Other.md': 'Plain C here, 2024 only.' });
+			expect((await searchVault(notes, 'c++', '', 20)).map((h) => h.path)).toEqual(['Lang.md']);
+			expect((await searchVault(notes, '2024-10', '', 20)).map((h) => h.path)).toEqual(['Lang.md']);
 		});
 
 		it('shows the basename, matched terms and a body excerpt around the densest match, with no score', async () => {
