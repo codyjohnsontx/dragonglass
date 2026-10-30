@@ -58,9 +58,10 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 	/** How often each call (name plus normalized arguments) was requested this turn. */
 	const callCounts = new Map<string, number>();
 	let forceFinal = false;
+	const maxRounds = Number.isFinite(opts.maxIterations) ? Math.max(1, opts.maxIterations) : 1;
 
 	for (;;) {
-		const finalRound = toolsEnabled && rounds > 0 && (forceFinal || rounds >= opts.maxIterations);
+		const finalRound = toolsEnabled && (forceFinal || rounds >= maxRounds);
 		const sendTools = toolsEnabled && !finalRound;
 		if (opts.signal.aborted) {
 			yield { type: 'error', error: new ProviderError('cancelled', 'Generation stopped.') };

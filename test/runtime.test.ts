@@ -222,6 +222,16 @@ describe('runAgent', () => {
 		expect((events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>).content).toBe('answer');
 	});
 
+	it('allows one tool round when the configured cap is not a usable number', async () => {
+		for (const maxIterations of [Number.NaN, 0]) {
+			const call: StreamEvent[] = [{ type: 'tool_call', call: { id: 'a', name: 'echo', argumentsJson: '{"text":"a"}' } }, { type: 'done', finishReason: 'tool_calls' }];
+			const p = scripted([call, [{ type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }]]);
+			const events = await collect(run(p, { maxIterations }));
+			expect(p.requests.map((r) => r.tools?.length)).toEqual([1, undefined]);
+			expect((events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>).content).toBe('answer');
+		}
+	});
+
 	it('answers without the final-answer instruction when no tool round ran', async () => {
 		const p = scripted([[{ type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }]]);
 		await collect(run(p, { maxIterations: 1 }));
