@@ -252,7 +252,8 @@ function linkLabel(path: string): string {
  * Find the note a model-supplied path means. Accepts a vault path, or a
  * wikilink the way it appears in notes (`Budget`, `Budget.md`, `[[Budget]]`,
  * `[[Projects/Budget|the budget]]`), which Obsidian resolves by basename or
- * by path suffix. When the path does not exist and exactly one note matches,
+ * by path suffix. A path in the wrong folder falls back to its basename.
+ * When the path does not exist and exactly one note matches,
  * that note is used and `notice` says so; several matches are listed in the
  * error so the model can pick one.
  */
@@ -266,11 +267,13 @@ export function resolveNotePath(vault: VaultPort, raw: unknown): { path: string;
 	const path = validateVaultPath(input, { configDir: vault.configDir });
 	if (vault.exists(path)) return { path, notice: '' };
 	const wanted = `/${path.toLowerCase()}`;
-	const matches = vault
+	const wantedName = baseName(path).toLowerCase();
+	const notes = vault
 		.listMarkdownFiles()
 		.map((f) => f.path)
-		.filter((p) => `/${p.toLowerCase()}`.endsWith(wanted))
 		.sort();
+	let matches = notes.filter((p) => `/${p.toLowerCase()}`.endsWith(wanted));
+	if (matches.length === 0) matches = notes.filter((p) => baseName(p).toLowerCase() === wantedName);
 	if (matches.length === 1) {
 		const match = matches[0] as string;
 		return { path: match, notice: `(Resolved ${path} to ${match}; use the full path next time.)\n` };

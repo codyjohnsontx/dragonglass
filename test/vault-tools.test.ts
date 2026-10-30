@@ -47,10 +47,16 @@ describe('vault tools', () => {
 		}
 		// An existing path is read as given, with no notice.
 		expect((await read.execute({ path: 'Projects/Milestones.md' }, ctx)).content).toMatch(/^<<<note path=/);
+		// A guessed folder falls back to the one note with that basename.
+		const wrongFolder = await read.execute({ path: 'Notes/milestones.md' }, ctx);
+		expect(wrongFolder.isError).toBeFalsy();
+		expect(wrongFolder.content).toMatch(/^\(Resolved Notes\/milestones\.md to Projects\/Milestones\.md; use the full path next time\.\)\n<<<note path="Projects\/Milestones\.md">>>/);
 		vault.seed('Archive/Milestones.md', 'old');
-		const several = await read.execute({ path: 'Milestones.md' }, ctx);
-		expect(several.isError).toBe(true);
-		expect(several.content).toContain('several notes match that name: Archive/Milestones.md, Projects/Milestones.md');
+		for (const path of ['Milestones.md', 'Notes/Milestones.md']) {
+			const several = await read.execute({ path }, ctx);
+			expect(several.isError).toBe(true);
+			expect(several.content).toContain('several notes match that name: Archive/Milestones.md, Projects/Milestones.md');
+		}
 		// A partial path picks between them, as Obsidian links do.
 		expect((await read.execute({ path: 'Archive/Milestones' }, ctx)).content).toContain('<<<note path="Archive/Milestones.md">>>\nold');
 		// Validation still applies to whatever was given.
@@ -103,6 +109,9 @@ describe('vault tools', () => {
 		const byName = await tool.execute({ path: '[[Milestones]]' }, ctx);
 		expect(byName.content).toMatch(/^\(Resolved Milestones\.md to Projects\/Milestones\.md/);
 		expect(JSON.parse(byName.content.slice(byName.content.indexOf('{'))).backlinks).toEqual(['Launch (Projects/Launch.md)']);
+		const wrongFolder = await tool.execute({ path: 'Notes/Milestones.md' }, ctx);
+		expect(wrongFolder.content).toMatch(/^\(Resolved Notes\/Milestones\.md to Projects\/Milestones\.md/);
+		expect(JSON.parse(wrongFolder.content.slice(wrongFolder.content.indexOf('{'))).backlinks).toEqual(['Launch (Projects/Launch.md)']);
 		expect((await tool.execute({ path: 'Nowhere' }, ctx)).content).toMatch(/no note at Nowhere\.md\. Use list_files or search_notes/);
 	});
 
