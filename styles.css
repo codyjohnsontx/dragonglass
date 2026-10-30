@@ -142,6 +142,19 @@
 	margin-top: var(--size-2-2);
 }
 
+/* Hidden from sighted view but still reachable by screen readers, e.g. the copy-status live region. */
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
 /* One visible Copy button per reply, under its text; it flips to "Copied" for a moment after a click. */
 .dg-msg-actions {
 	display: flex;

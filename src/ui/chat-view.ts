@@ -9,7 +9,7 @@ import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
-import { copyToClipboard } from './copy';
+import { copyStatusMessage, copyToClipboard } from './copy';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -39,6 +39,8 @@ export class ChatView extends ItemView {
 	private inputEl!: HTMLTextAreaElement;
 	private sendBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
+	/** Shared visually-hidden live region announcing copy success/failure to screen readers. */
+	private copyStatusEl!: HTMLElement;
 	private liveEl: HTMLElement | null = null;
 	private liveText = '';
 	/** Live-turn feedback: a status line until the first answer token, and the thinking block. */
@@ -86,6 +88,7 @@ export class ChatView extends ItemView {
 		root.addClass('dragonglass-view');
 		this.headerEl = root.createDiv({ cls: 'dg-header' });
 		this.messagesEl = root.createDiv({ cls: 'dg-messages' });
+		this.copyStatusEl = root.createDiv({ cls: 'dg-copy-status visually-hidden', attr: { role: 'status', 'aria-live': 'polite' } });
 		this.contextBarEl = root.createDiv({ cls: 'dg-context-bar' });
 		this.composerEl = root.createDiv({ cls: 'dg-composer' });
 		this.buildComposer();
@@ -367,6 +370,7 @@ export class ChatView extends ItemView {
 		let revert: number | null = null;
 		btn.addEventListener('click', () => {
 			void copyToClipboard(text, activeWindow.navigator.clipboard).then((ok) => {
+				this.copyStatusEl.setText(copyStatusMessage(ok));
 				if (!ok) return;
 				btn.addClass('is-copied');
 				show('check', 'Copied');
