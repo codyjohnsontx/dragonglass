@@ -22,3 +22,49 @@ export async function copyToClipboard(text: string, clipboard: ClipboardWriter |
 		return false;
 	}
 }
+
+/** The timer functions `CopyAnnouncer` needs, so callers can pass `window.setTimeout`/`window.clearTimeout` and tests can pass fakes. */
+export interface Timers {
+	setTimeout(fn: () => void, delayMs: number): number;
+	clearTimeout(id: number): void;
+}
+
+/**
+ * Serializes announcements to a shared screen-reader status region across
+ * concurrent copy clicks: `begin()` marks a new attempt as the latest and
+ * cancels any announcement still pending from an earlier one, and a delayed
+ * `announce()` from an attempt that is no longer the latest is a no-op.
+ * `dispose()` cancels any pending announcement, e.g. when the view closes.
+ */
+export class CopyAnnouncer {
+	private seq = 0;
+	private pending: number | null = null;
+
+	constructor(private readonly timers: Timers) {}
+
+	/** Marks a new copy attempt as the latest and cancels any pending announcement. Returns its id for `announce()`. */
+	begin(): number {
+		this.cancelPending();
+		return ++this.seq;
+	}
+
+	/** Schedules `onAnnounce` after `delayMs`, unless `attempt` has since been superseded by a later `begin()`. */
+	announce(attempt: number, delayMs: number, onAnnounce: () => void): void {
+		if (attempt !== this.seq) return;
+		this.pending = this.timers.setTimeout(() => {
+			this.pending = null;
+			if (attempt === this.seq) onAnnounce();
+		}, delayMs);
+	}
+
+	dispose(): void {
+		this.cancelPending();
+	}
+
+	private cancelPending(): void {
+		if (this.pending !== null) {
+			this.timers.clearTimeout(this.pending);
+			this.pending = null;
+		}
+	}
+}
