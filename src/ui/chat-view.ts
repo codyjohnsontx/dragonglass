@@ -154,7 +154,7 @@ export class ChatView extends ItemView {
 	private async switchProvider(id: ProviderId): Promise<void> {
 		await this.core.setActiveProvider(id);
 		await this.renderHeader();
-		void this.refreshStatus(true, undefined, true);
+		void this.refreshStatus();
 		this.renderContextBar();
 	}
 
