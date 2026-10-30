@@ -207,6 +207,7 @@ export function searchTerms(query: string): string[] {
  */
 export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any'): Promise<SearchHit[]> {
 	const terms = searchTerms(query);
+	const patterns = terms.map(wordStartPattern);
 	const prefix = folder === '' ? '' : `${folder}/`;
 	const hits: SearchHit[] = [];
 	for (const file of vault.listMarkdownFiles()) {
@@ -216,18 +217,21 @@ export async function searchVault(vault: VaultPort, query: string, folder: strin
 		const contentLower = content.toLowerCase();
 		const headingsLower = headingLines(contentLower).join('\n');
 		const matched: string[] = [];
+		const matchedPatterns: RegExp[] = [];
 		let score = 0;
-		for (const term of terms) {
-			const inName = wordStarts(nameLower, term, 1).length > 0;
-			const count = wordStarts(contentLower, term, 3).length;
-			if (!inName && count === 0) continue;
+		terms.forEach((term, i) => {
+			const pattern = patterns[i]!;
+			const inName = wordStarts(nameLower, pattern, 1).length > 0;
+			const count = wordStarts(contentLower, pattern, 3).length;
+			if (!inName && count === 0) return;
 			matched.push(term);
+			matchedPatterns.push(pattern);
 			if (inName) score += 10;
-			if (wordStarts(headingsLower, term, 1).length > 0) score += 5;
+			if (wordStarts(headingsLower, pattern, 1).length > 0) score += 5;
 			if (count > 0) score += 1 + count;
-		}
+		});
 		if (matched.length === 0 || (mode === 'all' && matched.length < terms.length)) continue;
-		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, matched) });
+		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, matchedPatterns) });
 	}
 	hits.sort((a, b) => b.matched.length - a.matched.length || b.score - a.score || a.path.localeCompare(b.path));
 	return hits.slice(0, limit);
@@ -237,14 +241,17 @@ function headingLines(content: string): string[] {
 	return content.split('\n').filter((line) => /^#{1,6}\s/.test(line));
 }
 
-/** Offsets (at most `max`) where `term` starts a word in `text`, so "risk" finds "risks" but "ai" not "email". */
-function wordStarts(text: string, term: string, max: number): number[] {
-	const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gu');
+/** Matches `term` at the start of a word, so "risk" finds "risks" but "ai" not "email". */
+function wordStartPattern(term: string): RegExp {
+	return new RegExp(`(?<![\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gu');
+}
+
+/** Offsets (at most `max`) where a `wordStartPattern` matches in `text`. */
+function wordStarts(text: string, pattern: RegExp, max: number): number[] {
 	const offsets: number[] = [];
-	for (const m of text.matchAll(pattern)) {
-		offsets.push(m.index ?? 0);
-		if (offsets.length >= max) break;
-	}
+	pattern.lastIndex = 0;
+	let m: RegExpExecArray | null;
+	while (offsets.length < max && (m = pattern.exec(text))) offsets.push(m.index);
 	return offsets;
 }
 
@@ -259,12 +266,12 @@ function bodyStart(content: string): number {
  * most distinct matched terms sit close together, so a multi-word query shows
  * the passage that is about all of them rather than the first stray hit.
  */
-function bestExcerpt(content: string, terms: string[], radius = 80): string {
+function bestExcerpt(content: string, patterns: RegExp[], radius = 80): string {
 	const body = content.slice(bodyStart(content));
 	const lower = body.toLowerCase();
 	const hits: Array<{ at: number; term: number }> = [];
-	terms.forEach((term, i) => {
-		for (const at of wordStarts(lower, term, 50)) hits.push({ at, term: i });
+	patterns.forEach((pattern, i) => {
+		for (const at of wordStarts(lower, pattern, 50)) hits.push({ at, term: i });
 	});
 	if (hits.length === 0) return clip(body, 0, radius * 2);
 	hits.sort((a, b) => a.at - b.at);
