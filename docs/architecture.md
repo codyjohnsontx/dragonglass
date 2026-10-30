@@ -49,6 +49,7 @@ src/
     proposal-card.ts      Diff review card with approve/reject/revert.
     note-picker.ts        Fuzzy picker for attaching notes.
     confirm-modal.ts      Confirmation dialog for destructive actions.
+    model-suggest.ts      Model suggestions under a free-text model id field.
     settings-tab.ts       Declarative settings tab (Obsidian 1.13+ API).
 ```
 
