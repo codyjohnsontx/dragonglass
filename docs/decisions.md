@@ -111,3 +111,33 @@ keeping their encrypted content would mean storing provider state on messages
 it does over Chat Completions. Function tools are sent with `strict: false`
 because strict mode, the Responses default, requires closed schemas with every
 property required.
+
+## 14. Search matches any word and ranks by coverage
+
+`search_notes` used to require every query word, so a local model asking for
+"project meeting" got one note of the many that mention either word, then
+narrowed further into empty results. Small models phrase queries as several
+loose words, so a note now matches if it contains any of them. Query words are
+lowercased and stripped of surrounding punctuation (quotes, commas, question
+marks) but keep inner characters, so `2024-10` and `c++` still work. Common
+words such as "and" or "the" are dropped unless nothing else is left: under
+any-word matching they would otherwise match almost every note. A word matches
+only at the start of a word in the note, so "risk" finds "risks" but "ai" does
+not find "email" or "said"; the same rule applies to names, headings, body
+counts and excerpt placement. The word start is found by checking the
+preceding character in code rather than with a regex lookbehind, which older
+mobile WebViews cannot parse. Words in Chinese, Japanese, Korean, Thai and
+similar scripts match anywhere, since words there are often written without
+spaces or carry attached particles: "会议" must find "今天的会议记录". A
+character of those scripts also ends the word before it, so "python" finds
+"我在学习Python编程". Frontmatter key names such as
+`date:` or `tags:` are not searched, so "date" does not match every note with a
+date property; their values still are. Results rank by how many distinct words a note
+contains, then by a score that weighs a word in the note's name over one in a
+heading over occurrences in the body, which count at most three times so a
+repeated word cannot bury a note that matches more of the query. Each
+result shows `Name (path)` so the model sees the wikilink form, which words
+matched, and an excerpt of the body (frontmatter skipped) around the passage
+where the most matched words sit together. The old numeric score is not shown:
+it meant nothing to the model. `mode: "all"` keeps strict AND for narrowing.
+There is still no stemming or semantic search; that would need an index.

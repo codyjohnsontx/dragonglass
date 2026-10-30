@@ -277,7 +277,9 @@ a different URL. To verify live:
 - One proposal per card; multi-file changes are reviewed one card at a time.
 - No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
   yet.
-- No semantic search; search is name and content substring matching.
+- No semantic search or stemming; search matches any query word at the start
+  of a word in note names and content, ranking notes that contain more of the
+  words first.
 - Cost estimates are not shown, only token counts from the provider.
 - Desktop verified only. The code avoids desktop-only APIs but mobile has not
   been exercised.

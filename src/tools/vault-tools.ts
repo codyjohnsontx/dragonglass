@@ -129,14 +129,21 @@ function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): Age
 	return {
 		name: 'search_notes',
 		description:
-			'Search note names and content for a phrase (case-insensitive). Returns matching paths with a short excerpt. Use before read_note when you do not know the exact path.',
+			'Search note names, headings and content for words (case-insensitive). A note matches if it contains any of the words; ' +
+			'notes containing more of them come first. Returns each note as "Name (path)" with an excerpt around the best match. ' +
+			'Excerpts are short: read_note a result before relying on its content.',
 		readOnly: true,
 		parameters: {
 			type: 'object',
 			properties: {
-				query: { type: 'string', description: 'Words to look for.' },
+				query: { type: 'string', description: 'Words to look for. Use several related words rather than narrowing to one.' },
 				folder: { type: 'string', description: 'Restrict to this folder (optional).' },
 				limit: { type: 'integer', description: 'Max results (default 20).', minimum: 1, maximum: 100 },
+				mode: {
+					type: 'string',
+					enum: ['any', 'all'],
+					description: '"any" (default) matches notes with any word; "all" only notes with every word.',
+				},
 			},
 			required: ['query'],
 		},
@@ -146,9 +153,11 @@ function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): Age
 				if (!query) return fail('Error: query must not be empty.');
 				const folder = validateVaultPath(args['folder'] ?? '', { markdown: false, allowRoot: true, configDir: vault.configDir });
 				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : options().maxSearchResults, 100);
-				const results = await searchVault(vault, query, folder, limit);
-				if (results.length === 0) return ok(`No notes matched "${query}".`);
-				return ok(results.map((r) => `${r.path} (score ${r.score})\n  ${r.excerpt}`).join('\n'));
+				const mode = args['mode'] === 'all' ? 'all' : 'any';
+				const hits = await searchVault(vault, query, folder, limit, mode);
+				if (hits.length === 0) return ok(`No notes matched "${query}".`);
+				const termCount = searchTerms(query).length;
+				return ok(hits.map((h) => formatHit(h, termCount)).join('\n'));
 			} catch (e) {
 				return wrapError(e);
 			}
@@ -156,62 +165,160 @@ function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): Age
 	};
 }
 
+function formatHit(hit: SearchHit, termCount: number): string {
+	const matched = termCount > 1 ? ` - matches ${hit.matched.join(', ')}` : '';
+	return `${hit.name} (${hit.path})${matched}\n  ${hit.excerpt}`;
+}
+
 export interface SearchHit {
 	path: string;
+	/** Basename without extension, the form wikilinks use. */
+	name: string;
+	/** Query terms found in the note, in query order. */
+	matched: string[];
+	/** Ranking score within notes matching the same number of terms. */
 	score: number;
 	excerpt: string;
 }
 
-export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number): Promise<SearchHit[]> {
-	const terms = query
-		.toLowerCase()
-		.split(/\s+/)
-		.filter((t) => t.length > 0);
+export type SearchMode = 'any' | 'all';
+
+/**
+ * Words dropped from a query unless it has nothing else, so "risks and
+ * action items" does not match every note that contains "and".
+ */
+const STOPWORDS = new Set([
+	'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it', 'my', 'of', 'on', 'or', 'the', 'to', 'with',
+]);
+
+/**
+ * Lowercased query words with surrounding punctuation trimmed, so `"project`
+ * and `items?` match like the bare words; inner characters stay ("2024-10"),
+ * as does a trailing + or # ("c++", "c#").
+ */
+export function searchTerms(query: string): string[] {
+	const trimmed = query.toLowerCase().split(/\s+/).map((t) => t.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}+#]+$/u, ''));
+	const words = [...new Set(trimmed.filter((t) => t.length > 0))];
+	const meaningful = words.filter((t) => !STOPWORDS.has(t));
+	return meaningful.length > 0 ? meaningful : words;
+}
+
+/**
+ * Notes matching any query term (or every term in `all` mode) at the start of
+ * a word, ranked by how many distinct terms they contain, then by score: a
+ * term in the note's name counts most, then in a heading, then a few
+ * occurrences in the content. Frontmatter key names are not searched.
+ */
+export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any'): Promise<SearchHit[]> {
+	const terms = searchTerms(query).map((term) => ({ term, find: wordStartFinder(term) }));
 	const prefix = folder === '' ? '' : `${folder}/`;
 	const hits: SearchHit[] = [];
 	for (const file of vault.listMarkdownFiles()) {
 		if (!file.path.startsWith(prefix)) continue;
 		const nameLower = file.name.toLowerCase();
 		const content = (await vault.readNote(file.path)) ?? '';
-		const contentLower = content.toLowerCase();
+		const contentLower = withoutFrontmatterKeys(content).toLowerCase();
+		const headingsLower = headingLines(contentLower).join('\n');
+		const found: typeof terms = [];
 		let score = 0;
-		let firstIdx = -1;
-		let allTermsMatch = true;
-		for (const term of terms) {
-			const inName = nameLower.includes(term);
-			const idx = contentLower.indexOf(term);
-			if (!inName && idx < 0) {
-				allTermsMatch = false;
-				break;
-			}
+		for (const t of terms) {
+			const inName = t.find(nameLower, 1).length > 0;
+			const count = t.find(contentLower, 3).length;
+			if (!inName && count === 0) continue;
+			found.push(t);
 			if (inName) score += 10;
-			if (idx >= 0) {
-				score += 1 + Math.min(countOccurrences(contentLower, term), 10);
-				if (firstIdx < 0 || idx < firstIdx) firstIdx = idx;
-			}
+			if (t.find(headingsLower, 1).length > 0) score += 5;
+			if (count > 0) score += 1 + count;
 		}
-		if (!allTermsMatch || score === 0) continue;
-		hits.push({ path: file.path, score, excerpt: excerptAround(content, firstIdx) });
+		if (found.length === 0 || (mode === 'all' && found.length < terms.length)) continue;
+		const matched = found.map((t) => t.term);
+		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, found.map((t) => t.find)) });
 	}
-	hits.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+	hits.sort((a, b) => b.matched.length - a.matched.length || b.score - a.score || a.path.localeCompare(b.path));
 	return hits.slice(0, limit);
 }
 
-function countOccurrences(haystack: string, needle: string): number {
-	let count = 0;
-	let idx = 0;
-	while ((idx = haystack.indexOf(needle, idx)) >= 0) {
-		count++;
-		idx += needle.length;
-	}
-	return count;
+function headingLines(content: string): string[] {
+	return content.split('\n').filter((line) => /^#{1,6}\s/.test(line));
 }
 
-function excerptAround(content: string, idx: number, radius = 80): string {
-	if (idx < 0) return content.slice(0, radius * 2).replace(/\s+/g, ' ').trim();
-	const start = Math.max(0, idx - radius);
-	const end = Math.min(content.length, idx + radius);
-	return `${start > 0 ? '…' : ''}${content.slice(start, end).replace(/\s+/g, ' ').trim()}${end < content.length ? '…' : ''}`;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+
+/** Scripts written without spaces between words, where a word start cannot be found from the text alone. */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
+/** Offsets (at most `max`) where a term starts a word in `text`. */
+type WordStartFinder = (text: string, max: number) => number[];
+
+/**
+ * Finds `term` at word starts, so "risk" finds "risks" but "ai" not "email".
+ * A term in an unspaced script such as Chinese or Thai matches anywhere, and
+ * a character of such a script ends the word before it ("学习python" has
+ * "python" at a word start).
+ */
+function wordStartFinder(term: string): WordStartFinder {
+	const anywhere = UNSPACED_SCRIPT.test(term);
+	return (text, max) => {
+		const offsets: number[] = [];
+		for (let at = text.indexOf(term); at >= 0 && offsets.length < max; ) {
+			const before = [...text.slice(Math.max(0, at - 2), at)].pop() ?? '';
+			const starts = anywhere || !LETTER_OR_DIGIT.test(before) || UNSPACED_SCRIPT.test(before);
+			if (starts) offsets.push(at);
+			at = text.indexOf(term, at + (starts ? term.length : 1));
+		}
+		return offsets;
+	};
+}
+
+/** Frontmatter key names (`date:`), blanked so a query word does not match every note with that property. */
+const FRONTMATTER_KEY = /^([ \t]*)[\p{L}\p{N}_][\p{L}\p{N}_ .-]*:(?=[ \t\r]|$)/gmu;
+
+function withoutFrontmatterKeys(content: string): string {
+	const start = bodyStart(content);
+	return content.slice(0, start).replace(FRONTMATTER_KEY, '$1') + content.slice(start);
+}
+
+/** Offset where the note body starts, after a leading YAML frontmatter block. */
+function bodyStart(content: string): number {
+	const m = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/.exec(content);
+	return m ? m[0].length : 0;
+}
+
+/**
+ * An excerpt of the note body (frontmatter skipped) around the spot where the
+ * most distinct matched terms sit close together, so a multi-word query shows
+ * the passage that is about all of them rather than the first stray hit.
+ */
+function bestExcerpt(content: string, finders: WordStartFinder[], radius = 80): string {
+	const body = content.slice(bodyStart(content));
+	const lower = body.toLowerCase();
+	const hits: Array<{ at: number; term: number }> = [];
+	finders.forEach((find, i) => {
+		for (const at of find(lower, 50)) hits.push({ at, term: i });
+	});
+	if (hits.length === 0) return clip(body, 0, radius * 2);
+	hits.sort((a, b) => a.at - b.at);
+	let best = { start: hits[0]!.at, end: hits[0]!.at, distinct: 0, count: 0 };
+	for (let i = 0; i < hits.length; i++) {
+		const start = hits[i]!.at;
+		const seen = new Set<number>();
+		let end = start;
+		let count = 0;
+		for (let j = i; j < hits.length && hits[j]!.at - start <= radius * 1.5; j++) {
+			seen.add(hits[j]!.term);
+			end = hits[j]!.at;
+			count++;
+		}
+		if (seen.size > best.distinct || (seen.size === best.distinct && count > best.count)) best = { start, end, distinct: seen.size, count };
+	}
+	const center = Math.floor((best.start + best.end) / 2);
+	return clip(body, Math.max(0, center - radius), radius * 2);
+}
+
+function clip(text: string, start: number, length: number): string {
+	const end = Math.min(text.length, start + length);
+	const inner = text.slice(start, end).replace(/\s+/g, ' ').trim();
+	return `${start > 0 ? '…' : ''}${inner}${end < text.length ? '…' : ''}`;
 }
 
 function getNoteMetadataTool(vault: VaultPort): AgentTool {
