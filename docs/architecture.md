@@ -14,9 +14,12 @@ src/
     http.ts               Transport: streaming fetch client, requestUrl fallback,
                           SSE and NDJSON parsers.
     ollama.ts             Ollama native API (/api/chat NDJSON).
-    openai.ts             OpenAI Chat Completions (SSE). Also serves the custom
-                          OpenAI-compatible provider (own id, URL, auth and
-                          capability overrides).
+    openai.ts             OpenAI Chat Completions (SSE), and the Responses API
+                          for models that take tools only there. Also serves
+                          the custom OpenAI-compatible provider (own id, URL,
+                          auth and capability overrides; Chat Completions only).
+    openai-responses.ts   Responses API wire format: stateless input items,
+                          function tools, SSE events.
     anthropic.ts          Anthropic Messages API (SSE, tool_use blocks).
     gemini.ts             Gemini API (streamGenerateContent SSE,
                           function declarations, thought signatures).

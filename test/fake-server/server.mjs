@@ -1,6 +1,6 @@
 /**
  * Fake LLM server speaking the Ollama native API, the OpenAI Chat Completions
- * API (under /v1), the Anthropic Messages API (under /anthropic/v1) and the
+ * and Responses APIs (under /v1), the Anthropic Messages API (under /anthropic/v1) and the
  * Gemini API (under /gemini/v1beta), with scripted behaviour driven by the
  * user's message so tests and the in-app end-to-end check are deterministic.
  *
@@ -22,9 +22,15 @@
  * `fake-429` -> 429, `fake-500` -> 500 (Anthropic: 529 overloaded),
  * `fake-slow` streams one word per 150 ms (OpenAI: and pauses 1.5 s mid tool call), `fake-overloaded` (Anthropic) sends
  * an error event mid-stream, `fake-safety` (Gemini) finishes with SAFETY and
- * no content, `fake-missing` (Gemini) -> 404, `gpt-6.1-sol` / `gpt-6.1-terra`
- * (OpenAI) reject tools over Chat Completions as the real API does, any other
- * model behaves normally.
+ * no content, `fake-missing` (Gemini) -> 404, `gpt-6.1-sol` / `gpt-6.1-terra` /
+ * `fake-responses-only` (OpenAI) reject tools over Chat Completions as the
+ * real API does, any other model behaves normally.
+ * OpenAI Responses only: `gpt-6.1-sol-<model>` behaves as `<model>`, so the
+ * adapter routes it here by name; every reply carries a reasoning item before the
+ * message or function call; `fake-overloaded` sends an `error` event and
+ * `fake-failed` a `response.failed` event mid-stream; `fake-length` ends
+ * incomplete at max_output_tokens. Tools must be flat, non-strict function
+ * tools, and a `function_call_output` must follow its `function_call`.
  * Ollama only: `fake-think` streams `thinking` chunks before the answer unless
  * the request says `think: false`; `fake-small` reports an 8192-token context
  * from /api/show; `fake-truncate` reports `prompt_eval_count` of half the
@@ -106,8 +112,9 @@ async function route(req, res, body) {
 			const ids = ['fake-gpt', 'fake-plain', 'text-embedding-3-small', 'whisper-1', 'tts-1', 'gpt-image-1', 'omni-moderation-latest', 'gpt-realtime'];
 			return json(res, 200, { object: 'list', data: ids.map((id) => ({ id, object: 'model' })) });
 		}
+		if (req.method === 'POST' && path === '/v1/responses') return responsesChat(res, body ?? {});
 		if (req.method === 'POST' && path === '/v1/chat/completions') {
-			if (/^gpt-6\.1-(sol|terra)/.test(body?.model ?? '') && Array.isArray(body?.tools) && body.tools.length > 0) {
+			if (/^(gpt-6\.1-(sol|terra)|fake-responses-only)/.test(body?.model ?? '') && Array.isArray(body?.tools) && body.tools.length > 0) {
 				return json(res, 400, {
 					error: {
 						message: `Function tools with reasoning_effort are not supported for ${body.model} in /v1/chat/completions. Please use /v1/responses instead.`,
@@ -345,6 +352,103 @@ async function openaiChat(res, body) {
 	}
 	if (body.stream_options?.include_usage) send({ ...base, choices: [], usage });
 	res.end('data: [DONE]\n\n');
+}
+
+// ------------------------------------------------------------ openai responses
+
+/** Validate like the Responses API does and flatten to plan()'s message shape. */
+function responsesToPlan(body) {
+	if ('messages' in body) return { error: "Unsupported parameter: 'messages'. In the Responses API, this parameter has moved to 'input'." };
+	for (const [i, t] of (body.tools ?? []).entries()) {
+		if (t.type !== 'function') return { error: `Invalid value: '${t.type}'. Supported values are: 'function', ...`, param: `tools[${i}].type` };
+		if (typeof t.name !== 'string') return { error: `Missing required parameter: 'tools[${i}].name'.`, param: `tools[${i}].name` };
+		// strict defaults to true and then requires closed objects with every property required.
+		if (t.strict !== false && t.parameters?.additionalProperties !== false) {
+			return { error: `Invalid schema for function '${t.name}': In context=(), 'additionalProperties' is required to be supplied and to be false.`, param: `tools[${i}].parameters` };
+		}
+	}
+	const input = typeof body.input === 'string' ? [{ role: 'user', content: body.input }] : body.input ?? [];
+	const out = [];
+	const callIds = new Set();
+	for (const [i, item] of input.entries()) {
+		const type = item.type ?? 'message';
+		if (type === 'message') {
+			if (!['user', 'assistant', 'system', 'developer'].includes(item.role)) return { error: `Invalid value: '${item.role}'. Supported values are: 'assistant', 'system', 'developer', and 'user'.`, param: `input[${i}].role` };
+			out.push({ role: item.role, content: String(item.content ?? '') });
+		} else if (type === 'function_call') {
+			if (!item.call_id || !item.name || typeof item.arguments !== 'string') return { error: `Missing required parameter: 'input[${i}].call_id'.`, param: `input[${i}]` };
+			callIds.add(item.call_id);
+			const prev = out.at(-1);
+			const call = { id: item.call_id, function: { name: item.name, arguments: item.arguments } };
+			if (prev?.role === 'assistant') prev.tool_calls = [...(prev.tool_calls ?? []), call];
+			else out.push({ role: 'assistant', content: '', tool_calls: [call] });
+		} else if (type === 'function_call_output') {
+			if (!callIds.has(item.call_id)) return { error: `No tool call found for function call output with call_id ${item.call_id}.`, param: 'input' };
+			out.push({ role: 'tool', content: String(item.output ?? '') });
+		} else {
+			return { error: `Invalid value: '${type}'.`, param: `input[${i}].type` };
+		}
+	}
+	return { messages: out };
+}
+
+async function responsesChat(res, body) {
+	// `gpt-6.1-sol-<fake model>` looks like a dated snapshot, so it reaches this route by name.
+	const model = String(body.model ?? '').replace(/^gpt-6\.1-(?:sol|terra)-/, '');
+	const b = modelBehaviour(model);
+	if (b.status === 429) return json(res, 429, { error: { message: 'Rate limit reached for fake-429', type: 'requests', param: null, code: 'rate_limit_exceeded' } });
+	if (b.status === 500) return json(res, 500, { error: { message: 'The server had an error', type: 'server_error', param: null, code: null } });
+	const flat = responsesToPlan(body);
+	if (flat.error) return json(res, 400, { error: { message: flat.error, type: 'invalid_request_error', param: flat.param ?? null, code: null } });
+	const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+	const p = plan(flat.messages, hasTools);
+	const id = `resp_fake_${Date.now()}`;
+	const usage = { input_tokens: 12, input_tokens_details: { cached_tokens: 0 }, output_tokens: 9, output_tokens_details: { reasoning_tokens: 2 }, total_tokens: 21 };
+	const reasoning = { id: 'rs_fake_1', type: 'reasoning', summary: [], encrypted_content: 'enc-fake-1' };
+	const item = p.tool
+		? { id: 'fc_fake_1', type: 'function_call', status: 'completed', call_id: 'call_fake_1', name: p.tool.name, arguments: JSON.stringify(p.tool.args) }
+		: { id: 'msg_fake_1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: p.text, annotations: [] }] };
+	const length = model.startsWith('fake-length');
+	const response = (status, output, extra = {}) => ({ id, object: 'response', model: body.model, status, store: body.store ?? true, output, usage: status === 'in_progress' ? null : usage, error: null, incomplete_details: null, ...extra });
+	const finished = length ? response('incomplete', [reasoning, item], { incomplete_details: { reason: 'max_output_tokens' } }) : response('completed', [reasoning, item]);
+	if (!body.stream) return json(res, 200, finished);
+	res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+	let seq = 0;
+	const send = (obj) => res.write(`event: ${obj.type}\ndata: ${JSON.stringify({ ...obj, sequence_number: seq++ })}\n\n`);
+	send({ type: 'response.created', response: response('in_progress', []) });
+	send({ type: 'response.in_progress', response: response('in_progress', []) });
+	send({ type: 'response.output_item.added', output_index: 0, item: { ...reasoning, encrypted_content: undefined } });
+	send({ type: 'response.output_item.done', output_index: 0, item: reasoning });
+	if (p.tool) {
+		const args = item.arguments;
+		const half = Math.ceil(args.length / 2);
+		send({ type: 'response.output_item.added', output_index: 1, item: { ...item, status: 'in_progress', arguments: '' } });
+		send({ type: 'response.function_call_arguments.delta', item_id: item.id, output_index: 1, delta: args.slice(0, half) });
+		if (b.slow) await sleep(1500); // the arguments are still streaming; the UI should already name the tool
+		send({ type: 'response.function_call_arguments.delta', item_id: item.id, output_index: 1, delta: args.slice(half) });
+		send({ type: 'response.function_call_arguments.done', item_id: item.id, output_index: 1, arguments: args });
+		send({ type: 'response.output_item.done', output_index: 1, item });
+	} else {
+		send({ type: 'response.output_item.added', output_index: 1, item: { ...item, status: 'in_progress', content: [] } });
+		send({ type: 'response.content_part.added', item_id: item.id, output_index: 1, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } });
+		for (const [i, word] of splitWords(p.text).entries()) {
+			send({ type: 'response.output_text.delta', item_id: item.id, output_index: 1, content_index: 0, delta: word, logprobs: [] });
+			if (b.slow) await sleep(150);
+			if (i === 1 && model.startsWith('fake-overloaded')) {
+				send({ type: 'error', code: 'server_error', message: 'The server is overloaded', param: null });
+				return res.end();
+			}
+			if (i === 1 && model.startsWith('fake-failed')) {
+				send({ type: 'response.failed', response: response('failed', [], { usage: null, error: { code: 'server_error', message: 'The model failed to generate a response.' } }) });
+				return res.end();
+			}
+		}
+		send({ type: 'response.output_text.done', item_id: item.id, output_index: 1, content_index: 0, text: p.text, logprobs: [] });
+		send({ type: 'response.content_part.done', item_id: item.id, output_index: 1, content_index: 0, part: item.content[0] });
+		send({ type: 'response.output_item.done', output_index: 1, item });
+	}
+	send({ type: length ? 'response.incomplete' : 'response.completed', response: finished });
+	res.end();
 }
 
 // ------------------------------------------------------------------ anthropic

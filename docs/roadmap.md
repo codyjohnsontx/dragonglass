@@ -30,6 +30,9 @@ without redesigning the provider or tool architecture.
   configurable base URL, bearer / custom-header / no authentication, and
   tool-calling and streaming overrides (Moonshot, OpenRouter, Groq, LM Studio,
   vLLM, llama.cpp).
+- **OpenAI Responses API** for models that take tool calls only there
+  (GPT-6.1 Sol and Terra), statelessly with `store: false`; other OpenAI
+  models and the custom endpoint stay on Chat Completions.
 
 ## Next
 

@@ -113,10 +113,11 @@ list of each provider's current models instead.
 2. Pick a model from the **Model** field's list (or type any model id) and
    select **Test OpenAI connection**.
 
-The OpenAI list leaves out models that take tools only through OpenAI's newer
-Responses API, such as GPT-6.1 Sol and Terra, because Dragonglass does not
-support that API yet. If you type one in anyway, the plugin retries without
-vault tools and tells you why.
+GPT-6.1 Sol and Terra take tool calls only through OpenAI's Responses API, so
+Dragonglass talks to them over that API and to other OpenAI models over Chat
+Completions. A model you type in that OpenAI says needs the Responses API for
+tools moves over to it for the rest of the session. Either way the requests
+are stateless: Dragonglass asks OpenAI not to store them.
 
 ### Anthropic
 
