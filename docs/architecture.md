@@ -74,9 +74,9 @@ src/
    one turn is answered with an error instead of being run again. After a
    third identical call, or once the `maxToolIterations` tool rounds are used
    up, one more request goes without tools and with an instruction to answer
-   from what was gathered; tool calls the model makes anyway are dropped, not run. Read tools
-   accept a wikilink name and resolve it by basename, as Obsidian does, and
-   write tools refuse placeholder text such as `[Insert …]`.
+   from what was gathered; tool calls the model makes anyway are dropped, not
+   run. Read tools accept a wikilink name and resolve it by basename, as
+   Obsidian does, and write tools refuse placeholder text such as `[Insert …]`.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
 
@@ -116,8 +116,8 @@ is surfaced as an error. Ollama sends `options.num_ctx` on every request (its
 server default of 4096 silently cuts prompts that do not fit), streams a
 thinking model's reasoning as `thinking` events and replays it on the
 assistant turns after the last user message so the plan survives tool rounds,
-and emits a `warning` event
-when `prompt_eval_count` says the prompt was cut anyway: a count well under
+and emits a `warning` event when `prompt_eval_count` says the prompt was cut
+anyway: a count well under
 the estimate for a prompt that could not have fit, or a count of exactly half
 the window plus two tokens, which is what Ollama's runner leaves after cutting
 one oversized message (measured on 0.40) and is trusted whenever the prompt
