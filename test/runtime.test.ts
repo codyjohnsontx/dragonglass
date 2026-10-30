@@ -154,13 +154,13 @@ describe('runAgent', () => {
 		expect(results.every((r) => r.result.isError)).toBe(true);
 	});
 
-	it('makes the last allowed request tool-free and asks for an answer', async () => {
+	it('follows the allowed tool rounds with one tool-free request that asks for an answer', async () => {
 		const call = (text: string): StreamEvent[] => [
 			{ type: 'tool_call', call: { id: text, name: 'echo', argumentsJson: JSON.stringify({ text }) } },
 			{ type: 'done', finishReason: 'tool_calls' },
 		];
 		const p = scripted([call('a'), call('b'), [{ type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }]]);
-		const events = await collect(run(p, { maxIterations: 3 }));
+		const events = await collect(run(p, { maxIterations: 2 }));
 		expect(events.some((e) => e.type === 'error')).toBe(false);
 		expect((events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>).content).toBe('answer');
 		expect(p.requests.map((r) => r.tools?.length)).toEqual([1, 1, undefined]);
@@ -185,12 +185,13 @@ describe('runAgent', () => {
 		const tools = () => new ToolRegistry().register(proposer);
 		const p = scripted([
 			[call('a'), { type: 'done', finishReason: 'tool_calls' }],
+			[call('c'), { type: 'done', finishReason: 'tool_calls' }],
 			[{ type: 'text', delta: 'Here is what I found.' }, call('b'), { type: 'done', finishReason: 'tool_calls' }],
 		]);
 		const added: { role: string; toolCalls?: unknown }[] = [];
 		const events = await collect(run(p, { maxIterations: 2, tools: tools(), onMessages: (m) => added.push(...m) }));
-		expect(runs).toBe(1);
-		expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(1);
+		expect(runs).toBe(2);
+		expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(2);
 		expect(events.some((e) => e.type === 'error')).toBe(false);
 		const end = events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>;
 		expect(end).toMatchObject({ type: 'assistant_end', content: 'Here is what I found.', toolCalls: [] });
@@ -202,18 +203,31 @@ describe('runAgent', () => {
 			[call('b'), { type: 'done', finishReason: 'tool_calls' }],
 		]);
 		runs = 0;
-		const silent = await collect(run(q, { maxIterations: 2, tools: tools() }));
+		const silent = await collect(run(q, { maxIterations: 1, tools: tools() }));
 		expect(runs).toBe(1);
-		expect((silent.at(-1) as Extract<RunEvent, { type: 'error' }>).error.message).toMatch(/Stopped after 2 tool rounds without a final answer/);
+		expect((silent.at(-1) as Extract<RunEvent, { type: 'error' }>).error.message).toMatch(/Stopped after 1 tool round without a final answer/);
 	});
 
-	it('treats the only request as the final one when one request is allowed', async () => {
-		const p = scripted([[{ type: 'tool_call', call: { id: 'a', name: 'echo', argumentsJson: '{"text":"a"}' } }, { type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }]]);
+	it('allows one tool round and then a tool-free answer when one round is allowed', async () => {
+		const p = scripted([
+			[{ type: 'tool_call', call: { id: 'a', name: 'echo', argumentsJson: '{"text":"a"}' } }, { type: 'done', finishReason: 'tool_calls' }],
+			[{ type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }],
+		]);
 		const events = await collect(run(p, { maxIterations: 1 }));
-		expect(p.requests[0]?.tools).toBeUndefined();
-		expect(p.requests[0]?.messages[0]?.content).toContain(FINAL_ANSWER_INSTRUCTION);
-		expect(events.some((e) => e.type === 'tool_result' || e.type === 'error')).toBe(false);
+		expect(p.requests.map((r) => r.tools?.length)).toEqual([1, undefined]);
+		expect(p.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:tools' });
+		expect(p.requests[1]?.messages[0]).toEqual({ role: 'system', content: `sys:no-tools\n\n${FINAL_ANSWER_INSTRUCTION}` });
+		expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(1);
+		expect(events.some((e) => e.type === 'error')).toBe(false);
 		expect((events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>).content).toBe('answer');
+	});
+
+	it('answers without the final-answer instruction when no tool round ran', async () => {
+		const p = scripted([[{ type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }]]);
+		await collect(run(p, { maxIterations: 1 }));
+		expect(p.requests).toHaveLength(1);
+		expect(p.requests[0]?.tools).toHaveLength(1);
+		expect(p.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:tools' });
 	});
 
 	it('does not rerun a repeated call and ends a loop of identical calls with a tool-free answer', async () => {
@@ -263,10 +277,12 @@ describe('runAgent', () => {
 		await collect(run(p));
 		expect(p.requests[0]?.tools).toBeUndefined();
 		expect(p.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:no-tools' });
-		const q = scripted([[{ type: 'done', finishReason: 'stop' }]]);
-		await collect(run(q, { toolsEnabled: false }));
+		const q = scripted([[{ type: 'tool_call', call: { id: 'a', name: 'echo', argumentsJson: '{"text":"a"}' } }, { type: 'done', finishReason: 'tool_calls' }]]);
+		const disabled = await collect(run(q, { toolsEnabled: false }));
 		expect(q.requests[0]?.tools).toBeUndefined();
 		expect(q.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:no-tools' });
+		expect(q.requests).toHaveLength(1);
+		expect(disabled.some((e) => e.type === 'tool_result')).toBe(false);
 		const r = scripted([[{ type: 'done', finishReason: 'stop' }]]);
 		await collect(run(r));
 		expect(r.requests[0]?.messages).toEqual([{ role: 'system', content: 'sys:tools' }, { role: 'user', content: 'hi' }]);

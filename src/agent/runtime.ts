@@ -8,9 +8,9 @@ import { AgentTool, parseToolArguments, ToolRegistry, ToolResult, ToolValidation
  *
  * Small local models tend to loop on the same call. A call repeated with the
  * same arguments in one turn is not run again; the model is told so. A third
- * identical call, or reaching the last allowed request, makes the next
- * request tool-free with an instruction to answer from what was gathered, so
- * the turn ends in an answer rather than the round-cap error.
+ * identical call, or using up the allowed tool rounds, makes the next request
+ * tool-free with an instruction to answer from what was gathered, so the turn
+ * ends in an answer rather than a round-cap error.
  */
 
 export type RunEvent =
@@ -44,6 +44,7 @@ export interface RunOptions {
 	toolsEnabled: boolean;
 	conversationId: string;
 	signal: AbortSignal;
+	/** Tool rounds allowed per turn; one tool-free request for the answer follows them. */
 	maxIterations: number;
 	/** Called after each assistant turn; the runtime appends the messages it created. */
 	onMessages?: (added: ChatMessage[]) => void;
@@ -52,14 +53,14 @@ export interface RunOptions {
 export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 	const messages = [...opts.messages];
 	let toolsEnabled = opts.toolsEnabled && opts.provider.capabilities.toolCalling !== false;
-	let iterations = 0;
+	/** Tool rounds run so far this turn. */
+	let rounds = 0;
 	/** How often each call (name plus normalized arguments) was requested this turn. */
 	const callCounts = new Map<string, number>();
 	let forceFinal = false;
 
-	while (iterations < opts.maxIterations) {
-		iterations++;
-		const finalRound = toolsEnabled && (forceFinal || iterations === opts.maxIterations);
+	for (;;) {
+		const finalRound = toolsEnabled && rounds > 0 && (forceFinal || rounds >= opts.maxIterations);
 		const sendTools = toolsEnabled && !finalRound;
 		if (opts.signal.aborted) {
 			yield { type: 'error', error: new ProviderError('cancelled', 'Generation stopped.') };
@@ -117,7 +118,6 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			if (turnError.kind === 'unsupported_tools' && sendTools && content === '') {
 				toolsEnabled = false;
 				yield { type: 'tools_disabled', reason: turnError.message };
-				iterations--;
 				continue;
 			}
 			if (content.length > 0 && turnError.kind === 'cancelled') {
@@ -130,8 +130,8 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			return;
 		}
 
-		// No tools were on offer for the final request, so calls it makes anyway are dropped, never run.
-		const calls = finalRound ? [] : toolCalls;
+		// Calls from a request that offered no tools are dropped, never run.
+		const calls = sendTools ? toolCalls : [];
 		const assistant: ChatMessage = { role: 'assistant', content, toolCalls: calls.length ? calls : undefined };
 		if (thinking) assistant.thinking = thinking;
 		messages.push(assistant);
@@ -143,12 +143,13 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			if (finalRound && content.trim() === '') {
 				yield {
 					type: 'error',
-					error: new ProviderError('unknown', `Stopped after ${iterations} tool rounds without a final answer. Ask again to continue.`),
+					error: new ProviderError('unknown', `Stopped after ${rounds} tool round${rounds === 1 ? '' : 's'} without a final answer. Ask again to continue.`),
 				};
 			}
 			return;
 		}
 
+		rounds++;
 		for (const call of calls) {
 			let result: ToolResult;
 			if (opts.signal.aborted) {
@@ -180,10 +181,6 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			return;
 		}
 	}
-	yield {
-		type: 'error',
-		error: new ProviderError('unknown', `Stopped after ${iterations} tool rounds. Ask again to continue.`),
-	};
 }
 
 /** Appended to the system prompt of the tool-free request that ends a looping or long turn. */
