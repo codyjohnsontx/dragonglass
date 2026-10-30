@@ -5,6 +5,12 @@ import { AgentTool, parseToolArguments, ToolRegistry, ToolResult, ToolValidation
  * The agent loop: send messages, stream the reply, run any tool calls through
  * the validated tool layer, feed results back, repeat until the model stops
  * or the iteration cap is hit. Emits events the chat view renders live.
+ *
+ * Small local models tend to loop on the same call. A call repeated with the
+ * same arguments in one turn is not run again; the model is told so. A third
+ * identical call, or using up the allowed tool rounds, makes the next request
+ * tool-free with an instruction to answer from what was gathered, so the turn
+ * ends in an answer rather than a round-cap error.
  */
 
 export type RunEvent =
@@ -38,6 +44,7 @@ export interface RunOptions {
 	toolsEnabled: boolean;
 	conversationId: string;
 	signal: AbortSignal;
+	/** Tool rounds allowed per turn; one tool-free request for the answer follows them. */
 	maxIterations: number;
 	/** Called after each assistant turn; the runtime appends the messages it created. */
 	onMessages?: (added: ChatMessage[]) => void;
@@ -46,10 +53,16 @@ export interface RunOptions {
 export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 	const messages = [...opts.messages];
 	let toolsEnabled = opts.toolsEnabled && opts.provider.capabilities.toolCalling !== false;
-	let iterations = 0;
+	/** Tool rounds run so far this turn. */
+	let rounds = 0;
+	/** How often each call (name plus normalized arguments) was requested this turn. */
+	const callCounts = new Map<string, number>();
+	let forceFinal = false;
+	const maxRounds = Number.isFinite(opts.maxIterations) ? Math.max(1, opts.maxIterations) : 1;
 
-	while (iterations < opts.maxIterations) {
-		iterations++;
+	for (;;) {
+		const finalRound = toolsEnabled && (forceFinal || rounds >= maxRounds);
+		const sendTools = toolsEnabled && !finalRound;
 		if (opts.signal.aborted) {
 			yield { type: 'error', error: new ProviderError('cancelled', 'Generation stopped.') };
 			return;
@@ -67,8 +80,8 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		try {
 			const stream = opts.provider.chat({
 				model: opts.model,
-				messages: [{ role: 'system', content: opts.system(toolsEnabled) }, ...messages],
-				tools: toolsEnabled ? opts.tools.definitions() : undefined,
+				messages: [{ role: 'system', content: finalRound ? `${opts.system(false)}\n\n${FINAL_ANSWER_INSTRUCTION}` : opts.system(toolsEnabled) }, ...messages],
+				tools: sendTools ? opts.tools.definitions() : undefined,
 				signal: opts.signal,
 			});
 			for await (const ev of stream) {
@@ -103,10 +116,9 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		if (turnError) {
 			// Retry once without tools when the model rejects them, so the user
 			// still gets an answer and a clear note about the limitation.
-			if (turnError.kind === 'unsupported_tools' && toolsEnabled && content === '') {
+			if (turnError.kind === 'unsupported_tools' && sendTools && content === '') {
 				toolsEnabled = false;
 				yield { type: 'tools_disabled', reason: turnError.message };
-				iterations--;
 				continue;
 			}
 			if (content.length > 0 && turnError.kind === 'cancelled') {
@@ -119,24 +131,45 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			return;
 		}
 
-		const assistant: ChatMessage = { role: 'assistant', content, toolCalls: toolCalls.length ? toolCalls : undefined };
+		// Calls from a request that offered no tools are dropped, never run.
+		const calls = sendTools ? toolCalls : [];
+		const assistant: ChatMessage = { role: 'assistant', content, toolCalls: calls.length ? calls : undefined };
+		if (thinking) assistant.thinking = thinking;
 		messages.push(assistant);
 		const added: ChatMessage[] = [assistant];
-		yield { type: 'assistant_end', content, thinking, toolCalls, usage, warnings };
+		yield { type: 'assistant_end', content, thinking, toolCalls: calls, usage, warnings };
 
-		if (toolCalls.length === 0) {
+		if (calls.length === 0) {
 			opts.onMessages?.(added);
+			if (finalRound && content.trim() === '') {
+				yield {
+					type: 'error',
+					error: new ProviderError('unknown', `Stopped after ${rounds} tool round${rounds === 1 ? '' : 's'} without a final answer. Ask again to continue.`),
+				};
+			}
 			return;
 		}
 
-		for (const call of toolCalls) {
+		rounds++;
+		for (const call of calls) {
 			let result: ToolResult;
 			if (opts.signal.aborted) {
 				result = { content: 'Not run: generation stopped.', isError: true };
 			} else {
 				const tool = opts.tools.get(call.name);
 				yield { type: 'tool_call', call, tool };
-				result = await executeTool(tool, call, opts);
+				const key = callKey(call);
+				const count = (callCounts.get(key) ?? 0) + 1;
+				callCounts.set(key, count);
+				if (count > 1) {
+					if (count >= 3) forceFinal = true;
+					result = {
+						content: `Error: you already called ${call.name} with these arguments in this turn and its result is above; calling it again gives the same result. Use a different tool or different arguments, or answer with what you have.`,
+						isError: true,
+					};
+				} else {
+					result = await executeTool(tool, call, opts);
+				}
 			}
 			const toolMsg: ChatMessage = { role: 'tool', content: result.content, toolCallId: call.id, toolName: call.name };
 			messages.push(toolMsg);
@@ -149,10 +182,32 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			return;
 		}
 	}
-	yield {
-		type: 'error',
-		error: new ProviderError('unknown', `Stopped after ${opts.maxIterations} tool rounds. Ask again to continue.`),
-	};
+}
+
+/** Appended to the system prompt of the tool-free request that ends a looping or long turn. */
+export const FINAL_ANSWER_INSTRUCTION =
+	'You have used up your tool calls for this turn. Answer the user now from the tool results above. ' +
+	'If something is still missing, say what you found and what is missing instead of guessing.';
+
+/** A call's identity for repeat detection: its name and its arguments with object keys sorted. */
+function callKey(call: ToolCall): string {
+	let args: unknown;
+	try {
+		// Blank arguments mean no arguments, as the tool layer reads them.
+		args = call.argumentsJson.trim() === '' ? {} : JSON.parse(call.argumentsJson);
+	} catch {
+		return `${call.name}\u0000${call.argumentsJson.trim()}`;
+	}
+	return `${call.name}\u0000${JSON.stringify(sortKeys(args))}`;
+}
+
+function sortKeys(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sortKeys);
+	if (value && typeof value === 'object') {
+		const obj = value as Record<string, unknown>;
+		return Object.fromEntries(Object.keys(obj).sort().map((k) => [k, sortKeys(obj[k])]));
+	}
+	return value;
 }
 
 async function executeTool(tool: AgentTool | undefined, call: ToolCall, opts: RunOptions): Promise<ToolResult> {

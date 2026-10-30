@@ -51,10 +51,10 @@ describe('chat model filters', () => {
 		expect(chat.filter(isOpenAIChatModel)).toEqual(chat);
 	});
 
-	it('hides OpenAI models that take tools only through the Responses API, snapshots included, unless configured', () => {
+	it('offers OpenAI models that take tools only through the Responses API, snapshots included', () => {
 		const listed = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-sol-2026-08-14', 'gpt-6.1-terra', 'gpt-6.1-terra-2026-08-14'].map((id) => ({ id }));
-		expect(ids(modelChoices('openai', listed).models)).toEqual(['gpt-6-astra', 'gpt-6-luna']);
-		expect(ids(withConfiguredModel(modelChoices('openai', listed).models, 'gpt-6.1-sol'))).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna']);
+		expect(ids(modelChoices('openai', listed).models)).toEqual(ids(listed));
+		expect(ids(modelChoices('openai', undefined).models)).toEqual(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna']);
 	});
 
 	it('drops Gemini speech, image, music, video and embedding models but keeps chat ones', () => {

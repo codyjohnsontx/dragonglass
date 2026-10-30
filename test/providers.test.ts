@@ -175,6 +175,27 @@ describe.each([
 		expect(lastChatBody()).not.toHaveProperty('think');
 	});
 
+	it('replays thinking on the assistant turns of the current user turn only', async () => {
+		const call = { id: 'c1', name: 'read_note', argumentsJson: '{"path":"A.md"}' };
+		await collect(
+			provider().chat({
+				model: 'fake-think',
+				messages: [
+					{ role: 'user', content: 'first' },
+					{ role: 'assistant', content: 'old answer', thinking: 'old plan' },
+					{ role: 'user', content: 'second' },
+					{ role: 'assistant', content: '', thinking: 'read A, then answer', toolCalls: [call] },
+					{ role: 'tool', content: 'A body', toolCallId: 'c1', toolName: 'read_note' },
+				],
+				tools,
+			}),
+		);
+		const sent = lastChatBody()['messages'] as Array<Record<string, unknown>>;
+		expect(sent[1]).toEqual({ role: 'assistant', content: 'old answer' });
+		expect(sent[3]).toMatchObject({ role: 'assistant', thinking: 'read A, then answer' });
+		expect(sent[3]?.['tool_calls']).toEqual([{ function: { name: 'read_note', arguments: { path: 'A.md' } } }]);
+	});
+
 	it('warns when the prompt count says Ollama cut the prompt', async () => {
 		const long = 'word '.repeat(6000); // ~7,500 tokens by the estimate, well over a 4096 window
 		const events = await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-truncate', messages: [{ role: 'user', content: long }] }));
@@ -200,6 +221,8 @@ describe('Ollama context accounting', () => {
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) }], undefined)).toBe(104);
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) + '\n\t   '.repeat(100) }], undefined)).toBe(105);
 		expect(estimatePromptTokens([{ role: 'user', content: '' }], tools)).toBeGreaterThan(4);
+		// Replayed thinking is part of the prompt.
+		expect(estimatePromptTokens([{ role: 'assistant', content: '', thinking: 'x'.repeat(400) }], undefined)).toBe(104);
 		// CJK counts about one token per character; other scripts about two characters per token.
 		expect(estimatePromptTokens([{ role: 'user', content: '秘密'.repeat(200) }], undefined)).toBe(404);
 		expect(estimatePromptTokens([{ role: 'user', content: 'слово'.repeat(80) }], undefined)).toBe(204);
@@ -355,14 +378,29 @@ describe.each([
 		expect(sent()).not.toHaveProperty('reasoning_effort');
 	});
 
-	it('explains that a Responses-only model cannot take tools over Chat Completions', async () => {
-		const err = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'read A.md' }], tools })).catch((e: unknown) => e as ProviderError);
-		expect(err).toMatchObject({ kind: 'unsupported_tools', status: 400 });
-		expect(err.userMessage()).toBe(
-			"This model does not support tool calling: gpt-6.1-sol takes tools only through OpenAI's newer Responses API, which Dragonglass does not support yet. Choose a tool-capable model, or ask a question that needs no vault access.",
-		);
-		const events = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'hello' }] }));
-		expect(text(events)).toMatch(/Hello/);
+	it('sends GPT-6.1 Sol and Terra, snapshots included, over the Responses API and the rest over Chat Completions', async () => {
+		const urls = () => fake.requests.slice(-1).map((r) => r.url);
+		for (const model of ['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6.1-sol-2026-08-14']) {
+			await collect(provider().chat({ model, messages: [{ role: 'user', content: 'hello' }] }));
+			expect(urls()).toEqual(['/v1/responses']);
+		}
+		for (const model of ['gpt-6-astra', 'gpt-6-luna', 'gpt-6.10-sol']) {
+			await collect(provider().chat({ model, messages: [{ role: 'user', content: 'hello' }], tools }));
+			expect(urls()).toEqual(['/v1/chat/completions']);
+		}
+	});
+
+	it('moves a model to the Responses API when Chat Completions says its tools need it, and stays there', async () => {
+		const before = fake.requests.length;
+		const events = await collect(provider().chat({ model: 'fake-responses-only', messages: [{ role: 'user', content: 'read A.md' }], tools }));
+		expect(events.find((e) => e.type === 'tool_call')).toMatchObject({ call: { name: 'read_note', argumentsJson: '{"path":"A.md"}' } });
+		expect(fake.requests.slice(before).map((r) => r.url)).toEqual(['/v1/chat/completions', '/v1/responses']);
+
+		const p = provider();
+		await collect(p.chat({ model: 'fake-responses-only', messages: [{ role: 'user', content: 'read A.md' }], tools }));
+		const mark = fake.requests.length;
+		await collect(p.chat({ model: 'fake-responses-only', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(fake.requests.slice(mark).map((r) => r.url)).toEqual(['/v1/responses']);
 	});
 
 	it('maps rate limits and server errors', async () => {
@@ -375,6 +413,111 @@ describe.each([
 		const err = await provider('sk-wrong').listModels().catch((e: unknown) => e as ProviderError);
 		expect(JSON.stringify(err)).not.toContain('sk-wrong');
 		expect(err.message).not.toContain('sk-wrong');
+	});
+});
+
+describe.each([
+	['streaming', () => new FetchHttpClient()],
+	['non-streaming', wholeBodyClient],
+])('OpenAIProvider over the Responses API (%s)', (label, makeClient) => {
+	const provider = (key: string | null = 'sk-fake') =>
+		new OpenAIProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/v1`, apiKey: () => key }));
+	const sent = () => fake.requests.filter((r) => r.url === '/v1/responses').at(-1)!.body!;
+
+	it('streams text with usage, statelessly', async () => {
+		const events = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hello' }] }));
+		expect(text(events)).toBe('Hello from the fake model. I can read and edit your notes.');
+		if (label === 'streaming') expect(events.filter((e) => e.type === 'text').length).toBeGreaterThan(1);
+		expect(events.find((e) => e.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 12, outputTokens: 9, reasoningTokens: 2 } });
+		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'stop' });
+		expect(sent()).toEqual({
+			model: 'gpt-6.1-sol',
+			input: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hello' }],
+			stream: label === 'streaming',
+			store: false,
+		});
+	});
+
+	it('sends flat non-strict function tools, emits the call, and round-trips its result', async () => {
+		const events = await collect(provider().chat({ model: 'gpt-6.1-terra', messages: [{ role: 'user', content: 'read A.md' }], tools }));
+		if (label === 'streaming') expectStartBeforeCall(events, 'read_note');
+		expect(events.filter((e) => e.type === 'tool_call')).toEqual([
+			{ type: 'tool_call', call: { id: 'call_fake_1', name: 'read_note', argumentsJson: '{"path":"A.md"}' } },
+		]);
+		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'tool_calls' });
+		expect(sent()['tools']).toEqual([{ type: 'function', name: 'read_note', description: 'read', parameters: tools[0]!.parameters, strict: false }]);
+
+		const history: ChatMessage[] = [
+			{ role: 'user', content: 'read A.md' },
+			{ role: 'assistant', content: 'Let me look.', toolCalls: [{ id: 'call_fake_1', name: 'read_note', argumentsJson: '{"path":"A.md"}' }] },
+			{ role: 'tool', content: '<<<note path="A.md">>>\n# Title line\n<<<end note>>>', toolCallId: 'call_fake_1', toolName: 'read_note' },
+		];
+		const second = await collect(provider().chat({ model: 'gpt-6.1-terra', messages: history, tools }));
+		expect(text(second)).toBe('The note A.md begins with: # Title line');
+		expect(sent()['input']).toEqual([
+			{ role: 'user', content: 'read A.md' },
+			{ role: 'assistant', content: 'Let me look.' },
+			{ type: 'function_call', call_id: 'call_fake_1', name: 'read_note', arguments: '{"path":"A.md"}' },
+			{ type: 'function_call_output', call_id: 'call_fake_1', output: history[2]!.content },
+		]);
+	});
+
+	it('replays tool history as text when no tools are sent', async () => {
+		const history: ChatMessage[] = [
+			{ role: 'user', content: 'read A.md' },
+			{ role: 'assistant', content: '', toolCalls: [{ id: 'call_fake_1', name: 'read_note', argumentsJson: '{"path":"A.md"}' }] },
+			{ role: 'tool', content: 'note body', toolCallId: 'call_fake_1', toolName: 'read_note' },
+			{ role: 'assistant', content: 'Done.' },
+			{ role: 'user', content: 'hello' },
+		];
+		expect(text(await collect(provider().chat({ model: 'gpt-6.1-sol', messages: history })))).toMatch(/^Hello/);
+		expect(sent()).not.toHaveProperty('tools');
+		expect(sent()['input']).toEqual([
+			{ role: 'user', content: 'read A.md' },
+			{ role: 'assistant', content: '[Called tool read_note with {"path":"A.md"}]' },
+			{ role: 'user', content: '[Result of tool read_note]\nnote body' },
+			{ role: 'assistant', content: 'Done.' },
+			{ role: 'user', content: 'hello' },
+		]);
+	});
+
+	it('reports a reply cut at the output limit', async () => {
+		const events = await collect(provider().chat({ model: 'gpt-6.1-sol-fake-length', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(text(events)).toMatch(/^Hello/);
+		expect(events.at(-1)).toEqual({ type: 'done', finishReason: 'length' });
+	});
+
+	it('maps auth, rate limits and server errors', async () => {
+		await expect(collect(provider(null).chat({ model: 'gpt-6.1-sol', messages: [] }))).rejects.toMatchObject({ kind: 'auth' });
+		const bad = await collect(provider('sk-wrong').chat({ model: 'gpt-6.1-sol', messages: [] })).catch((e: unknown) => e as ProviderError);
+		expect(bad).toMatchObject({ kind: 'auth', status: 401 });
+		expect(JSON.stringify(bad)).not.toContain('sk-wrong');
+		await expect(collect(provider().chat({ model: 'gpt-6.1-sol-fake-429', messages: [] }))).rejects.toMatchObject({ kind: 'rate_limit' });
+		await expect(collect(provider().chat({ model: 'gpt-6.1-sol-fake-500', messages: [] }))).rejects.toMatchObject({ kind: 'server', message: 'The server had an error' });
+	});
+});
+
+describe('OpenAIProvider Responses streaming specifics', () => {
+	const provider = () => new OpenAIProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/v1`, apiKey: () => 'sk-fake' }));
+	const run = async (model: string, seen: StreamEvent[], signal?: AbortSignal, onEvent?: () => void) => {
+		for await (const e of provider().chat({ model, messages: [{ role: 'user', content: 'hello' }], signal })) {
+			seen.push(e);
+			onEvent?.();
+		}
+	};
+
+	it('surfaces an error event and a failed response sent mid-stream', async () => {
+		const seen: StreamEvent[] = [];
+		await expect(run('gpt-6.1-sol-fake-overloaded', seen)).rejects.toMatchObject({ kind: 'server', message: 'The server is overloaded' });
+		expect(text(seen)).toBe('Hello from ');
+		await expect(run('gpt-6.1-sol-fake-failed', [])).rejects.toMatchObject({ kind: 'server', message: 'The model failed to generate a response.' });
+	});
+
+	it('stops a streaming reply when aborted', async () => {
+		const ac = new AbortController();
+		const seen: StreamEvent[] = [];
+		await expect(run('gpt-6.1-sol-fake-slow', seen, ac.signal, () => seen.length === 2 && ac.abort())).rejects.toMatchObject({ kind: 'cancelled' });
+		expect(seen.length).toBeLessThan(6);
 	});
 });
 
@@ -465,6 +608,18 @@ describe.each([
 		const { provider } = setup({ baseUrl: `${fake.baseUrl}/v1`, apiKeySecretId: 'oa' });
 		expect(await provider.checkConnection()).toMatchObject({ ok: true });
 		expect(lastHeaders()['authorization']).toBe('Bearer sk-fake');
+	});
+
+	it('stays on Chat Completions and explains a model whose tools need the Responses API', async () => {
+		const { provider } = setup({ baseUrl: `${fake.baseUrl}/v1`, apiKeySecretId: 'oa' });
+		const err = await collect(provider.chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'read A.md' }], tools })).catch((e: unknown) => e as ProviderError);
+		expect(err).toMatchObject({ kind: 'unsupported_tools', status: 400 });
+		expect(err.userMessage()).toBe(
+			"This model does not support tool calling: gpt-6.1-sol takes tools only through OpenAI's Responses API, which Dragonglass uses only with the OpenAI provider. Choose a tool-capable model, or ask a question that needs no vault access.",
+		);
+		expect(fake.requests.at(-1)!.url).toBe('/v1/chat/completions');
+		expect(text(await collect(provider.chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'hello' }] })))).toMatch(/^Hello/);
+		expect(fake.requests.at(-1)!.url).toBe('/v1/chat/completions');
 	});
 
 	it('reports a missing base URL instead of requesting a relative one', async () => {

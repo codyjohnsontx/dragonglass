@@ -11,8 +11,9 @@ written.
   subscription, no account, no proxy; cloud usage is billed to you by the
   provider. See [Ways to run it](#ways-to-run-it).
 - **Local-first and private.** Nothing leaves your machine except the message
-  you type, the context you choose to attach, and the results of the tools
-  the model calls, and only to the provider you configured. No telemetry.
+  you type, the context you choose to attach, the results of the tools the
+  model calls and a short vault overview (note count and top-level folder
+  names), and only to the provider you configured. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
   inspect properties, links and backlinks, and propose creating or editing
   notes. Edits are shown as a diff; you approve, reject, or revert. Nothing is
@@ -112,10 +113,11 @@ list of each provider's current models instead.
 2. Pick a model from the **Model** field's list (or type any model id) and
    select **Test OpenAI connection**.
 
-The OpenAI list leaves out models that take tools only through OpenAI's newer
-Responses API, such as GPT-6.1 Sol and Terra, because Dragonglass does not
-support that API yet. If you type one in anyway, the plugin retries without
-vault tools and tells you why.
+GPT-6.1 Sol and Terra take tool calls only through OpenAI's Responses API, so
+Dragonglass talks to them over that API and to other OpenAI models over Chat
+Completions. A model you type in that OpenAI says needs the Responses API for
+tools moves over to it for the rest of the session. Either way the requests
+are stateless: Dragonglass asks OpenAI not to store them.
 
 ### Anthropic
 
@@ -318,8 +320,12 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 ## Privacy
 
 - No telemetry. No account. No server of ours.
-- The whole vault is never uploaded. Only chosen context and tool results go
-  to the provider you picked.
+- The whole vault is never uploaded. What goes to the provider you picked is
+  your message, the context you attach (the active note, a selection, attached
+  notes), the content of every note the model reads or searches through its
+  tools, and a short overview of the vault: the note count and the names of
+  the top-level folders. With a cloud provider, all of that leaves your
+  machine.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content is treated as data: the model is told not to follow

@@ -37,6 +37,33 @@ describe('vault tools', () => {
 		expect((await read.execute({ path: 'Missing.md' }, ctx)).content).toMatch(/no note at/);
 	});
 
+	it('resolves a wikilink name to the one note it means, and lists the candidates when several match', async () => {
+		const { vault, registry } = setup();
+		const read = registry.get('read_note')!;
+		for (const path of ['Milestones', 'Milestones.md', '[[Milestones]]', '[[Milestones|the plan]]', '[[Milestones#Beta]]', 'milestones.md']) {
+			const r = await read.execute({ path }, ctx);
+			expect(r.isError).toBeFalsy();
+			expect(r.content).toMatch(/^\(Resolved .+ to Projects\/Milestones\.md; use the full path next time\.\)\n<<<note path="Projects\/Milestones\.md">>>/);
+		}
+		// An existing path is read as given, with no notice.
+		expect((await read.execute({ path: 'Projects/Milestones.md' }, ctx)).content).toMatch(/^<<<note path=/);
+		// A guessed folder falls back to the one note with that basename.
+		const wrongFolder = await read.execute({ path: 'Notes/milestones.md' }, ctx);
+		expect(wrongFolder.isError).toBeFalsy();
+		expect(wrongFolder.content).toMatch(/^\(Resolved Notes\/milestones\.md to Projects\/Milestones\.md; use the full path next time\.\)\n<<<note path="Projects\/Milestones\.md">>>/);
+		vault.seed('Archive/Milestones.md', 'old');
+		for (const path of ['Milestones.md', 'Notes/Milestones.md']) {
+			const several = await read.execute({ path }, ctx);
+			expect(several.isError).toBe(true);
+			expect(several.content).toContain('several notes match that name: Archive/Milestones.md, Projects/Milestones.md');
+		}
+		// A partial path picks between them, as Obsidian links do.
+		expect((await read.execute({ path: 'Archive/Milestones' }, ctx)).content).toContain('<<<note path="Archive/Milestones.md">>>\nold');
+		// Validation still applies to whatever was given.
+		expect((await read.execute({ path: '[[../secret]]' }, ctx)).content).toMatch(/traversal/);
+		expect((await read.execute({ path: '.obsidian/app' }, ctx)).content).toMatch(/off limits/);
+	});
+
 	it('truncates long notes', async () => {
 		const vault = new MemoryVaultPort({ 'Big.md': 'x'.repeat(100) });
 		const registry = new ToolRegistry();
@@ -197,15 +224,26 @@ describe('vault tools', () => {
 		});
 	});
 
-	it('returns metadata with links and backlinks', async () => {
+	it('returns metadata with links and backlinks as wikilink names beside their paths', async () => {
 		const { registry } = setup();
-		const r = await registry.get('get_note_metadata')!.execute({ path: 'Projects/Launch.md' }, ctx);
+		const tool = registry.get('get_note_metadata')!;
+		expect(tool.description).toMatch(/backlinks/);
+		expect(tool.description).toMatch(/what links to X/);
+		const r = await tool.execute({ path: 'Projects/Launch.md' }, ctx);
 		const meta = JSON.parse(r.content);
 		expect(meta.frontmatter).toEqual({ status: 'active' });
 		expect(meta.tags).toEqual(['#project']);
 		expect(meta.headings).toEqual([{ level: 1, text: 'Launch' }]);
-		expect(meta.outgoingLinks).toEqual(['Projects/Milestones.md']);
-		expect(meta.backlinks).toEqual(['Projects/Milestones.md']);
+		expect(meta.outgoingLinks).toEqual(['Milestones (Projects/Milestones.md)']);
+		expect(meta.backlinks).toEqual(['Milestones (Projects/Milestones.md)']);
+		// A wikilink name resolves here too.
+		const byName = await tool.execute({ path: '[[Milestones]]' }, ctx);
+		expect(byName.content).toMatch(/^\(Resolved Milestones\.md to Projects\/Milestones\.md/);
+		expect(JSON.parse(byName.content.slice(byName.content.indexOf('{'))).backlinks).toEqual(['Launch (Projects/Launch.md)']);
+		const wrongFolder = await tool.execute({ path: 'Notes/Milestones.md' }, ctx);
+		expect(wrongFolder.content).toMatch(/^\(Resolved Notes\/Milestones\.md to Projects\/Milestones\.md/);
+		expect(JSON.parse(wrongFolder.content.slice(wrongFolder.content.indexOf('{'))).backlinks).toEqual(['Launch (Projects/Launch.md)']);
+		expect((await tool.execute({ path: 'Nowhere' }, ctx)).content).toMatch(/no note at Nowhere\.md\. Use list_files or search_notes/);
 	});
 
 	it('reads the active note and selection', async () => {
@@ -230,6 +268,19 @@ describe('vault tools', () => {
 		expect(vault.exists('New.md')).toBe(false);
 		const bad = await registry.get('propose_edit_note')!.execute({ path: 'Projects/Launch.md', summary: 's', edits: [{ type: 'nope' }] }, ctx);
 		expect(bad.isError).toBe(true);
+	});
+
+	it('refuses proposals with placeholder text and tells the model to gather the content', async () => {
+		const { registry } = setup();
+		const edit = await registry.get('propose_edit_note')!.execute(
+			{ path: 'Projects/Launch.md', summary: 'decisions', edits: [{ type: 'append', content: '## Decisions\n\n- [Insert decisions from October meetings here]\n' }] },
+			ctx,
+		);
+		expect(edit.isError).toBe(true);
+		expect(edit.proposal).toBeUndefined();
+		expect(edit.content).toMatch(/placeholder text \(\[Insert decisions from October meetings here\]\)\. Search and read/);
+		const create = await registry.get('propose_create_note')!.execute({ path: 'New.md', content: 'Owner: [TODO: find owner]', summary: 's' }, ctx);
+		expect(create.isError).toBe(true);
 	});
 });
 

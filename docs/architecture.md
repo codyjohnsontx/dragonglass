@@ -14,9 +14,12 @@ src/
     http.ts               Transport: streaming fetch client, requestUrl fallback,
                           SSE and NDJSON parsers.
     ollama.ts             Ollama native API (/api/chat NDJSON).
-    openai.ts             OpenAI Chat Completions (SSE). Also serves the custom
-                          OpenAI-compatible provider (own id, URL, auth and
-                          capability overrides).
+    openai.ts             OpenAI Chat Completions (SSE), and the Responses API
+                          for models that take tools only there. Also serves
+                          the custom OpenAI-compatible provider (own id, URL,
+                          auth and capability overrides; Chat Completions only).
+    openai-responses.ts   Responses API wire format: stateless input items,
+                          function tools, SSE events.
     anthropic.ts          Anthropic Messages API (SSE, tool_use blocks).
     gemini.ts             Gemini API (streamGenerateContent SSE,
                           function declarations, thought signatures).
@@ -45,7 +48,8 @@ src/
     store.ts              One JSON file per conversation, debounced writes.
   ui/
     chat-view.ts          The sidebar ItemView.
-    copy.ts               Clipboard write behind the per-reply Copy button.
+    copy.ts               Clipboard write behind the per-reply Copy button,
+                          and its screen-reader "Copied" announcement.
     proposal-card.ts      Diff review card with approve/reject/revert.
     note-picker.ts        Fuzzy picker for attaching notes.
     confirm-modal.ts      Confirmation dialog for destructive actions.
@@ -70,7 +74,13 @@ src/
    (`agent/tools.ts`). Only then does the tool run. Read tools return text.
    Write tools return a `ChangeProposal` and *do not write*.
 5. Tool results are appended as `tool` messages and the loop continues until
-   the model answers without tools or `maxToolIterations` is hit.
+   the model answers without tools. A call repeated with the same arguments in
+   one turn is answered with an error instead of being run again. After a
+   third identical call, or once the `maxToolIterations` tool rounds are used
+   up, one more request goes without tools and with an instruction to answer
+   from what was gathered; tool calls the model makes anyway are dropped, not
+   run. Read tools accept a wikilink name and resolve it by basename, as
+   Obsidian does, and write tools refuse placeholder text such as `[Insert …]`.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
 
@@ -108,9 +118,11 @@ requires its thought signature to be replayed with function calls, reports an
 invalid key as HTTP 400, and can stop with a safety reason and no text, which
 is surfaced as an error. Ollama sends `options.num_ctx` on every request (its
 server default of 4096 silently cuts prompts that do not fit), streams a
-thinking model's reasoning as `thinking` events, and emits a `warning` event
-when `prompt_eval_count` says the prompt was cut anyway: a count well under
-the estimate for a prompt that could not have fit, or a count of exactly half
+thinking model's reasoning as `thinking` events and replays it on the
+assistant turns after the last user message so the plan survives tool rounds,
+and emits a `warning` event when `prompt_eval_count` says the prompt was cut
+anyway: a count well under the estimate for a prompt that could not have
+fit, or a count of exactly half
 the window plus two tokens, which is what Ollama's runner leaves after cutting
 one oversized message (measured on 0.40) and is trusted whenever the prompt
 could have overflowed under a byte-level tokenizer, so notes in Chinese,

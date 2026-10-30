@@ -37,6 +37,12 @@ export interface ChatMessage {
 	toolCallId?: string;
 	/** Present on tool messages: the tool name (some providers want it). */
 	toolName?: string;
+	/**
+	 * Reasoning the model streamed on this assistant turn. Set by the agent
+	 * loop within one user turn so a thinking model keeps its plan across tool
+	 * rounds; adapters that cannot replay reasoning ignore it.
+	 */
+	thinking?: string;
 }
 
 /** JSON Schema subset used for tool parameters. */
@@ -87,7 +93,7 @@ export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'other';
 
 export type StreamEvent =
 	| { type: 'text'; delta: string }
-	/** Hidden reasoning from a thinking model. Shown to the user, never sent back. */
+	/** Hidden reasoning from a thinking model. Shown to the user; replayed to Ollama only within the same user turn. */
 	| { type: 'thinking'; delta: string }
 	/**
 	 * The model has begun a call to `name`; its arguments are still streaming.
