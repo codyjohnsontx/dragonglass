@@ -96,3 +96,18 @@ documented placeholder signature (`skip_thought_signature_validator`).
 The Messages API requires `max_tokens` on every request and the right value
 depends on the model. It is a user setting (default 8192) rather than a
 hardcoded per-model table that would go stale. Gemini and OpenAI need no cap.
+
+## 13. OpenAI Responses API stateless, per model
+
+GPT-6.1 Sol and Terra take tool calls only through the Responses API, so the
+OpenAI adapter sends those models (and any model whose Chat Completions tool
+error points at `/v1/responses`) there and keeps everything else, including
+the custom endpoint, on Chat Completions. Requests are stateless
+(`store: false`, full history as input items each turn) rather than chained
+with `previous_response_id`, which would keep conversations on OpenAI's
+servers and tie history to one provider. Reasoning items are not replayed:
+keeping their encrypted content would mean storing provider state on messages
+(decision 11), and without it the model reasons afresh at each tool step, as
+it does over Chat Completions. Function tools are sent with `strict: false`
+because strict mode, the Responses default, requires closed schemas with every
+property required.

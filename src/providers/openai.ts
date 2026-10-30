@@ -13,8 +13,9 @@ import {
 	StreamEvent,
 	toProviderError,
 } from './types';
-import { HttpClient, joinUrl, parseSse } from './http';
+import { HttpClient, HttpStreamResponse, joinUrl, parseSse } from './http';
 import { OPENAI_RESPONSES_ONLY_TOOLS } from './model-choices';
+import { responsesBody, responsesStreamEvents, responsesWholeEvents } from './openai-responses';
 
 /**
  * OpenAI models that take tool calls over Chat Completions only with
@@ -27,17 +28,11 @@ const TOOLS_NEED_NO_REASONING = /^gpt-6-(?:luna|sol)(?:-|$)/;
 /**
  * OpenAI's 400 for tools sent over Chat Completions to a model that takes them
  * only through the Responses API ("Function tools ... are not supported for
- * <model> in /v1/chat/completions. Please use /v1/responses instead."), said
- * plainly. Any other error is returned unchanged.
+ * <model> in /v1/chat/completions. Please use /v1/responses instead.").
  */
-function responsesOnlyTools(model: string, err: ProviderError): ProviderError {
-	if (err.status !== 400 || !/tool|function/i.test(err.message)) return err;
-	if (!OPENAI_RESPONSES_ONLY_TOOLS.test(model) && !/\/v1\/responses|responses api/i.test(err.message)) return err;
-	return new ProviderError(
-		'unsupported_tools',
-		`${model} takes tools only through OpenAI's newer Responses API, which Dragonglass does not support yet`,
-		400,
-	);
+function wantsResponses(model: string, err: ProviderError): boolean {
+	if (err.status !== 400 || !/tool|function/i.test(err.message)) return false;
+	return OPENAI_RESPONSES_ONLY_TOOLS.test(model) || /\/v1\/responses|responses api/i.test(err.message);
 }
 
 /**
@@ -66,13 +61,16 @@ export interface OpenAIIdentity {
 }
 
 /**
- * OpenAI adapter using the Chat Completions API with SSE streaming. The
- * custom OpenAI-compatible provider is this class with its own identity,
- * base URL, auth and capability overrides.
+ * OpenAI adapter using the Chat Completions API with SSE streaming, and the
+ * Responses API for OpenAI models that take tools only there. The custom
+ * OpenAI-compatible provider is this class with its own identity, base URL,
+ * auth and capability overrides, and always uses Chat Completions.
  */
 export class OpenAIProvider implements Provider {
 	readonly id: ProviderId;
 	readonly displayName: string;
+	/** Models OpenAI has told this session to call over the Responses API. */
+	private readonly responsesModels = new Set<string>();
 
 	constructor(
 		private readonly http: HttpClient,
@@ -145,8 +143,25 @@ export class OpenAIProvider implements Provider {
 		}
 	}
 
-	async *chat(request: ChatRequest): AsyncIterable<StreamEvent> {
+	/** Whether `model` goes over the Responses API. Only OpenAI itself serves it. */
+	private usesResponses(model: string): boolean {
+		return this.id === 'openai' && (OPENAI_RESPONSES_ONLY_TOOLS.test(model) || this.responsesModels.has(model));
+	}
+
+	private async post(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<HttpStreamResponse> {
 		const headers = this.headers();
+		try {
+			return await this.http.stream({ url: this.url(path), method: 'POST', headers, body: JSON.stringify(body), signal });
+		} catch (e) {
+			throw toProviderError(e);
+		}
+	}
+
+	async *chat(request: ChatRequest): AsyncIterable<StreamEvent> {
+		if (this.usesResponses(request.model)) {
+			yield* this.responsesChat(request);
+			return;
+		}
 		const { capabilities } = this;
 		const streaming = this.http.supportsStreaming && capabilities.streaming;
 		const body: Record<string, unknown> = {
@@ -164,21 +179,21 @@ export class OpenAIProvider implements Provider {
 		}
 		if (request.temperature !== undefined) body['temperature'] = request.temperature;
 
-		let res;
-		try {
-			res = await this.http.stream({
-				url: this.url('/chat/completions'),
-				method: 'POST',
-				headers,
-				body: JSON.stringify(body),
-				signal: request.signal,
-			});
-		} catch (e) {
-			throw toProviderError(e);
-		}
+		const res = await this.post('/chat/completions', body, request.signal);
 		if (res.status < 200 || res.status >= 300) {
 			const err = errorFromStatus(res.status, await res.errorText());
-			throw body['tools'] ? responsesOnlyTools(request.model, err) : err;
+			if (!body['tools'] || !wantsResponses(request.model, err)) throw err;
+			if (this.id !== 'openai') {
+				throw new ProviderError(
+					'unsupported_tools',
+					`${request.model} takes tools only through OpenAI's Responses API, which Dragonglass uses only with the OpenAI provider`,
+					400,
+				);
+			}
+			// A model the built-in list does not know yet: remember it and ask again over Responses.
+			this.responsesModels.add(request.model);
+			yield* this.responsesChat(request);
+			return;
 		}
 
 		if (!streaming) {
@@ -240,6 +255,15 @@ export class OpenAIProvider implements Provider {
 			};
 		}
 		yield { type: 'done', finishReason: finish ?? (pending.size > 0 ? 'tool_calls' : 'other') };
+	}
+
+	private async *responsesChat(request: ChatRequest): AsyncIterable<StreamEvent> {
+		const { capabilities } = this;
+		const streaming = this.http.supportsStreaming && capabilities.streaming;
+		const withTools = capabilities.toolCalling && (request.tools?.length ?? 0) > 0;
+		const res = await this.post('/responses', responsesBody(request, streaming, withTools), request.signal);
+		if (res.status < 200 || res.status >= 300) throw errorFromStatus(res.status, await res.errorText());
+		yield* streaming ? responsesStreamEvents(res.chunks, request.signal) : responsesWholeEvents(res.chunks);
 	}
 
 	private async *nonStreamingEvents(chunks: AsyncIterable<string>): AsyncIterable<StreamEvent> {

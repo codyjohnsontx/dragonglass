@@ -6,10 +6,11 @@ import { ModelInfo, Provider, ProviderError, ProviderId, toProviderError } from 
  * provider's model docs; update them when a provider retires one.
  */
 export const SUGGESTED_MODELS: Partial<Record<ProviderId, readonly ModelInfo[]>> = {
-	// https://developers.openai.com/api/docs/models. Only models that take
-	// tool calls over Chat Completions; see OPENAI_RESPONSES_ONLY_TOOLS.
+	// https://developers.openai.com/api/docs/models
 	openai: [
 		{ id: 'gpt-6-astra', label: 'GPT-6 Astra' },
+		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+		{ id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
 		{ id: 'gpt-6-luna', label: 'GPT-6 Luna' },
 	],
 	// https://platform.claude.com/docs/en/about-claude/models/overview
@@ -39,15 +40,10 @@ export function isOpenAIChatModel(id: string): boolean {
 }
 
 /**
- * OpenAI chat models whose docs say tool calls need the Responses API, which
- * the adapter does not speak yet, so they cannot use vault tools. Kept out of
- * the menu with their dated snapshots; a hand-typed id still works.
+ * OpenAI chat models whose docs say tool calls need the Responses API, dated
+ * snapshots included. The OpenAI adapter sends these over Responses.
  */
 export const OPENAI_RESPONSES_ONLY_TOOLS = /^gpt-6\.1-(?:sol|terra)(?:-|$)/;
-
-function isOpenAIMenuModel(id: string): boolean {
-	return isOpenAIChatModel(id) && !OPENAI_RESPONSES_ONLY_TOOLS.test(id);
-}
 
 /** Gemini models that accept generateContent but produce speech, images, music or video rather than chat. */
 const GEMINI_NON_CHAT = /tts|image|banana|embedding|transcribe|lyria|imagen|veo/i;
@@ -65,7 +61,7 @@ export interface ModelChoices {
 }
 
 const CHAT_FILTERS: Partial<Record<ProviderId, (id: string) => boolean>> = {
-	openai: isOpenAIMenuModel,
+	openai: isOpenAIChatModel,
 	gemini: isGeminiChatModel,
 };
 
