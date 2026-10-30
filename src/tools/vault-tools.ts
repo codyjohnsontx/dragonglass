@@ -206,7 +206,7 @@ export function searchTerms(query: string): string[] {
  * occurrences in the content. Frontmatter key names are not searched.
  */
 export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any'): Promise<SearchHit[]> {
-	const terms = searchTerms(query);
+	const terms = searchTerms(query).map((term) => ({ term, find: wordStartFinder(term) }));
 	const prefix = folder === '' ? '' : `${folder}/`;
 	const hits: SearchHit[] = [];
 	for (const file of vault.listMarkdownFiles()) {
@@ -215,19 +215,20 @@ export async function searchVault(vault: VaultPort, query: string, folder: strin
 		const content = (await vault.readNote(file.path)) ?? '';
 		const contentLower = withoutFrontmatterKeys(content).toLowerCase();
 		const headingsLower = headingLines(contentLower).join('\n');
-		const matched: string[] = [];
+		const found: typeof terms = [];
 		let score = 0;
-		for (const term of terms) {
-			const inName = wordStarts(nameLower, term, 1).length > 0;
-			const count = wordStarts(contentLower, term, 3).length;
+		for (const t of terms) {
+			const inName = t.find(nameLower, 1).length > 0;
+			const count = t.find(contentLower, 3).length;
 			if (!inName && count === 0) continue;
-			matched.push(term);
+			found.push(t);
 			if (inName) score += 10;
-			if (wordStarts(headingsLower, term, 1).length > 0) score += 5;
+			if (t.find(headingsLower, 1).length > 0) score += 5;
 			if (count > 0) score += 1 + count;
 		}
-		if (matched.length === 0 || (mode === 'all' && matched.length < terms.length)) continue;
-		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, matched) });
+		if (found.length === 0 || (mode === 'all' && found.length < terms.length)) continue;
+		const matched = found.map((t) => t.term);
+		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, found.map((t) => t.find)) });
 	}
 	hits.sort((a, b) => b.matched.length - a.matched.length || b.score - a.score || a.path.localeCompare(b.path));
 	return hits.slice(0, limit);
@@ -242,22 +243,27 @@ const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 /** Scripts written without spaces between words, where a word start cannot be found from the text alone. */
 const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 
+/** Offsets (at most `max`) where a term starts a word in `text`. */
+type WordStartFinder = (text: string, max: number) => number[];
+
 /**
- * Offsets (at most `max`) where `term` starts a word in `text`, so "risk"
- * finds "risks" but "ai" not "email". A term in an unspaced script such as
- * Chinese or Thai matches anywhere, and a character of such a script ends the
- * word before it ("学习python" has "python" at a word start).
+ * Finds `term` at word starts, so "risk" finds "risks" but "ai" not "email".
+ * A term in an unspaced script such as Chinese or Thai matches anywhere, and
+ * a character of such a script ends the word before it ("学习python" has
+ * "python" at a word start).
  */
-function wordStarts(text: string, term: string, max: number): number[] {
+function wordStartFinder(term: string): WordStartFinder {
 	const anywhere = UNSPACED_SCRIPT.test(term);
-	const offsets: number[] = [];
-	for (let at = text.indexOf(term); at >= 0 && offsets.length < max; ) {
-		const before = [...text.slice(Math.max(0, at - 2), at)].pop() ?? '';
-		const starts = anywhere || !LETTER_OR_DIGIT.test(before) || UNSPACED_SCRIPT.test(before);
-		if (starts) offsets.push(at);
-		at = text.indexOf(term, at + (starts ? term.length : 1));
-	}
-	return offsets;
+	return (text, max) => {
+		const offsets: number[] = [];
+		for (let at = text.indexOf(term); at >= 0 && offsets.length < max; ) {
+			const before = [...text.slice(Math.max(0, at - 2), at)].pop() ?? '';
+			const starts = anywhere || !LETTER_OR_DIGIT.test(before) || UNSPACED_SCRIPT.test(before);
+			if (starts) offsets.push(at);
+			at = text.indexOf(term, at + (starts ? term.length : 1));
+		}
+		return offsets;
+	};
 }
 
 /** Frontmatter key names (`date:`), blanked so a query word does not match every note with that property. */
@@ -279,12 +285,12 @@ function bodyStart(content: string): number {
  * most distinct matched terms sit close together, so a multi-word query shows
  * the passage that is about all of them rather than the first stray hit.
  */
-function bestExcerpt(content: string, terms: string[], radius = 80): string {
+function bestExcerpt(content: string, finders: WordStartFinder[], radius = 80): string {
 	const body = content.slice(bodyStart(content));
 	const lower = body.toLowerCase();
 	const hits: Array<{ at: number; term: number }> = [];
-	terms.forEach((term, i) => {
-		for (const at of wordStarts(lower, term, 50)) hits.push({ at, term: i });
+	finders.forEach((find, i) => {
+		for (const at of find(lower, 50)) hits.push({ at, term: i });
 	});
 	if (hits.length === 0) return clip(body, 0, radius * 2);
 	hits.sort((a, b) => a.at - b.at);

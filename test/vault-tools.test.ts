@@ -141,14 +141,15 @@ describe('vault tools', () => {
 				'Notes/项目会议.md': '没有内容',
 				'Thai.md': 'บันทึกการประชุมโครงการ',
 				'Mail.md': 'Send the email again.',
-				'学习.md': '我在学习Python编程，使用AI工具',
+				'学习.md': '我在学习Python编程',
+				'工具.md': '使用ai工具',
 				'データ.md': 'データベースのsql設計',
 			});
 			const hits = await searchVault(vault, '会议', '', 20);
 			expect(hits.map((h) => h.path)).toEqual(['Notes/项目会议.md', 'Journal/今天.md']);
 			expect(hits[1]!.excerpt).toBe('今天的会议记录');
 			expect((await searchVault(vault, 'โครงการ', '', 20)).map((h) => h.path)).toEqual(['Thai.md']);
-			expect((await searchVault(vault, 'ai', '', 20)).map((h) => h.path)).toEqual(['学习.md']);
+			expect((await searchVault(vault, 'ai', '', 20)).map((h) => h.path)).toEqual(['工具.md']);
 			expect((await searchVault(vault, 'python', '', 20)).map((h) => h.path)).toEqual(['学习.md']);
 			expect((await searchVault(vault, 'sql', '', 20)).map((h) => h.path)).toEqual(['データ.md']);
 		});
