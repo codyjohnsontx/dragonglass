@@ -94,7 +94,7 @@ export class AnthropicProvider implements Provider {
 	async checkConnection(signal?: AbortSignal): Promise<ConnectionStatus> {
 		try {
 			const models = await this.listModels(signal);
-			return { ok: true, detail: `Anthropic reachable (${countModels(models.length)})` };
+			return { ok: true, detail: `Anthropic reachable (${countModels(models.length)})`, models };
 		} catch (e) {
 			return { ok: false, error: toProviderError(e) };
 		}

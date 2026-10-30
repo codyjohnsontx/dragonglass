@@ -62,16 +62,16 @@ describe.each([
 	const lastChatBody = () => fake.requests.filter((r) => r.url === '/api/chat').at(-1)!.body!;
 
 	it('checks connection and lists models', async () => {
-		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake' });
+		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake', models: [{ id: 'fake-tools:latest' }, { id: 'fake-plain:latest' }] });
 		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-tools:latest', 'fake-plain:latest']);
 	});
 
 	it('confirms the configured model is installed as part of the connection check', async () => {
-		expect(await provider({ model: 'fake-tools:latest' }).checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake, model fake-tools:latest installed' });
+		expect(await provider({ model: 'fake-tools:latest' }).checkConnection()).toMatchObject({ ok: true, detail: 'Ollama 0.0.0-fake, model fake-tools:latest installed' });
 		// A bare name means the :latest tag, as it does for Ollama itself.
 		expect(await provider({ model: 'fake-tools' }).checkConnection()).toMatchObject({ ok: true });
 		const missing = await provider({ model: 'nonexistent:latest' }).checkConnection();
-		expect(missing).toMatchObject({ ok: false, error: { kind: 'model_not_found' } });
+		expect(missing).toMatchObject({ ok: false, error: { kind: 'model_not_found' }, models: [{ id: 'fake-tools:latest' }, { id: 'fake-plain:latest' }] });
 		if (!missing.ok) {
 			expect(missing.error.userMessage()).toBe(
 				'Model not found: "nonexistent:latest" is not installed on this server (installed: fake-tools:latest, fake-plain:latest). Pick a different model in settings.',
@@ -369,7 +369,7 @@ describe.each([
 	it('talks to a local server with no authentication and never sends the key', async () => {
 		const { provider } = setup({ baseUrl: `${fake.baseUrl}/local/v1`, auth: 'none' });
 		expect(provider.id).toBe('custom');
-		expect(await provider.checkConnection()).toEqual({ ok: true, detail: 'Custom reachable (1 model)' });
+		expect(await provider.checkConnection()).toMatchObject({ ok: true, detail: 'Custom reachable (1 model)' });
 		expect(lastHeaders()['authorization']).toBeUndefined();
 		expect(JSON.stringify(lastHeaders())).not.toContain('custom-fake');
 		expect(provider.capabilities).toMatchObject({ remote: false, billed: false });
@@ -477,7 +477,7 @@ describe.each([
 		expect(headers['x-api-key']).toBe('sk-ant-fake');
 		expect(headers['anthropic-version']).toBe('2023-06-01');
 		expect(headers['authorization']).toBeUndefined();
-		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Anthropic reachable (2 models)' });
+		expect(await provider().checkConnection()).toMatchObject({ ok: true, detail: 'Anthropic reachable (2 models)' });
 	});
 
 	it('fails fast without a key and maps 401', async () => {
@@ -614,7 +614,7 @@ describe.each([
 		const req = fake.requests.at(-1)!;
 		expect(req.headers['x-goog-api-key']).toBe('gemini-fake');
 		expect(req.url).not.toContain('gemini-fake');
-		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Gemini reachable (1 model)' });
+		expect(await provider().checkConnection()).toMatchObject({ ok: true, detail: 'Gemini reachable (1 model)' });
 	});
 
 	it('fails fast without a key and maps the 400 invalid-key response to auth', async () => {

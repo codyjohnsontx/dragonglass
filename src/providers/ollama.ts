@@ -100,16 +100,18 @@ export class OllamaProvider implements Provider {
 			// A reachable server with a model that is not pulled fails on the
 			// first chat, so check the model here where the user is looking.
 			const model = this.config().model;
-			if (!model) return { ok: true, detail: version };
-			const installed = (await this.listModels(signal)).map((m) => m.id);
+			const models = await this.listModels(signal);
+			if (!model) return { ok: true, detail: version, models };
+			const installed = models.map((m) => m.id);
 			if (!installed.some((id) => id === model || id === `${model}:latest`)) {
 				const shown = installed.slice(0, 5).join(', ') + (installed.length > 5 ? ', …' : '');
 				return {
 					ok: false,
 					error: new ProviderError('model_not_found', `"${model}" is not installed on this server (installed: ${shown || 'none'})`),
+					models,
 				};
 			}
-			return { ok: true, detail: `${version}, model ${model} installed` };
+			return { ok: true, detail: `${version}, model ${model} installed`, models };
 		} catch (e) {
 			return { ok: false, error: toProviderError(e) };
 		}

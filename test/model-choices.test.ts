@@ -5,6 +5,7 @@ import {
 	isOpenAIChatModel,
 	loadModelChoices,
 	ModelChoices,
+	modelChoices,
 	ModelMenu,
 	SUGGESTED_MODELS,
 	withConfiguredModel,
@@ -12,7 +13,7 @@ import {
 import { OpenAIProvider } from '../src/providers/openai';
 import { createProviders } from '../src/providers/registry';
 import { mergeSettings } from '../src/settings';
-import { ModelInfo, Provider, ProviderId } from '../src/providers/types';
+import { ModelInfo, Provider } from '../src/providers/types';
 // @ts-expect-error plain JS module
 import { startFakeServer } from './fake-server/server.mjs';
 
@@ -103,38 +104,51 @@ describe('withConfiguredModel', () => {
 	});
 });
 
-describe('ModelMenu', () => {
-	const choices = (...models: string[]): ModelChoices => ({ live: true, models: models.map((id) => ({ id })) });
+describe('modelChoices', () => {
+	it('uses what the connection check listed, without listing again', async () => {
+		const p = providers({ openai: 'sk-fake' });
+		const status = await p.openai.checkConnection();
+		expect(modelChoices('openai', status.models)).toEqual({ live: true, models: [{ id: 'fake-gpt' }, { id: 'fake-plain' }] });
+	});
 
-	it('shows each provider only its own list after a switch', async () => {
-		const menu = new ModelMenu((id) => Promise.resolve(id === 'openai' ? choices('gpt') : choices('claude')));
-		await menu.refresh('openai');
+	it('falls back to suggestions when the check failed or listed nothing', async () => {
+		const status = await providers({}).anthropic.checkConnection();
+		expect(status.ok).toBe(false);
+		expect(modelChoices('anthropic', status.models)).toEqual({ live: false, models: SUGGESTED_MODELS.anthropic });
+		expect(modelChoices('openai', [])).toEqual({ live: false, models: SUGGESTED_MODELS.openai });
+	});
+});
+
+describe('ModelMenu', () => {
+	const live = (...models: string[]): ModelChoices => ({ live: true, models: models.map((id) => ({ id })) });
+	const suggested: ModelChoices = { live: false, models: [...SUGGESTED_MODELS.openai!] };
+
+	it('shows each provider only its own list after a switch', () => {
+		const menu = new ModelMenu();
+		expect(menu.offer('openai', live('gpt'))).toBe(true);
 		expect(ids(menu.models('openai'))).toEqual(['gpt']);
 		expect(menu.models('anthropic')).toEqual([]);
-		await menu.refresh('anthropic');
+		expect(menu.offer('anthropic', live('claude'))).toBe(true);
 		expect(ids(menu.models('anthropic'))).toEqual(['claude']);
 		expect(menu.models('openai')).toEqual([]);
 	});
 
-	it('drops a slow load for the provider switched away from', async () => {
-		let finishOpenAI!: (c: ModelChoices) => void;
-		const menu = new ModelMenu((id: ProviderId) =>
-			id === 'openai' ? new Promise<ModelChoices>((r) => (finishOpenAI = r)) : Promise.resolve(choices('claude')),
-		);
-		const first = menu.refresh('openai');
-		expect(await menu.refresh('anthropic')).toEqual(choices('claude'));
-		finishOpenAI(choices('gpt'));
-		expect(await first).toBeNull();
-		expect(ids(menu.models('anthropic'))).toEqual(['claude']);
+	it('swaps suggestions for the live list once it arrives, then keeps it', () => {
+		const menu = new ModelMenu();
+		expect(menu.offer('openai', suggested)).toBe(true);
+		expect(menu.offer('openai', suggested)).toBe(false);
+		expect(menu.offer('openai', live('gpt'))).toBe(true);
+		expect(menu.offer('openai', live('gpt', 'gpt-2'))).toBe(false);
+		expect(menu.offer('openai', suggested)).toBe(false);
+		expect(ids(menu.models('openai'))).toEqual(['gpt']);
 	});
 
-	it('retries a suggestion list but keeps a live one', async () => {
-		const menu = new ModelMenu(() => Promise.resolve({ live: false, models: [...SUGGESTED_MODELS.openai!] }));
-		await menu.refresh('openai');
-		expect(menu.hasLiveList('openai')).toBe(false);
-		const live = new ModelMenu(() => Promise.resolve(choices('gpt')));
-		await live.refresh('openai');
-		expect(live.hasLiveList('openai')).toBe(true);
-		expect(live.hasLiveList('anthropic')).toBe(false);
+	it('takes any list when asked to replace', () => {
+		const menu = new ModelMenu();
+		menu.offer('openai', live('gpt'));
+		expect(menu.offer('openai', live('gpt', 'gpt-2'), true)).toBe(true);
+		expect(ids(menu.models('openai'))).toEqual(['gpt', 'gpt-2']);
+		expect(menu.offer('openai', suggested, true)).toBe(true);
+		expect(menu.models('openai')).toEqual(SUGGESTED_MODELS.openai);
 	});
 });

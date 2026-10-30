@@ -123,9 +123,10 @@ export interface ModelInfo {
 	contextWindow?: number;
 }
 
+/** A connection check, with the models it listed on the way so callers need not list them again. */
 export type ConnectionStatus =
-	| { ok: true; detail: string }
-	| { ok: false; error: ProviderError };
+	| { ok: true; detail: string; models: ModelInfo[] }
+	| { ok: false; error: ProviderError; models?: ModelInfo[] };
 
 export interface Provider {
 	readonly id: ProviderId;

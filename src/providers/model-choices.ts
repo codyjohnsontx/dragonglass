@@ -54,15 +54,18 @@ export interface ModelChoices {
 	error?: ProviderError;
 }
 
+/** `models` as provider `id` listed them, or its built-in suggestions when it listed none or could not list. */
+export function modelChoices(id: ProviderId, models: readonly ModelInfo[] | undefined): ModelChoices {
+	if (models && models.length > 0) return { models: [...models], live: true };
+	return { models: [...(SUGGESTED_MODELS[id] ?? [])], live: false };
+}
+
 /** The provider's own model list, or its built-in suggestions when that list is empty or unavailable. */
 export async function loadModelChoices(provider: Provider, signal?: AbortSignal): Promise<ModelChoices> {
-	const fallback = [...(SUGGESTED_MODELS[provider.id] ?? [])];
 	try {
-		const models = await provider.listModels(signal);
-		if (models.length > 0) return { models, live: true };
-		return { models: fallback, live: false };
+		return modelChoices(provider.id, await provider.listModels(signal));
 	} catch (e) {
-		return { models: fallback, live: false, error: toProviderError(e) };
+		return { ...modelChoices(provider.id, undefined), error: toProviderError(e) };
 	}
 }
 
@@ -73,32 +76,26 @@ export function withConfiguredModel(models: readonly ModelInfo[], configured: st
 }
 
 /**
- * The model list behind the chat sidebar's menu. Lists are kept per provider
- * so switching providers never shows the previous provider's models, and a
- * load that finishes after a newer one started is dropped.
+ * The model list behind the chat sidebar's menu. The list is kept per
+ * provider so switching providers never shows the previous provider's models.
  */
 export class ModelMenu {
-	private seq = 0;
 	private loaded: { provider: ProviderId; choices: ModelChoices } | null = null;
 
-	constructor(private readonly load: (provider: ProviderId) => Promise<ModelChoices>) {}
-
-	/** Models loaded for `provider`; empty until a load for it completes. */
+	/** Models held for `provider`; empty until choices for it are offered. */
 	models(provider: ProviderId): ModelInfo[] {
 		return this.loaded?.provider === provider ? this.loaded.choices.models : [];
 	}
 
-	/** True when the provider's own list for `provider` is loaded; a suggestion list is worth retrying. */
-	hasLiveList(provider: ProviderId): boolean {
-		return this.loaded?.provider === provider && this.loaded.choices.live;
-	}
-
-	/** Load the list for `provider`. Resolves null when a newer refresh superseded this one. */
-	async refresh(provider: ProviderId): Promise<ModelChoices | null> {
-		const seq = ++this.seq;
-		const choices = await this.load(provider);
-		if (seq !== this.seq) return null;
+	/**
+	 * Take `choices` for `provider` when `replace` is set, when nothing is held
+	 * for it yet, or when they swap suggestions for the provider's own list.
+	 * Returns whether the menu changed.
+	 */
+	offer(provider: ProviderId, choices: ModelChoices, replace = false): boolean {
+		const held = this.loaded?.provider === provider ? this.loaded.choices : null;
+		if (!replace && held && (held.live || !choices.live)) return false;
 		this.loaded = { provider, choices };
-		return choices;
+		return true;
 	}
 }

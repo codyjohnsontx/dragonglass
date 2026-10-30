@@ -3,8 +3,8 @@ import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
 import { Conversation, StoredMessage, TurnUsage, usageByTurn } from '../persistence/conversation';
-import { ModelMenu, withConfiguredModel } from '../providers/model-choices';
-import { PROVIDER_IDS, ProviderErrorKind, ProviderId, ToolCall } from '../providers/types';
+import { modelChoices, ModelMenu, withConfiguredModel } from '../providers/model-choices';
+import { ModelInfo, PROVIDER_IDS, ProviderErrorKind, ProviderId, ToolCall } from '../providers/types';
 import { ActiveContext } from '../vault/port';
 import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
@@ -31,7 +31,7 @@ export class ChatView extends ItemView {
 	 * unless the user asks; a new selection is included as the setting says.
 	 */
 	private sentSelection: { path: string | null; text: string } | null = null;
-	private readonly modelMenu: ModelMenu;
+	private readonly modelMenu = new ModelMenu();
 	/** Bumped per connection check so a check for a provider switched away from cannot set the light. */
 	private statusSeq = 0;
 
@@ -71,7 +71,6 @@ export class ChatView extends ItemView {
 		this.includeActive = core.getSettings().includeActiveNote;
 		this.includeSelection = core.getSettings().includeSelection;
 		this.navigation = false;
-		this.modelMenu = new ModelMenu((id) => core.modelChoices(id));
 	}
 
 	getViewType(): string {
@@ -167,12 +166,12 @@ export class ChatView extends ItemView {
 	}
 
 	/**
-	 * Re-check the connection and show the result in the header light. Loads
-	 * the model menu with `reloadModels`, when the check fails, or when the
-	 * menu does not hold the provider's own list yet. The menu falls back to
-	 * the provider's suggested models when it cannot list its own, such as
-	 * before a key is entered. With `quiet` false a failure is also raised as
-	 * a Notice.
+	 * Re-check the connection and show the result in the header light. The
+	 * models the check listed fill the menu with `reloadModels`, when it holds
+	 * nothing for the provider yet, or when they replace its suggested models.
+	 * The menu falls back to the provider's suggested models when it cannot
+	 * list its own, such as before a key is entered. With `quiet` false a
+	 * failure is also raised as a Notice.
 	 */
 	private async refreshStatus(quiet = true, signal?: AbortSignal, reloadModels = false): Promise<void> {
 		const seq = ++this.statusSeq;
@@ -185,7 +184,7 @@ export class ChatView extends ItemView {
 			if (prior) this.setStatus(prior.state, prior.title);
 			return;
 		}
-		if (reloadModels || !status.ok || !this.modelMenu.hasLiveList(provider)) await this.loadModels(provider);
+		await this.showModels(provider, status.models, reloadModels);
 		if (seq !== this.statusSeq) return;
 		if (status.ok) {
 			this.setStatus('ok', status.detail);
@@ -210,10 +209,11 @@ export class ChatView extends ItemView {
 		setIcon(this.statusEl, state === 'ok' ? 'circle-check' : state === 'error' ? 'circle-alert' : 'loader');
 	}
 
-	private async loadModels(provider: ProviderId): Promise<void> {
-		const choices = await this.modelMenu.refresh(provider);
-		// Superseded by a newer load, or the user switched providers meanwhile.
-		if (!choices || this.core.getSettings().activeProvider !== provider) return;
+	private async showModels(provider: ProviderId, listed: ModelInfo[] | undefined, replace: boolean): Promise<void> {
+		// The user switched providers while the check ran.
+		if (this.core.getSettings().activeProvider !== provider) return;
+		const choices = modelChoices(provider, listed);
+		if (!this.modelMenu.offer(provider, choices, replace)) return;
 		if (!this.core.activeModel() && choices.models[0]) await this.core.setActiveModel(choices.models[0].id);
 		await this.renderHeader();
 	}
