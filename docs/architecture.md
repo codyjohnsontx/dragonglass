@@ -117,8 +117,8 @@ server default of 4096 silently cuts prompts that do not fit), streams a
 thinking model's reasoning as `thinking` events and replays it on the
 assistant turns after the last user message so the plan survives tool rounds,
 and emits a `warning` event when `prompt_eval_count` says the prompt was cut
-anyway: a count well under
-the estimate for a prompt that could not have fit, or a count of exactly half
+anyway: a count well under the estimate for a prompt that could not have
+fit, or a count of exactly half
 the window plus two tokens, which is what Ollama's runner leaves after cutting
 one oversized message (measured on 0.40) and is trusted whenever the prompt
 could have overflowed under a byte-level tokenizer, so notes in Chinese,
