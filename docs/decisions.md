@@ -76,7 +76,7 @@ that would go stale.
 
 Adapters are tested over real HTTP against a small Node server that speaks the
 Ollama, OpenAI, Anthropic and Gemini wire formats with scripted behaviour, and
-rejects the request shapes the real Anthropic and Gemini APIs reject. The same server backs
+rejects the request shapes the real Anthropic, Gemini and OpenAI Responses APIs reject. The same server backs
 the in-app end-to-end check, so the chat, tool loop, diff and apply path were
 exercised in a real Obsidian instance without a live model.
 
