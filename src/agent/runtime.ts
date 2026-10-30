@@ -193,7 +193,8 @@ export const FINAL_ANSWER_INSTRUCTION =
 function callKey(call: ToolCall): string {
 	let args: unknown;
 	try {
-		args = JSON.parse(call.argumentsJson);
+		// Blank arguments mean no arguments, as the tool layer reads them.
+		args = call.argumentsJson.trim() === '' ? {} : JSON.parse(call.argumentsJson);
 	} catch {
 		return `${call.name}\u0000${call.argumentsJson.trim()}`;
 	}

@@ -40,6 +40,8 @@ describe('rejectNewPlaceholders', () => {
 			expect(() => rejectNewPlaceholders('', text)).not.toThrow();
 		}
 		expect(() => rejectNewPlaceholders('Owner: [TODO]\n', 'Owner: [TODO]\nMore text\n')).not.toThrow();
+		// Another copy of a placeholder the note already has is still new.
+		expect(() => rejectNewPlaceholders('Owner: [TODO]\n', 'Owner: [TODO]\nBudget: [todo]\n')).toThrow(ProposalError);
 	});
 	it('finds placeholders at the start of the text, right after other text and next to links', () => {
 		for (const text of ['[insert here]', 'x[todo]', 'See [[Plan]] [placeholder]', '[[Todo]][todo: owner]', 'a\n[Insert decisions]\n']) {

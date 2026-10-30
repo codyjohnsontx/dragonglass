@@ -297,10 +297,15 @@ function placeholders(text: string): string[] {
 	return [...text.matchAll(PLACEHOLDER)].map((m) => m[2] ?? '');
 }
 
-/** Refuse a proposal that adds placeholder text the note did not already have. */
+/** Refuse a proposal that adds placeholder text, counting each placeholder the note already had. */
 export function rejectNewPlaceholders(before: string, after: string): void {
-	const existing = new Set(placeholders(before).map((m) => m.toLowerCase()));
-	const added = placeholders(after).find((m) => !existing.has(m.toLowerCase()));
+	const existing = new Map<string, number>();
+	for (const m of placeholders(before)) existing.set(m.toLowerCase(), (existing.get(m.toLowerCase()) ?? 0) + 1);
+	const added = placeholders(after).find((m) => {
+		const left = existing.get(m.toLowerCase()) ?? 0;
+		existing.set(m.toLowerCase(), left - 1);
+		return left <= 0;
+	});
 	if (added) {
 		throw new ProposalError(
 			`The proposal contains placeholder text (${truncate(added, 80)}). Search and read the notes that hold this information first, then propose the real content; if it cannot be found, tell the user instead of proposing a placeholder.`,

@@ -240,6 +240,26 @@ describe('runAgent', () => {
 		expect(p.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:tools' });
 	});
 
+	it('treats blank and empty-object arguments as the same call', async () => {
+		let runs = 0;
+		const noArgs: AgentTool = {
+			name: 'list',
+			description: 'list',
+			readOnly: true,
+			parameters: { type: 'object', properties: {} },
+			execute: () => {
+				runs++;
+				return Promise.resolve({ content: 'a.md' });
+			},
+		};
+		const call = (id: string, argumentsJson: string): StreamEvent[] => [{ type: 'tool_call', call: { id, name: 'list', argumentsJson } }, { type: 'done', finishReason: 'tool_calls' }];
+		const p = scripted([call('a', ''), call('b', '{}'), [{ type: 'text', delta: 'done' }, { type: 'done', finishReason: 'stop' }]]);
+		const events = await collect(run(p, { tools: new ToolRegistry().register(noArgs) }));
+		const results = events.filter((e): e is Extract<RunEvent, { type: 'tool_result' }> => e.type === 'tool_result');
+		expect(runs).toBe(1);
+		expect(results[1]?.result.content).toMatch(/already called list with these arguments/);
+	});
+
 	it('does not rerun a repeated call and ends a loop of identical calls with a tool-free answer', async () => {
 		let runs = 0;
 		const counting: AgentTool = {
