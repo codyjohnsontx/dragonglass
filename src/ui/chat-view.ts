@@ -10,7 +10,7 @@ import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
-import { copyToClipboard } from './copy';
+import { copyToClipboard, CopyAnnouncer } from './copy';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -61,6 +61,11 @@ export class ChatView extends ItemView {
 	private liveToolChips: HTMLElement[] = [];
 	private runningChip: HTMLElement | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
+	/** Serializes announcements to the shared copyStatusEl across concurrent copy clicks. */
+	private readonly copyAnnouncer = new CopyAnnouncer({
+		setTimeout: (fn, delayMs) => window.setTimeout(fn, delayMs),
+		clearTimeout: (id) => window.clearTimeout(id),
+	});
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -108,6 +113,7 @@ export class ChatView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.abort?.abort();
+		this.copyAnnouncer.dispose();
 		await this.core.store.flush();
 	}
 
@@ -373,12 +379,12 @@ export class ChatView extends ItemView {
 		show('copy', 'Copy');
 		let revert: number | null = null;
 		btn.addEventListener('click', () => {
+			const attempt = this.copyAnnouncer.begin();
 			void copyToClipboard(text, activeWindow.navigator.clipboard).then((ok) => {
 				if (!ok) return;
-				this.copyStatusEl.empty();
-				window.setTimeout(() => this.copyStatusEl.setText('Copied to clipboard.'), 100);
 				btn.addClass('is-copied');
 				show('check', 'Copied');
+				this.copyAnnouncer.announce(attempt, this.copyStatusEl, 'Copied to clipboard.', 100);
 				if (revert !== null) window.clearTimeout(revert);
 				revert = window.setTimeout(() => {
 					btn.removeClass('is-copied');
