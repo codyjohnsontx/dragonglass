@@ -61,6 +61,7 @@ export class ProposalEngine {
 		if (this.vault.exists(path)) {
 			throw new ProposalError(`A file already exists at ${path}. Use an edit instead.`);
 		}
+		rejectNewPlaceholders('', content);
 		return {
 			id: this.newId(),
 			conversationId,
@@ -86,6 +87,7 @@ export class ProposalEngine {
 		if (before === null) throw new ProposalError(`No note found at ${path}.`);
 		const after = applyOperations(before, ops);
 		if (after === before) throw new ProposalError('The proposed edit makes no changes.');
+		rejectNewPlaceholders(before, after);
 		return {
 			id: this.newId(),
 			conversationId,
@@ -280,6 +282,35 @@ export function applyOperations(before: string, ops: EditOperation[]): string {
 		}
 	}
 	return text;
+}
+
+/**
+ * Bracketed fill-in text such as `[Insert decisions here]` or `[TODO: owner]`,
+ * which a model writes when it proposes an edit before gathering the content.
+ * Wikilinks (`[[Todo list]]`) and Markdown links (`[todo](url)`) do not count.
+ */
+// The character before the bracket is matched as a group rather than with a
+// lookbehind, which older mobile WebViews do not support.
+const PLACEHOLDER = /(^|[^[])(\[(?:insert|todo|placeholder)\b[^\]\n]*\])(?![\]([])/gi;
+
+function placeholders(text: string): string[] {
+	return [...text.matchAll(PLACEHOLDER)].map((m) => m[2] ?? '');
+}
+
+/** Refuse a proposal that adds placeholder text, counting each placeholder the note already had. */
+export function rejectNewPlaceholders(before: string, after: string): void {
+	const existing = new Map<string, number>();
+	for (const m of placeholders(before)) existing.set(m.toLowerCase(), (existing.get(m.toLowerCase()) ?? 0) + 1);
+	const added = placeholders(after).find((m) => {
+		const left = existing.get(m.toLowerCase()) ?? 0;
+		existing.set(m.toLowerCase(), left - 1);
+		return left <= 0;
+	});
+	if (added) {
+		throw new ProposalError(
+			`The proposal contains placeholder text (${truncate(added, 80)}). Search and read the notes that hold this information first, then propose the real content; if it cannot be found, tell the user instead of proposing a placeholder.`,
+		);
+	}
 }
 
 function truncate(s: string, n: number): string {

@@ -1,7 +1,7 @@
 import { AgentTool, ToolResult } from '../agent/tools';
 import { prefixWithinTokens } from '../providers/types';
 import { VaultPort } from '../vault/port';
-import { InvalidPathError, validateVaultPath } from '../vault/paths';
+import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
 import { EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
 
 /**
@@ -103,17 +103,21 @@ function readNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentT
 		parameters: {
 			type: 'object',
 			properties: {
-				path: { type: 'string', description: 'Vault-relative path ending in .md, e.g. "Projects/Launch.md".' },
+				path: {
+					type: 'string',
+					description: 'Vault-relative path ending in .md, e.g. "Projects/Launch.md". A wikilink name such as "Launch" also works.',
+				},
 			},
 			required: ['path'],
 		},
 		async execute(args) {
 			try {
-				const path = validateVaultPath(args['path'], { configDir: vault.configDir });
-				const content = await vault.readNote(path);
-				if (content === null) return fail(`Error: no note at ${path}. Use list_files or search_notes to find the right path.`);
+				const found = resolveNotePath(vault, args['path']);
+				if ('error' in found) return fail(found.error);
+				const content = await vault.readNote(found.path);
+				if (content === null) return fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`);
 				const { maxReadChars, maxReadTokens } = options();
-				return ok(formatNote(path, content, maxReadChars, maxReadTokens));
+				return ok(`${found.notice}${formatNote(found.path, content, maxReadChars, maxReadTokens)}`);
 			} catch (e) {
 				return wrapError(e);
 			}
@@ -214,24 +218,71 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 	return {
 		name: 'get_note_metadata',
 		description:
-			'Get a note\'s frontmatter properties, tags, headings, outgoing wikilinks and backlinks. Use this to understand how notes relate without reading full content.',
+			'Which notes link to this note (backlinks), which notes it links to, its tags, properties and headings. ' +
+			'Use this for questions like "what links to X" or "what is related to X", without reading full content.',
 		readOnly: true,
 		parameters: {
 			type: 'object',
-			properties: { path: { type: 'string', description: 'Vault-relative path ending in .md.' } },
+			properties: {
+				path: { type: 'string', description: 'Vault-relative path ending in .md. A wikilink name such as "Launch" also works.' },
+			},
 			required: ['path'],
 		},
 		execute(args) {
 			try {
-				const path = validateVaultPath(args['path'], { configDir: vault.configDir });
-				const meta = vault.getMetadata(path);
-				if (!meta) return Promise.resolve(fail(`Error: no note at ${path}.`));
-				return Promise.resolve(ok(JSON.stringify(meta, null, 2)));
+				const found = resolveNotePath(vault, args['path']);
+				if ('error' in found) return Promise.resolve(fail(found.error));
+				const meta = vault.getMetadata(found.path);
+				if (!meta) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
+				const shown = { ...meta, outgoingLinks: meta.outgoingLinks.map(linkLabel), backlinks: meta.backlinks.map(linkLabel) };
+				return Promise.resolve(ok(`${found.notice}${JSON.stringify(shown, null, 2)}`));
 			} catch (e) {
 				return Promise.resolve(wrapError(e));
 			}
 		},
 	};
+}
+
+/** A linked note as the model should cite it, with the path its tools take: `Budget (Projects/Budget.md)`. */
+function linkLabel(path: string): string {
+	return `${baseName(path)} (${path})`;
+}
+
+/**
+ * Find the note a model-supplied path means. Accepts a vault path, or a
+ * wikilink the way it appears in notes (`Budget`, `Budget.md`, `[[Budget]]`,
+ * `[[Projects/Budget|the budget]]`), which Obsidian resolves by basename or
+ * by path suffix. A path in the wrong folder falls back to its basename.
+ * When the path does not exist and exactly one note matches,
+ * that note is used and `notice` says so; several matches are listed in the
+ * error so the model can pick one.
+ */
+export function resolveNotePath(vault: VaultPort, raw: unknown): { path: string; notice: string } | { error: string } {
+	let input = raw;
+	if (typeof input === 'string') {
+		const link = /^\s*\[\[([^\]|#]*)(?:[|#][^\]]*)?\]\]\s*$/.exec(input);
+		if (link) input = link[1] ?? '';
+		if (typeof input === 'string' && input.trim() !== '' && !/\.md\s*$/i.test(input)) input = `${input.trim()}.md`;
+	}
+	const path = validateVaultPath(input, { configDir: vault.configDir });
+	if (vault.exists(path)) return { path, notice: '' };
+	const wanted = `/${path.toLowerCase()}`;
+	const wantedName = baseName(path).toLowerCase();
+	const notes = vault
+		.listMarkdownFiles()
+		.map((f) => f.path)
+		.sort();
+	let matches = notes.filter((p) => `/${p.toLowerCase()}`.endsWith(wanted));
+	if (matches.length === 0) matches = notes.filter((p) => baseName(p).toLowerCase() === wantedName);
+	if (matches.length === 1) {
+		const match = matches[0] as string;
+		return { path: match, notice: `(Resolved ${path} to ${match}; use the full path next time.)\n` };
+	}
+	if (matches.length > 1) {
+		const shown = matches.slice(0, 10).join(', ') + (matches.length > 10 ? ', …' : '');
+		return { error: `Error: no note at ${path}, and several notes match that name: ${shown}. Call again with one of these paths.` };
+	}
+	return { error: `Error: no note at ${path}. Use list_files or search_notes to find the right path.` };
 }
 
 function getActiveNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {

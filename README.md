@@ -11,8 +11,9 @@ written.
   subscription, no account, no proxy; cloud usage is billed to you by the
   provider. See [Ways to run it](#ways-to-run-it).
 - **Local-first and private.** Nothing leaves your machine except the message
-  you type, the context you choose to attach, and the results of the tools
-  the model calls, and only to the provider you configured. No telemetry.
+  you type, the context you choose to attach, the results of the tools the
+  model calls and a short vault overview (note count and top-level folder
+  names), and only to the provider you configured. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
   inspect properties, links and backlinks, and propose creating or editing
   notes. Edits are shown as a diff; you approve, reject, or revert. Nothing is
@@ -316,8 +317,12 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 ## Privacy
 
 - No telemetry. No account. No server of ours.
-- The whole vault is never uploaded. Only chosen context and tool results go
-  to the provider you picked.
+- The whole vault is never uploaded. What goes to the provider you picked is
+  your message, the context you attach (the active note, a selection, attached
+  notes), the content of every note the model reads or searches through its
+  tools, and a short overview of the vault: the note count and the names of
+  the top-level folders. With a cloud provider, all of that leaves your
+  machine.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content is treated as data: the model is told not to follow

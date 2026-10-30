@@ -167,7 +167,7 @@ export class OllamaProvider implements Provider {
 		if (request.temperature !== undefined) options['temperature'] = request.temperature;
 		const body: Record<string, unknown> = {
 			model: request.model,
-			messages: request.messages.map(toOllamaMessage),
+			messages: toOllamaMessages(request.messages),
 			stream: this.http.supportsStreaming,
 			options,
 		};
@@ -300,6 +300,7 @@ export function estimatePromptTokens(
 	let tokens = messages.length * 4;
 	for (const m of messages) {
 		tokens += estimate(m.content);
+		if (m.thinking) tokens += estimate(m.thinking);
 		for (const c of m.toolCalls ?? []) tokens += estimate(c.name + c.argumentsJson);
 	}
 	if (tools) tokens += estimate(JSON.stringify(tools));
@@ -364,10 +365,25 @@ export function splitReasoningTokens(outputTokens: number | undefined, thinkingC
 	return Math.min(outputTokens, Math.round((outputTokens * thinkingChars) / total));
 }
 
-function toOllamaMessage(m: ChatMessage): Record<string, unknown> {
+/**
+ * Assistant turns after the last user message carry their `thinking`, so a
+ * thinking model keeps its plan across the tool rounds of one turn instead of
+ * re-deriving it every round. Older turns go without it, as thinking models'
+ * chat templates (qwen3) expect.
+ */
+export function toOllamaMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+	let lastUser = -1;
+	messages.forEach((m, i) => {
+		if (m.role === 'user') lastUser = i;
+	});
+	return messages.map((m, i) => toOllamaMessage(m, i > lastUser));
+}
+
+function toOllamaMessage(m: ChatMessage, withThinking: boolean): Record<string, unknown> {
 	switch (m.role) {
 		case 'assistant': {
 			const out: Record<string, unknown> = { role: 'assistant', content: m.content };
+			if (withThinking && m.thinking) out['thinking'] = m.thinking;
 			if (m.toolCalls && m.toolCalls.length > 0) {
 				out['tool_calls'] = m.toolCalls.map((c) => ({
 					function: { name: c.name, arguments: parseArgs(c.argumentsJson) },
