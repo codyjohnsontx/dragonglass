@@ -111,9 +111,11 @@ only at the start of a word in the note, so "risk" finds "risks" but "ai" does
 not find "email" or "said"; the same rule applies to names, headings, body
 counts and excerpt placement. The word start is found by checking the
 preceding character in code rather than with a regex lookbehind, which older
-mobile WebViews cannot parse. Words in scripts written without spaces (Chinese,
-Japanese, Korean, Thai and similar) match anywhere, since there is no word
-start to find: "会议" must find "今天的会议记录". Frontmatter key names such as
+mobile WebViews cannot parse. Words in Chinese, Japanese, Korean, Thai and
+similar scripts match anywhere, since words there are often written without
+spaces or carry attached particles: "会议" must find "今天的会议记录". A
+character of those scripts also ends the word before it, so "python" finds
+"我在学习Python编程". Frontmatter key names such as
 `date:` or `tags:` are not searched, so "date" does not match every note with a
 date property; their values still are. Results rank by how many distinct words a note
 contains, then by a score that weighs a word in the note's name over one in a

@@ -245,14 +245,15 @@ const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p
 /**
  * Offsets (at most `max`) where `term` starts a word in `text`, so "risk"
  * finds "risks" but "ai" not "email". A term in an unspaced script such as
- * Chinese or Thai matches anywhere.
+ * Chinese or Thai matches anywhere, and a character of such a script ends the
+ * word before it ("学习python" has "python" at a word start).
  */
 function wordStarts(text: string, term: string, max: number): number[] {
 	const anywhere = UNSPACED_SCRIPT.test(term);
 	const offsets: number[] = [];
 	for (let at = text.indexOf(term); at >= 0 && offsets.length < max; ) {
 		const before = [...text.slice(Math.max(0, at - 2), at)].pop() ?? '';
-		const starts = anywhere || !LETTER_OR_DIGIT.test(before);
+		const starts = anywhere || !LETTER_OR_DIGIT.test(before) || UNSPACED_SCRIPT.test(before);
 		if (starts) offsets.push(at);
 		at = text.indexOf(term, at + (starts ? term.length : 1));
 	}
