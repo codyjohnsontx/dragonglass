@@ -66,6 +66,67 @@ describe('vault tools', () => {
 		expect((await registry.get('search_notes')!.execute({ query: '  ' }, ctx)).isError).toBe(true);
 	});
 
+	describe('search ranking and output', () => {
+		function searchSetup() {
+			const filler = 'Unrelated filler text about other things. '.repeat(6);
+			const vault = new MemoryVaultPort({
+				'Projects/Risks.md': '---\ntags: [project]\n---\n# Risks\n\n- Sync conflicts, no owner yet\n- Pricing page copy may slip\n',
+				'Projects/Budget.md': '---\ntags: [project, finance]\n---\n# Budget\n\nQ4 spend is on track.\n',
+				'Meetings/Planning.md': `---\ntype: meeting\n---\n# Planning\n\n${filler}\n## Action items\n\n- [ ] Draft the project risks list\n`,
+				'Meetings/Standup.md': '# Standup\n\nShort meeting. Nothing on risks.\n',
+				'Recipes.md': '# Recipes\n\nPancakes and waffles.\n',
+			});
+			const registry = new ToolRegistry();
+			for (const t of createVaultTools(vault, new ProposalEngine(vault))) registry.register(t);
+			return { vault, registry };
+		}
+
+		it('matches notes with any term and ranks by how many terms they contain', async () => {
+			const { vault } = searchSetup();
+			const hits = await searchVault(vault, 'project meeting', '', 20);
+			expect(hits.map((h) => h.path)).toEqual(['Meetings/Planning.md', 'Meetings/Standup.md', 'Projects/Budget.md', 'Projects/Risks.md']);
+			expect(hits[0]!.matched).toEqual(['project', 'meeting']);
+		});
+
+		it('requires every term in "all" mode', async () => {
+			const { vault, registry } = searchSetup();
+			expect((await searchVault(vault, 'project meeting', '', 20, 'all')).map((h) => h.path)).toEqual(['Meetings/Planning.md']);
+			const r = await registry.get('search_notes')!.execute({ query: 'project waffles', mode: 'all' }, ctx);
+			expect(r.content).toMatch(/No notes matched/);
+			const search = registry.get('search_notes')!;
+			expect(() => parseToolArguments(search, '{"query":"x","mode":"some"}')).toThrow(/one of any, all/);
+		});
+
+		it('boosts name and heading matches over body mentions', async () => {
+			const { vault } = searchSetup();
+			const hits = await searchVault(vault, 'risks', '', 20);
+			expect(hits.map((h) => h.path)).toEqual(['Projects/Risks.md', 'Meetings/Planning.md', 'Meetings/Standup.md']);
+			const actions = await searchVault(vault, 'action', '', 20);
+			expect(actions.map((h) => h.path)).toEqual(['Meetings/Planning.md']);
+			expect(actions[0]!.score).toBeGreaterThan(5);
+		});
+
+		it('ignores stopwords unless the query has nothing else', async () => {
+			const { vault } = searchSetup();
+			expect((await searchVault(vault, 'risks and action items', '', 20)).map((h) => h.path)).not.toContain('Recipes.md');
+			expect((await searchVault(vault, 'and', '', 20)).map((h) => h.path)).toEqual(['Meetings/Standup.md', 'Recipes.md']);
+		});
+
+		it('shows the basename, matched terms and a body excerpt around the densest match, with no score', async () => {
+			const { registry } = searchSetup();
+			const r = await registry.get('search_notes')!.execute({ query: 'project risks action' }, ctx);
+			const lines = r.content.split('\n');
+			expect(lines[0]).toBe('Planning (Meetings/Planning.md) - matches project, risks, action');
+			expect(lines[1]).toContain('Action items');
+			expect(lines[1]).toContain('project risks list');
+			expect(lines[1]).not.toContain('Unrelated filler text about other things. Unrelated');
+			expect(r.content).not.toMatch(/score/);
+			expect(r.content).not.toMatch(/tags:|type: meeting/);
+			const single = await registry.get('search_notes')!.execute({ query: 'budget' }, ctx);
+			expect(single.content).toBe('Budget (Projects/Budget.md)\n  # Budget Q4 spend is on track.');
+		});
+	});
+
 	it('returns metadata with links and backlinks', async () => {
 		const { registry } = setup();
 		const r = await registry.get('get_note_metadata')!.execute({ path: 'Projects/Launch.md' }, ctx);
