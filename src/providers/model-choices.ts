@@ -30,17 +30,17 @@ export const SUGGESTED_MODELS: Partial<Record<ProviderId, readonly ModelInfo[]>>
 };
 
 /**
- * OpenAI's /models also lists embedding, speech, image, moderation, legacy
- * completion and Responses-only models, none of which answer a chat.
+ * OpenAI's /models also lists embedding, speech, transcription, image, video,
+ * moderation, realtime and legacy completion models, none of which answer a chat.
  */
-const OPENAI_NON_CHAT = /embedding|whisper|tts|dall-e|image|transcribe|realtime|audio|moderation|^babbage|^davinci|sora|search|computer-use|deep-research|codex|instruct/i;
+const OPENAI_NON_CHAT = /embedding|whisper|tts|transcribe|dall-e|image|sora|moderation|realtime|^babbage|^davinci/i;
 
 export function isOpenAIChatModel(id: string): boolean {
 	return !OPENAI_NON_CHAT.test(id);
 }
 
-/** Gemini models that accept generateContent but produce speech, images or music rather than chat. */
-const GEMINI_NON_CHAT = /tts|image|banana|embedding|transcribe|robotics|lyria|imagen|veo/i;
+/** Gemini models that accept generateContent but produce speech, images, music or video rather than chat. */
+const GEMINI_NON_CHAT = /tts|image|banana|embedding|transcribe|lyria|imagen|veo/i;
 
 export function isGeminiChatModel(id: string): boolean {
 	return !GEMINI_NON_CHAT.test(id);
@@ -54,9 +54,19 @@ export interface ModelChoices {
 	error?: ProviderError;
 }
 
-/** `models` as provider `id` listed them, or its built-in suggestions when it listed none or could not list. */
+const CHAT_FILTERS: Partial<Record<ProviderId, (id: string) => boolean>> = {
+	openai: isOpenAIChatModel,
+	gemini: isGeminiChatModel,
+};
+
+/**
+ * The chat models among `models` as provider `id` listed them, or its built-in
+ * suggestions when it listed none or could not list.
+ */
 export function modelChoices(id: ProviderId, models: readonly ModelInfo[] | undefined): ModelChoices {
-	if (models && models.length > 0) return { models: [...models], live: true };
+	const isChat = CHAT_FILTERS[id];
+	const chat = isChat ? (models ?? []).filter((m) => isChat(m.id)) : [...(models ?? [])];
+	if (chat.length > 0) return { models: chat, live: true };
 	return { models: [...(SUGGESTED_MODELS[id] ?? [])], live: false };
 }
 

@@ -14,7 +14,6 @@ import {
 	toProviderError,
 } from './types';
 import { HttpClient, joinUrl, parseSse } from './http';
-import { isOpenAIChatModel } from './model-choices';
 
 /**
  * How the key is sent: `Authorization: Bearer <key>`, the bare key in a named
@@ -107,7 +106,7 @@ export class OpenAIProvider implements Provider {
 		const parsed = safeJson(res.text) as { data?: Array<{ id?: string }> } | null;
 		return (parsed?.data ?? [])
 			.map((m) => m.id ?? '')
-			.filter((id) => id.length > 0 && (this.id !== 'openai' || isOpenAIChatModel(id)))
+			.filter((id) => id.length > 0)
 			.sort()
 			.map((id) => ({ id }));
 	}

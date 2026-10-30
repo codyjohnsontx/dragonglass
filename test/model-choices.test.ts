@@ -10,7 +10,6 @@ import {
 	SUGGESTED_MODELS,
 	withConfiguredModel,
 } from '../src/providers/model-choices';
-import { OpenAIProvider } from '../src/providers/openai';
 import { createProviders } from '../src/providers/registry';
 import { mergeSettings } from '../src/settings';
 import { ModelInfo, Provider } from '../src/providers/types';
@@ -28,10 +27,10 @@ beforeAll(async () => {
 });
 afterAll(() => fake.close());
 
-function providers(keys: Partial<Record<'openai' | 'anthropic' | 'gemini', string>>) {
+function providers(keys: Partial<Record<'openai' | 'anthropic' | 'gemini', string>>, openaiModel = 'fake-gpt') {
 	const settings = mergeSettings({
 		ollama: { baseUrl: `${fake.baseUrl}`, model: 'fake-tools' },
-		openai: { apiKeySecretId: keys.openai ? 'openai' : '', model: 'fake-gpt', baseUrl: `${fake.baseUrl}/v1` },
+		openai: { apiKeySecretId: keys.openai ? 'openai' : '', model: openaiModel, baseUrl: `${fake.baseUrl}/v1` },
 		anthropic: { apiKeySecretId: keys.anthropic ? 'anthropic' : '', model: 'fake-claude', baseUrl: `${fake.baseUrl}/anthropic/v1` },
 		gemini: { apiKeySecretId: keys.gemini ? 'gemini' : '', model: 'fake-gemini', baseUrl: `${fake.baseUrl}/gemini/v1beta` },
 	});
@@ -42,19 +41,33 @@ function providers(keys: Partial<Record<'openai' | 'anthropic' | 'gemini', strin
 const ids = (models: readonly ModelInfo[]) => models.map((m) => m.id);
 
 describe('chat model filters', () => {
-	it('drops OpenAI embedding, speech, image, moderation and realtime models', () => {
-		const listed = ['gpt-6-luna', 'gpt-6.1-sol', 'o4-mini', 'text-embedding-3-large', 'whisper-1', 'tts-1-hd', 'gpt-4o-mini-tts', 'gpt-4o-transcribe', 'dall-e-3', 'gpt-image-1', 'omni-moderation-latest', 'gpt-realtime', 'gpt-4o-audio-preview', 'davinci-002', 'babbage-002', 'gpt-3.5-turbo-instruct', 'sora-2'];
-		expect(listed.filter(isOpenAIChatModel)).toEqual(['gpt-6-luna', 'gpt-6.1-sol', 'o4-mini']);
+	it('drops OpenAI embedding, speech, image, video, moderation, realtime and legacy completion models', () => {
+		const nonChat = ['text-embedding-3-large', 'whisper-1', 'tts-1-hd', 'gpt-4o-mini-tts', 'gpt-4o-transcribe', 'dall-e-3', 'gpt-image-1', 'omni-moderation-latest', 'gpt-realtime', 'davinci-002', 'babbage-002', 'sora-2'];
+		expect(nonChat.filter(isOpenAIChatModel)).toEqual([]);
 	});
 
-	it('drops Gemini speech, image and embedding models', () => {
-		const listed = ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.8-flash-tts', 'gemini-3.1-flash-image', 'gemini-nano-banana-2.1', 'gemini-embedding-2', 'gemini-3.5-transcribe'];
-		expect(listed.filter(isGeminiChatModel)).toEqual(['gemini-4-argon', 'gemini-3.8-flash']);
+	it('keeps OpenAI models that can still answer a chat', () => {
+		const chat = ['gpt-6-luna', 'gpt-6.1-sol', 'o4-mini', 'gpt-audio', 'gpt-4o-audio-preview', 'gpt-4o-search-preview', 'codex-mini-latest', 'computer-use-preview', 'o3-deep-research', 'gpt-3.5-turbo-instruct'];
+		expect(chat.filter(isOpenAIChatModel)).toEqual(chat);
 	});
 
-	it('leaves custom endpoint lists unfiltered', async () => {
-		const custom = new OpenAIProvider(new FetchHttpClient(), () => ({ baseUrl: `${fake.baseUrl}/v1`, apiKey: () => 'sk-fake' }), { id: 'custom', displayName: 'Custom' });
-		expect(await custom.listModels()).toContainEqual({ id: 'text-embedding-3-small' });
+	it('drops Gemini speech, image, music, video and embedding models but keeps chat ones', () => {
+		const listed = ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-robotics-er-1.5-preview', 'gemini-3.8-flash-tts', 'gemini-3.1-flash-image', 'gemini-nano-banana-2.1', 'gemini-embedding-2', 'gemini-3.5-transcribe', 'lyria-3', 'imagen-5', 'veo-4'];
+		expect(listed.filter(isGeminiChatModel)).toEqual(['gemini-4-argon', 'gemini-3.8-flash', 'gemini-robotics-er-1.5-preview']);
+	});
+
+	it('leaves custom endpoint lists unfiltered', () => {
+		expect(modelChoices('custom', [{ id: 'text-embedding-3-small' }])).toEqual({ live: true, models: [{ id: 'text-embedding-3-small' }] });
+	});
+
+	it('filters only the menu, never the provider list a configured model is checked against', async () => {
+		const openai = providers({ openai: 'sk-fake' }, 'text-embedding-3-small').openai;
+		expect(await openai.listModels()).toContainEqual({ id: 'text-embedding-3-small' });
+		const status = await openai.checkConnection();
+		expect(status).toMatchObject({ ok: true, detail: 'OpenAI reachable (8 models)' });
+		expect(status.models).toContainEqual({ id: 'text-embedding-3-small' });
+		const menu = withConfiguredModel(modelChoices('openai', status.models).models, 'text-embedding-3-small');
+		expect(ids(menu)).toEqual(['text-embedding-3-small', 'fake-gpt', 'fake-plain']);
 	});
 });
 

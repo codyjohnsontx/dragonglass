@@ -299,8 +299,8 @@ describe.each([
 	const provider = (key: string | null = 'sk-fake') =>
 		new OpenAIProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/v1`, apiKey: () => key }));
 
-	it('lists only chat models with the bearer key', async () => {
-		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-gpt', 'fake-plain']);
+	it('lists every model with the bearer key', async () => {
+		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-gpt', 'fake-plain', 'gpt-image-1', 'gpt-realtime', 'omni-moderation-latest', 'text-embedding-3-small', 'tts-1', 'whisper-1']);
 		expect(fake.requests.at(-1)!.headers['authorization']).toBe('Bearer sk-fake');
 	});
 
@@ -609,12 +609,15 @@ describe.each([
 	const provider = (key: string | null = 'gemini-fake') =>
 		new GeminiProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => key }));
 
-	it('lists only generateContent chat models, with the key in a header', async () => {
-		expect(await provider().listModels()).toEqual([{ id: 'fake-gemini', label: 'Fake Gemini', contextWindow: 1048576 }]);
+	it('lists generateContent models, with the key in a header', async () => {
+		expect(await provider().listModels()).toEqual([
+			{ id: 'fake-gemini', label: 'Fake Gemini', contextWindow: 1048576 },
+			{ id: 'fake-gemini-tts', label: 'Fake Gemini TTS' },
+		]);
 		const req = fake.requests.at(-1)!;
 		expect(req.headers['x-goog-api-key']).toBe('gemini-fake');
 		expect(req.url).not.toContain('gemini-fake');
-		expect(await provider().checkConnection()).toMatchObject({ ok: true, detail: 'Gemini reachable (1 model)' });
+		expect(await provider().checkConnection()).toMatchObject({ ok: true, detail: 'Gemini reachable (2 models)' });
 	});
 
 	it('fails fast without a key and maps the 400 invalid-key response to auth', async () => {
