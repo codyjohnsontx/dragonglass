@@ -7,8 +7,7 @@ import { ModelInfo, Provider, ProviderError, ProviderId, toProviderError } from 
  */
 export const SUGGESTED_MODELS: Partial<Record<ProviderId, readonly ModelInfo[]>> = {
 	// https://developers.openai.com/api/docs/models. Only models that take
-	// tool calls over Chat Completions: GPT-6.1 Sol and Terra need the
-	// Responses API for tools, so they stay out until the adapter moves to it.
+	// tool calls over Chat Completions; see OPENAI_RESPONSES_ONLY_TOOLS.
 	openai: [
 		{ id: 'gpt-6-astra', label: 'GPT-6 Astra' },
 		{ id: 'gpt-6-luna', label: 'GPT-6 Luna' },
@@ -39,6 +38,17 @@ export function isOpenAIChatModel(id: string): boolean {
 	return !OPENAI_NON_CHAT.test(id);
 }
 
+/**
+ * OpenAI chat models whose docs say tool calls need the Responses API, which
+ * the adapter does not speak yet, so they cannot use vault tools. Kept out of
+ * the menu with their dated snapshots; a hand-typed id still works.
+ */
+export const OPENAI_RESPONSES_ONLY_TOOLS = /^gpt-6\.1-(?:sol|terra)(?:-|$)/;
+
+function isOpenAIMenuModel(id: string): boolean {
+	return isOpenAIChatModel(id) && !OPENAI_RESPONSES_ONLY_TOOLS.test(id);
+}
+
 /** Gemini models that accept generateContent but produce speech, images, music or video rather than chat. */
 const GEMINI_NON_CHAT = /tts|image|banana|embedding|transcribe|lyria|imagen|veo/i;
 
@@ -55,7 +65,7 @@ export interface ModelChoices {
 }
 
 const CHAT_FILTERS: Partial<Record<ProviderId, (id: string) => boolean>> = {
-	openai: isOpenAIChatModel,
+	openai: isOpenAIMenuModel,
 	gemini: isGeminiChatModel,
 };
 

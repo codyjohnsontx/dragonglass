@@ -351,6 +351,16 @@ describe.each([
 		expect(sent()).not.toHaveProperty('reasoning_effort');
 	});
 
+	it('explains that a Responses-only model cannot take tools over Chat Completions', async () => {
+		const err = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'read A.md' }], tools })).catch((e: unknown) => e as ProviderError);
+		expect(err).toMatchObject({ kind: 'unsupported_tools', status: 400 });
+		expect(err.userMessage()).toBe(
+			"This model does not support tool calling: gpt-6.1-sol takes tools only through OpenAI's newer Responses API, which Dragonglass does not support yet. Choose a tool-capable model, or ask a question that needs no vault access.",
+		);
+		const events = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(text(events)).toMatch(/Hello/);
+	});
+
 	it('maps rate limits and server errors', async () => {
 		await expect(collect(provider().chat({ model: 'fake-429', messages: [] }))).rejects.toMatchObject({ kind: 'rate_limit' });
 		const err = await collect(provider().chat({ model: 'fake-500', messages: [] })).catch((e: unknown) => e as ProviderError);

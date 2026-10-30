@@ -47,8 +47,14 @@ describe('chat model filters', () => {
 	});
 
 	it('keeps OpenAI models that can still answer a chat', () => {
-		const chat = ['gpt-6-luna', 'gpt-6.1-sol', 'o4-mini', 'gpt-audio', 'gpt-4o-audio-preview', 'gpt-4o-search-preview', 'codex-mini-latest', 'computer-use-preview', 'o3-deep-research', 'gpt-3.5-turbo-instruct'];
+		const chat = ['gpt-6-luna', 'o4-mini', 'gpt-audio', 'gpt-4o-audio-preview', 'gpt-4o-search-preview', 'codex-mini-latest', 'computer-use-preview', 'o3-deep-research', 'gpt-3.5-turbo-instruct'];
 		expect(chat.filter(isOpenAIChatModel)).toEqual(chat);
+	});
+
+	it('hides OpenAI models that take tools only through the Responses API, snapshots included, unless configured', () => {
+		const listed = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-sol-2026-08-14', 'gpt-6.1-terra', 'gpt-6.1-terra-2026-08-14'].map((id) => ({ id }));
+		expect(ids(modelChoices('openai', listed).models)).toEqual(['gpt-6-astra', 'gpt-6-luna']);
+		expect(ids(withConfiguredModel(modelChoices('openai', listed).models, 'gpt-6.1-sol'))).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna']);
 	});
 
 	it('drops Gemini speech, image, music, video and embedding models but keeps chat ones', () => {

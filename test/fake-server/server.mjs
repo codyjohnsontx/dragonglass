@@ -22,7 +22,9 @@
  * `fake-429` -> 429, `fake-500` -> 500 (Anthropic: 529 overloaded),
  * `fake-slow` streams one word per 150 ms (OpenAI: and pauses 1.5 s mid tool call), `fake-overloaded` (Anthropic) sends
  * an error event mid-stream, `fake-safety` (Gemini) finishes with SAFETY and
- * no content, `fake-missing` (Gemini) -> 404, any other model behaves normally.
+ * no content, `fake-missing` (Gemini) -> 404, `gpt-6.1-sol` / `gpt-6.1-terra`
+ * (OpenAI) reject tools over Chat Completions as the real API does, any other
+ * model behaves normally.
  * Ollama only: `fake-think` streams `thinking` chunks before the answer unless
  * the request says `think: false`; `fake-small` reports an 8192-token context
  * from /api/show; `fake-truncate` reports `prompt_eval_count` of half the
@@ -104,7 +106,19 @@ async function route(req, res, body) {
 			const ids = ['fake-gpt', 'fake-plain', 'text-embedding-3-small', 'whisper-1', 'tts-1', 'gpt-image-1', 'omni-moderation-latest', 'gpt-realtime'];
 			return json(res, 200, { object: 'list', data: ids.map((id) => ({ id, object: 'model' })) });
 		}
-		if (req.method === 'POST' && path === '/v1/chat/completions') return openaiChat(res, body ?? {});
+		if (req.method === 'POST' && path === '/v1/chat/completions') {
+			if (/^gpt-6\.1-(sol|terra)/.test(body?.model ?? '') && Array.isArray(body?.tools) && body.tools.length > 0) {
+				return json(res, 400, {
+					error: {
+						message: `Function tools with reasoning_effort are not supported for ${body.model} in /v1/chat/completions. Please use /v1/responses instead.`,
+						type: 'invalid_request_error',
+						param: 'tools',
+						code: null,
+					},
+				});
+			}
+			return openaiChat(res, body ?? {});
+		}
 	}
 	const compat = /^\/(local|keyed)(\/v1\/.*)$/.exec(path);
 	if (compat) {
