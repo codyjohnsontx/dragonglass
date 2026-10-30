@@ -23,6 +23,8 @@ export class DragonglassSettingTab extends PluginSettingTab {
 	async setControlValue(key: string, value: unknown): Promise<void> {
 		setPath(this.plugin.settings, key, value);
 		await this.plugin.saveSettings();
+		// The header name and key rows depend on the auth choice.
+		if (key === 'custom.auth') this.update();
 	}
 
 	getSettingDefinitions(): SettingDefinitionItem[] {
@@ -38,6 +40,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						openai: 'OpenAI (cloud, billed to your account)',
 						anthropic: 'Anthropic (cloud, billed to your account)',
 						gemini: 'Google Gemini (cloud, billed to your account)',
+						custom: 'OpenAI-compatible endpoint (Moonshot, OpenRouter, LM Studio, vLLM…)',
 					},
 				},
 			},
@@ -147,6 +150,76 @@ export class DragonglassSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'OpenAI-compatible endpoint',
+				items: [
+					{
+						name: 'About',
+						desc: 'Any service or local server that speaks the OpenAI Chat Completions API, for example Moonshot (Kimi), OpenRouter, Groq, LM Studio, vLLM or llama.cpp. Remote services bill you directly.',
+					},
+					{
+						name: 'Base URL',
+						desc: 'The API root that /chat/completions and /models hang off, usually ending in /v1. For example https://openrouter.ai/api/v1 or http://127.0.0.1:1234/v1.',
+						control: {
+							type: 'text',
+							key: 'custom.baseUrl',
+							placeholder: 'https://api.example.com/v1',
+							validate: (v) => (v.trim() === '' || /^https?:\/\/\S+$/.test(v.trim()) ? undefined : 'Enter a URL starting with http:// or https://'),
+						},
+					},
+					{
+						name: 'Authentication',
+						desc: 'Most services take a bearer token. Some use a named header instead. Local servers usually need none, and then no key is ever sent.',
+						control: {
+							type: 'dropdown',
+							key: 'custom.auth',
+							options: {
+								bearer: 'Authorization: Bearer <key>',
+								header: 'Key in a custom header',
+								none: 'No authentication',
+							},
+						},
+					},
+					{
+						name: 'Header name',
+						visible: () => this.plugin.settings.custom.auth === 'header',
+						desc: 'The header that carries the bare key, for example api-key.',
+						control: {
+							type: 'text',
+							key: 'custom.authHeader',
+							placeholder: 'api-key',
+							validate: (v) => (v.trim() === '' || /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(v.trim()) ? undefined : 'Enter a valid HTTP header name'),
+						},
+					},
+					{
+						name: 'API key',
+						visible: () => this.plugin.settings.custom.auth !== 'none',
+						desc: 'Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to the base URL above.',
+						control: { type: 'secret', key: 'custom.apiKeySecretId' },
+					},
+					{
+						name: 'Model',
+						desc: 'The model id exactly as the service names it. Once the connection works the chat sidebar lists the models the server reports.',
+						control: { type: 'text', key: 'custom.model', placeholder: 'model-id' },
+					},
+					{
+						name: 'Tool calling',
+						desc: 'Lets the model use vault tools. Turn off for servers or models that reject tool definitions or answer with broken tool calls. When a server refuses tools the plugin also retries once without them.',
+						control: { type: 'toggle', key: 'custom.toolCalling' },
+					},
+					{
+						name: 'Streaming',
+						desc: 'Turn off for servers that cannot stream; replies then arrive all at once.',
+						control: { type: 'toggle', key: 'custom.streaming' },
+					},
+					{
+						name: 'Test endpoint connection',
+						desc: 'Lists models at the base URL with the authentication above. Makes one small request to that server.',
+						action: () => void this.test('custom'),
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'Context',
 				items: [
 					{
@@ -202,7 +275,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Network transport',
-						desc: 'Streaming uses the fetch API. If your Ollama server rejects requests from Obsidian (CORS), switch to Obsidian\'s request API; replies then arrive all at once.',
+						desc: 'Streaming uses the fetch API. If your Ollama server or OpenAI-compatible endpoint rejects requests from Obsidian (CORS), switch to Obsidian\'s request API; replies then arrive all at once.',
 						control: {
 							type: 'dropdown',
 							key: 'transport',

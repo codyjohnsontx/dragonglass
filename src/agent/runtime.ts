@@ -30,6 +30,9 @@ export type RunEvent =
 export interface RunOptions {
 	provider: Provider;
 	model: string;
+	/** Builds the system prompt for whether tools are actually sent on a turn. */
+	system: (toolsEnabled: boolean) => string;
+	/** The conversation so far, without a system message. */
 	messages: ChatMessage[];
 	tools: ToolRegistry;
 	toolsEnabled: boolean;
@@ -64,7 +67,7 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 		try {
 			const stream = opts.provider.chat({
 				model: opts.model,
-				messages: [...messages],
+				messages: [{ role: 'system', content: opts.system(toolsEnabled) }, ...messages],
 				tools: toolsEnabled ? opts.tools.definitions() : undefined,
 				signal: opts.signal,
 			});

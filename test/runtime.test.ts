@@ -44,6 +44,7 @@ function run(provider: Provider, overrides: Partial<Parameters<typeof runAgent>[
 	return runAgent({
 		provider,
 		model: 'm',
+		system: (toolsEnabled) => (toolsEnabled ? 'sys:tools' : 'sys:no-tools'),
 		messages: [{ role: 'user', content: 'hi' }],
 		tools,
 		toolsEnabled: true,
@@ -160,15 +161,21 @@ describe('runAgent', () => {
 		};
 		const events = await collect(run(failing));
 		expect(events.map((e) => e.type)).toEqual(['assistant_start', 'tools_disabled', 'assistant_start', 'text_delta', 'assistant_end']);
+		expect(p.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:no-tools' });
 	});
 
 	it('omits tools when disabled or unsupported by the provider', async () => {
 		const p = scripted([[{ type: 'done', finishReason: 'stop' }]], { toolCalling: false });
 		await collect(run(p));
 		expect(p.requests[0]?.tools).toBeUndefined();
+		expect(p.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:no-tools' });
 		const q = scripted([[{ type: 'done', finishReason: 'stop' }]]);
 		await collect(run(q, { toolsEnabled: false }));
 		expect(q.requests[0]?.tools).toBeUndefined();
+		expect(q.requests[0]?.messages[0]).toEqual({ role: 'system', content: 'sys:no-tools' });
+		const r = scripted([[{ type: 'done', finishReason: 'stop' }]]);
+		await collect(run(r));
+		expect(r.requests[0]?.messages).toEqual([{ role: 'system', content: 'sys:tools' }, { role: 'user', content: 'hi' }]);
 	});
 
 	it('surfaces provider errors and cancellation', async () => {

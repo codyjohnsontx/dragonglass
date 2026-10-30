@@ -29,8 +29,13 @@
  * requested `num_ctx`, which is what a real server does after cutting a
  * prompt that did not fit.
  *
+ * OpenAI-compatible servers for the custom endpoint: `/local/v1` needs no key
+ * and rejects tool definitions the way llama.cpp does without `--jinja`;
+ * `/keyed/v1` wants the bare key in an `api-key` header. Both list
+ * `local-model` and otherwise answer like the OpenAI route.
+ *
  * Keys: OpenAI `Bearer sk-fake`, Anthropic `x-api-key: sk-ant-fake`, Gemini
- * `x-goog-api-key: gemini-fake`. The Anthropic and Gemini routes reject the
+ * `x-goog-api-key: gemini-fake`, keyed endpoint `api-key: custom-fake`. The Anthropic and Gemini routes reject the
  * request shapes the real APIs reject (non-alternating roles, empty text
  * blocks, orphan tool results, `additionalProperties` in Gemini schemas, a
  * Gemini function call replayed without a thought signature) so adapter bugs
@@ -41,6 +46,7 @@ import http from 'node:http';
 const API_KEY = 'sk-fake';
 const ANTHROPIC_KEY = 'sk-ant-fake';
 const GEMINI_KEY = 'gemini-fake';
+const CUSTOM_KEY = 'custom-fake';
 
 export function startFakeServer(port = 0) {
 	const requests = [];
@@ -50,7 +56,7 @@ export function startFakeServer(port = 0) {
 		res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
 		res.setHeader(
 			'Access-Control-Allow-Headers',
-			'Authorization, Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, x-goog-api-key',
+			'Authorization, Content-Type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access, x-goog-api-key, api-key',
 		);
 		res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 		if (req.method === 'OPTIONS') {
@@ -97,6 +103,20 @@ async function route(req, res, body) {
 			return json(res, 200, { object: 'list', data: [{ id: 'fake-gpt', object: 'model' }, { id: 'fake-plain', object: 'model' }] });
 		}
 		if (req.method === 'POST' && path === '/v1/chat/completions') return openaiChat(res, body ?? {});
+	}
+	const compat = /^\/(local|keyed)(\/v1\/.*)$/.exec(path);
+	if (compat) {
+		const [, kind, sub] = compat;
+		if (kind === 'keyed' && req.headers['api-key'] !== CUSTOM_KEY) {
+			return json(res, 401, { error: { message: 'Invalid API key', type: 'authentication_error' } });
+		}
+		if (req.method === 'GET' && sub === '/v1/models') return json(res, 200, { object: 'list', data: [{ id: 'local-model', object: 'model' }] });
+		if (req.method === 'POST' && sub === '/v1/chat/completions') {
+			if (kind === 'local' && Array.isArray(body?.tools) && body.tools.length > 0) {
+				return json(res, 400, { error: { code: 400, message: 'tools param requires --jinja flag', type: 'invalid_request_error' } });
+			}
+			return openaiChat(res, body ?? {});
+		}
 	}
 	if (path.startsWith('/anthropic/v1/')) {
 		if (req.headers['x-api-key'] !== ANTHROPIC_KEY) {
@@ -522,6 +542,6 @@ function safeJson(text) {
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
 	const port = Number(process.argv[2] ?? process.env.FAKE_LLM_PORT ?? 11435);
 	startFakeServer(port).then((s) => {
-		console.log(`fake LLM server listening on ${s.baseUrl} (keys: OpenAI ${API_KEY}, Anthropic ${ANTHROPIC_KEY}, Gemini ${GEMINI_KEY})`);
+		console.log(`fake LLM server listening on ${s.baseUrl} (keys: OpenAI ${API_KEY}, Anthropic ${ANTHROPIC_KEY}, Gemini ${GEMINI_KEY}, custom header api-key ${CUSTOM_KEY})`);
 	});
 }

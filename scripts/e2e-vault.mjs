@@ -34,6 +34,7 @@ writeFileSync(
 			openai: { apiKeySecretId: '', model: 'fake-gpt', baseUrl: `${fakeBase}/v1` },
 			anthropic: { apiKeySecretId: '', model: 'fake-claude', baseUrl: `${fakeBase}/anthropic/v1`, maxTokens: 1024 },
 			gemini: { apiKeySecretId: '', model: 'fake-gemini', baseUrl: `${fakeBase}/gemini/v1beta` },
+			custom: { apiKeySecretId: '', model: 'local-model', baseUrl: `${fakeBase}/local/v1`, auth: 'none' },
 		},
 		null,
 		2,

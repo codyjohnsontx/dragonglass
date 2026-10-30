@@ -103,10 +103,10 @@ describe('context building', () => {
 			{ id: '5', role: 'tool', content: 'r', createdAt: 5, toolCallId: 'c', toolName: 't' },
 			{ id: '6', role: 'assistant', content: '', createdAt: 6, interrupted: true },
 		];
-		const msgs = toProviderMessages('sys', stored, 'CTX');
-		expect(msgs.map((m) => m.role)).toEqual(['system', 'user', 'user', 'assistant', 'tool']);
-		expect(msgs[1]?.content).toBe('first');
-		expect(msgs[2]?.content).toBe('CTX\n\nsecond');
-		expect(msgs[4]).toEqual({ role: 'tool', content: 'r', toolCallId: 'c', toolName: 't' });
+		const msgs = toProviderMessages(stored, 'CTX');
+		expect(msgs.map((m) => m.role)).toEqual(['user', 'user', 'assistant', 'tool']);
+		expect(msgs[0]?.content).toBe('first');
+		expect(msgs[1]?.content).toBe('CTX\n\nsecond');
+		expect(msgs[3]).toEqual({ role: 'tool', content: 'r', toolCallId: 'c', toolName: 't' });
 	});
 });

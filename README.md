@@ -5,10 +5,11 @@ agentic assistant that lives in a sidebar, understands your vault as a linked
 knowledge base, and proposes every change as a diff you approve before it is
 written.
 
-- **Bring your own model.** Local models through Ollama, or OpenAI, Anthropic
-  or Google Gemini with your own API key. Custom OpenAI-compatible endpoints
-  are next on the [roadmap](docs/roadmap.md). No subscription, no account, no
-  proxy; cloud usage is billed to you by the provider.
+- **Bring your own model.** Local models through Ollama, OpenAI, Anthropic
+  or Google Gemini with your own API key, or any OpenAI-compatible endpoint
+  (Moonshot's Kimi, OpenRouter, Groq, LM Studio, vLLM, llama.cpp). No
+  subscription, no account, no proxy; cloud usage is billed to you by the
+  provider. See [Ways to run it](#ways-to-run-it).
 - **Local-first and private.** Nothing leaves your machine except the message
   you type, the context you choose to attach, and the results of the tools
   the model calls, and only to the provider you configured. No telemetry.
@@ -35,6 +36,28 @@ manually:
    mode if needed, and enable **Dragonglass AI**.
 
 Requires Obsidian 1.13.2 or newer (for keychain-backed secret storage).
+
+## Ways to run it
+
+Dragonglass talks to a model over an API. It never logs in to a chat app, so
+a ChatGPT, Claude or Gemini chat subscription cannot be used; only API keys
+(or a local server) work. Pick whichever suits you:
+
+- **Local Ollama.** Models run on your own machine; nothing leaves it. See
+  [Ollama](#ollama-local).
+- **Ollama cloud models, through your local Ollama.** Sign in once with
+  `ollama signin`, pull one of the cloud models from Ollama's library (for
+  example a Kimi K2 cloud tag), and select it as an Ollama model. No code or
+  extra settings are needed. These models run on Ollama's servers, so your
+  messages and attached context leave your machine even though the plugin
+  talks to `127.0.0.1`.
+- **An OpenAI, Anthropic or Google Gemini API key.** Billed by that provider
+  to your account. See [OpenAI](#openai), [Anthropic](#anthropic) and
+  [Google Gemini](#google-gemini).
+- **Any OpenAI-compatible endpoint.** Services such as Moonshot (Kimi models)
+  and OpenRouter (many vendors' models behind one key), or a server you run
+  yourself such as LM Studio, vLLM or llama.cpp. See
+  [OpenAI-compatible endpoint](#openai-compatible-endpoint).
 
 ## Configure
 
@@ -106,6 +129,46 @@ from your machine to Anthropic.
 2. Enter a model such as `gemini-2.5-flash`, or pick one from the sidebar model
    menu, and select **Test Gemini connection**.
 
+### OpenAI-compatible endpoint
+
+For any server that speaks the OpenAI Chat Completions API. It shows up as
+**Custom** in the sidebar's provider menu.
+
+1. **Base URL** is the API root that `/chat/completions` and `/models` sit
+   under, usually ending in `/v1`. For example:
+   - Moonshot: `https://api.moonshot.ai/v1`
+   - OpenRouter: `https://openrouter.ai/api/v1`
+   - Groq: `https://api.groq.com/openai/v1`
+   - LM Studio: `http://127.0.0.1:1234/v1`
+   - llama.cpp `llama-server`: `http://127.0.0.1:8080/v1`
+   - vLLM: `http://127.0.0.1:8000/v1`
+2. **Authentication**: most services take `Authorization: Bearer <key>`.
+   Choose **Key in a custom header** for services that want the key in a
+   named header (for example `api-key`), or **No authentication** for local
+   servers; then no key is ever sent.
+3. **API key**: a keychain secret, like the other providers. It is sent only
+   to the base URL above.
+4. **Model**: the model id exactly as the service names it, or pick one from
+   the sidebar model menu once the connection works.
+5. Select **Test endpoint connection**. It lists the server's models with the
+   authentication you chose.
+
+Two switches cover servers that do not support everything:
+
+- **Tool calling** off stops sending tool definitions, for servers or models
+  that reject them or answer with broken tool calls. With it on, a server
+  that refuses tools (for example vLLM without `--enable-auto-tool-choice`, or
+  llama.cpp without `--jinja`) still gets an answer: the plugin retries once
+  without tools and says so.
+- **Streaming** off asks for whole replies, for servers that cannot stream.
+
+An endpoint on `localhost`, `127.x.x.x` or `[::1]` is treated as local: the sidebar
+does not show the cloud privacy note and token counts are not described as
+billed. Any other host is treated as a remote service. If the connection test
+cannot reach a server that answers from the command line, the server probably
+refuses requests from Obsidian's `app://` origin (CORS); switch
+**Advanced → Network transport** to the Obsidian request API.
+
 ### Switching providers
 
 Switch providers from the sidebar at any time. The conversation stays as it
@@ -161,6 +224,8 @@ vault:
 - Streaming chat over the Ollama, OpenAI, Anthropic and Gemini wire formats,
   including tool calls, tool results, usage, cancellation, and error mapping
   (bad key, rate limit, server error, unreachable server, model without tools).
+- Custom OpenAI-compatible endpoints with bearer, custom-header and no
+  authentication, a server that rejects tools, and streaming turned off.
 - Switching providers mid-conversation, including replaying tool calls made
   by one provider to another.
 - Read tools: list, read, search, metadata with links and backlinks, active
@@ -174,7 +239,9 @@ vault:
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
-documentation. To verify live:
+documentation. The custom endpoint has not been run against Moonshot,
+OpenRouter or another live service yet; it is the OpenAI adapter pointed at
+a different URL. To verify live:
 
 1. Run Ollama with a tool-capable model and set it in settings; or add an
    OpenAI, Anthropic or Gemini key in the keychain.
@@ -187,7 +254,12 @@ documentation. To verify live:
 
 ## Known limitations
 
-- Custom OpenAI-compatible endpoints are designed for but not built.
+- A ChatGPT, Claude or Gemini chat subscription cannot be used; only API keys
+  or a local server.
+- Custom endpoints get the standard OpenAI request shape. Provider-specific
+  extras (OpenRouter routing options, reasoning fields some services stream)
+  are not sent or shown, and a server without a `/models` route fails the
+  connection test even if chat works.
 - One proposal per card; multi-file changes are reviewed one card at a time.
 - No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
   yet.
@@ -222,7 +294,9 @@ real vaults or settings. The fake server answers scripted prompts such as
 `hello`, `read Projects/Launch.md`, and
 `edit Projects/Launch.md replace "November 1" with "November 15"`. Cloud
 providers need a keychain secret holding the fake key: `sk-fake` for OpenAI,
-`sk-ant-fake` for Anthropic, `gemini-fake` for Gemini.
+`sk-ant-fake` for Anthropic, `gemini-fake` for Gemini. The custom endpoint
+starts on the fake server's `/local/v1`, which needs no key and rejects tools;
+`/keyed/v1` takes `custom-fake` in an `api-key` header.
 
 Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 [decision record](docs/decisions.md).

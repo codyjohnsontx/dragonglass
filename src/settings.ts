@@ -38,12 +38,31 @@ export interface GeminiSettings {
 	baseUrl: string;
 }
 
+/** How a custom endpoint is sent its key; see `OpenAIAuth`. */
+export type CustomAuth = 'bearer' | 'header' | 'none';
+
+/** Any server speaking the OpenAI Chat Completions API (Moonshot, OpenRouter, LM Studio, vLLM, llama.cpp). */
+export interface CustomSettings {
+	baseUrl: string;
+	model: string;
+	/** Id of the secret in Obsidian's SecretStorage. The key itself is never stored here. */
+	apiKeySecretId: string;
+	auth: CustomAuth;
+	/** Header that carries the bare key when `auth` is `header`, for example `api-key`. */
+	authHeader: string;
+	/** Off for servers that cannot stream; replies then arrive all at once. */
+	streaming: boolean;
+	/** Off for servers or models that reject or mishandle tool definitions. */
+	toolCalling: boolean;
+}
+
 export interface DragonglassSettings {
 	activeProvider: ProviderId;
 	ollama: OllamaSettings;
 	openai: OpenAISettings;
 	anthropic: AnthropicSettings;
 	gemini: GeminiSettings;
+	custom: CustomSettings;
 	/** Default toggles for new messages. */
 	includeActiveNote: boolean;
 	includeSelection: boolean;
@@ -69,6 +88,7 @@ export const DEFAULT_SETTINGS: DragonglassSettings = {
 	openai: { apiKeySecretId: '', model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
 	anthropic: { apiKeySecretId: '', model: 'claude-sonnet-4-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 8192 },
 	gemini: { apiKeySecretId: '', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+	custom: { baseUrl: '', model: '', apiKeySecretId: '', auth: 'bearer', authHeader: '', streaming: true, toolCalling: true },
 	includeActiveNote: true,
 	includeSelection: true,
 	toolsEnabled: true,
@@ -94,7 +114,7 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 		if (typeof numCtx === 'number' && Number.isInteger(numCtx) && numCtx >= MIN_NUM_CTX) out.ollama.numCtx = numCtx;
 		if (typeof ollama['think'] === 'boolean') out.ollama.think = ollama['think'];
 	}
-	for (const id of ['openai', 'anthropic', 'gemini'] as const) {
+	for (const id of ['openai', 'anthropic', 'gemini', 'custom'] as const) {
 		const cloud = r[id] as Record<string, unknown> | undefined;
 		if (!cloud || typeof cloud !== 'object') continue;
 		if (typeof cloud['apiKeySecretId'] === 'string') out[id].apiKeySecretId = cloud['apiKeySecretId'];
@@ -105,6 +125,14 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 	if (anthropic && typeof anthropic === 'object') {
 		const maxTokens = anthropic['maxTokens'];
 		if (typeof maxTokens === 'number' && Number.isInteger(maxTokens) && maxTokens > 0) out.anthropic.maxTokens = maxTokens;
+	}
+	const custom = r['custom'] as Record<string, unknown> | undefined;
+	if (custom && typeof custom === 'object') {
+		const auth = custom['auth'];
+		if (auth === 'bearer' || auth === 'header' || auth === 'none') out.custom.auth = auth;
+		if (typeof custom['authHeader'] === 'string') out.custom.authHeader = custom['authHeader'];
+		if (typeof custom['streaming'] === 'boolean') out.custom.streaming = custom['streaming'];
+		if (typeof custom['toolCalling'] === 'boolean') out.custom.toolCalling = custom['toolCalling'];
 	}
 	for (const key of ['includeActiveNote', 'includeSelection', 'toolsEnabled', 'showUsage'] as const) {
 		if (typeof r[key] === 'boolean') out[key] = r[key];

@@ -142,14 +142,14 @@ export class DragonglassCore {
 		this.store.touch(conv);
 
 		const noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
-		const system = buildSystemPrompt({ toolsEnabled: this.settings.toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote });
 		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
-		const messages = toProviderMessages(system, conv.messages, contextBlock);
+		const messages = toProviderMessages(conv.messages, contextBlock);
 
 		let current: StoredMessage | null = null;
 		const events = runAgent({
 			provider,
 			model,
+			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote }),
 			messages,
 			tools: this.createTools(noteTokens),
 			toolsEnabled: this.settings.toolsEnabled,
