@@ -9,6 +9,7 @@ import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
+import { copyToClipboard } from './copy';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -304,6 +305,7 @@ export class ChatView extends ItemView {
 			if (m.content) {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
 				void MarkdownRenderer.render(this.app, m.content, body, '', this);
+				this.addCopyButton(wrap, m.content);
 			}
 			// A call whose result never arrived (the run died first) has no result row to live on.
 			const unanswered = (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
@@ -346,6 +348,36 @@ export class ChatView extends ItemView {
 			const card = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`);
 			if (card) renderProposalCard(this.app, this.core, conv, p, card, () => this.renderMessages());
 		}
+	}
+
+	/**
+	 * A visible Copy button under a reply. It puts the reply's Markdown on the
+	 * clipboard and reads "Copied" for a moment so a click is seen to work.
+	 */
+	private addCopyButton(wrap: HTMLElement, text: string): void {
+		const row = wrap.createDiv({ cls: 'dg-msg-actions' });
+		const btn = row.createEl('button', { cls: 'dg-copy-btn', attr: { 'aria-label': 'Copy reply to clipboard' } });
+		const icon = btn.createSpan();
+		const label = btn.createSpan();
+		const show = (name: string, caption: string): void => {
+			setIcon(icon, name);
+			label.setText(caption);
+		};
+		show('copy', 'Copy');
+		let revert: number | null = null;
+		btn.addEventListener('click', () => {
+			void copyToClipboard(text, activeWindow.navigator.clipboard).then((ok) => {
+				if (!ok) return;
+				btn.addClass('is-copied');
+				show('check', 'Copied');
+				if (revert !== null) window.clearTimeout(revert);
+				revert = window.setTimeout(() => {
+					btn.removeClass('is-copied');
+					show('copy', 'Copy');
+					revert = null;
+				}, 1500);
+			});
+		});
 	}
 
 	/** Collapsed block holding a thinking model's reasoning. Returns the summary and body elements. */
@@ -577,6 +609,8 @@ export class ChatView extends ItemView {
 					this.liveEl.addClass('markdown-rendered');
 					if (ev.content) {
 						void MarkdownRenderer.render(this.app, ev.content, this.liveEl, '', this);
+						// The run may go on with tool rounds; the reply is copyable as soon as it is complete.
+						if (this.liveEl.parentElement) this.addCopyButton(this.liveEl.parentElement, ev.content);
 					} else if (ev.toolCalls.length > 0) {
 						// Tool-only round: the calls show on their result rows, so no bubble here.
 						this.liveEl.parentElement?.addClass('dg-msg-step');
