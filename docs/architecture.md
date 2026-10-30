@@ -42,6 +42,7 @@ src/
     store.ts              One JSON file per conversation, debounced writes.
   ui/
     chat-view.ts          The sidebar ItemView.
+    copy.ts               What the per-reply Copy button puts on the clipboard.
     proposal-card.ts      Diff review card with approve/reject/revert.
     note-picker.ts        Fuzzy picker for attaching notes.
     confirm-modal.ts      Confirmation dialog for destructive actions.

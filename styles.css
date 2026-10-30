@@ -52,6 +52,8 @@
 	display: flex;
 	flex-direction: column;
 	gap: var(--size-4-2);
+	/* Obsidian turns selection off for the whole app; the transcript is text the user may want to copy. */
+	user-select: text;
 }
 
 .dg-empty {
@@ -138,6 +140,45 @@
 	flex-wrap: wrap;
 	gap: var(--size-2-1);
 	margin-top: var(--size-2-2);
+}
+
+/* One visible Copy button per reply, under its text; it flips to "Copied" for a moment after a click. */
+.dg-msg-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: var(--size-2-2);
+	user-select: none;
+}
+
+.dg-copy-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	padding: 0 var(--size-2-2);
+	height: auto;
+	line-height: 1.8;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	background: none;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	cursor: pointer;
+}
+
+.dg-copy-btn:hover {
+	color: var(--text-normal);
+	background-color: var(--background-modifier-hover);
+}
+
+.dg-copy-btn svg {
+	width: 1em;
+	height: 1em;
+}
+
+.dg-copy-btn.is-copied {
+	color: var(--color-green);
+	border-color: var(--color-green);
 }
 
 .dg-msg-note,

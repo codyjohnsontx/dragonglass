@@ -193,6 +193,8 @@ Open the sidebar with the gem icon in the ribbon or the command
 **Dragonglass AI: Open chat**.
 
 - Ask questions: "What does my Launch note say about the date?"
+- Copy a reply: select text in the sidebar and copy it as usual, or select
+  **Copy** under a reply to put its Markdown on the clipboard.
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
   The model reads the note, proposes a change, and a card with the diff
   appears. Select **Approve** to apply or **Reject** to discard.
