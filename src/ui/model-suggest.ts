@@ -5,12 +5,12 @@ import { ModelInfo } from '../providers/types';
 /**
  * Suggests models under a model id text field. The field stays free text, so
  * an id the list does not offer can still be typed. The list is fetched once
- * per focus; until the user types, every model is shown rather than only the
- * one already in the field.
+ * per focus; while the field still holds the value it had then, every model is
+ * shown rather than only the one already in the field.
  */
 export class ModelSuggest extends AbstractInputSuggest<ModelInfo> {
 	private choices: Promise<ModelChoices> | null = null;
-	private typed = false;
+	private untouched = '';
 
 	constructor(
 		app: App,
@@ -19,20 +19,22 @@ export class ModelSuggest extends AbstractInputSuggest<ModelInfo> {
 		private readonly onPick: (id: string) => void,
 	) {
 		super(app, inputEl);
-		inputEl.addEventListener('focus', () => {
-			this.choices = null;
-			this.typed = false;
-		});
-		inputEl.addEventListener('input', () => {
-			this.typed = true;
-		});
+		// Capture runs this before the suggest's own focus listener computes the list.
+		inputEl.addEventListener(
+			'focus',
+			() => {
+				this.choices = null;
+				this.untouched = inputEl.value;
+			},
+			{ capture: true },
+		);
 	}
 
 	protected async getSuggestions(query: string): Promise<ModelInfo[]> {
 		this.choices ??= this.load();
 		const { models } = await this.choices;
 		const q = query.trim().toLowerCase();
-		if (!this.typed || !q) return models;
+		if (query === this.untouched || !q) return models;
 		return models.filter((m) => m.id.toLowerCase().includes(q) || (m.label ?? '').toLowerCase().includes(q));
 	}
 
@@ -45,7 +47,7 @@ export class ModelSuggest extends AbstractInputSuggest<ModelInfo> {
 	selectSuggestion(model: ModelInfo): void {
 		this.setValue(model.id);
 		this.onPick(model.id);
-		this.typed = false;
+		this.untouched = model.id;
 		this.close();
 	}
 }
