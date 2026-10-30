@@ -88,7 +88,7 @@ export class ChatView extends ItemView {
 		root.addClass('dragonglass-view');
 		this.headerEl = root.createDiv({ cls: 'dg-header' });
 		this.messagesEl = root.createDiv({ cls: 'dg-messages' });
-		this.copyStatusEl = root.createDiv({ cls: 'dg-copy-status visually-hidden', attr: { role: 'status', 'aria-live': 'polite' } });
+		this.copyStatusEl = root.createDiv({ cls: 'dg-copy-status', attr: { role: 'status', 'aria-live': 'polite' } });
 		this.contextBarEl = root.createDiv({ cls: 'dg-context-bar' });
 		this.composerEl = root.createDiv({ cls: 'dg-composer' });
 		this.buildComposer();
@@ -370,7 +370,8 @@ export class ChatView extends ItemView {
 		let revert: number | null = null;
 		btn.addEventListener('click', () => {
 			void copyToClipboard(text, activeWindow.navigator.clipboard).then((ok) => {
-				this.copyStatusEl.setText(copyStatusMessage(ok));
+				this.copyStatusEl.empty();
+				window.setTimeout(() => this.copyStatusEl.setText(copyStatusMessage(ok)), 100);
 				if (!ok) return;
 				btn.addClass('is-copied');
 				show('check', 'Copied');

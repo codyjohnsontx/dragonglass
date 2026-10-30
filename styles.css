@@ -142,8 +142,8 @@
 	margin-top: var(--size-2-2);
 }
 
-/* Hidden from sighted view but still reachable by screen readers, e.g. the copy-status live region. */
-.visually-hidden {
+/* The copy-status live region: hidden from sighted view but still read by screen readers. */
+.dg-copy-status {
 	position: absolute;
 	width: 1px;
 	height: 1px;

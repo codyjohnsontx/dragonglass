@@ -9,11 +9,6 @@ export type ClipboardWriter = Pick<Clipboard, 'writeText'>;
  * success; a failure such as a denied clipboard permission is reported as a
  * Notice and returns false so the caller leaves its button unchanged.
  */
-/** Text for the shared live region that announces a copy attempt to screen readers. */
-export function copyStatusMessage(ok: boolean): string {
-	return ok ? 'Copied to clipboard.' : 'Could not copy to clipboard.';
-}
-
 export async function copyToClipboard(text: string, clipboard: ClipboardWriter | undefined): Promise<boolean> {
 	if (!clipboard) {
 		new Notice('Clipboard is not available here.');
@@ -26,4 +21,9 @@ export async function copyToClipboard(text: string, clipboard: ClipboardWriter |
 		new Notice(`Could not copy: ${e instanceof Error ? e.message : String(e)}`);
 		return false;
 	}
+}
+
+/** Text for the shared live region that announces a copy attempt to screen readers. */
+export function copyStatusMessage(ok: boolean): string {
+	return ok ? 'Copied to clipboard.' : 'Could not copy to clipboard.';
 }
