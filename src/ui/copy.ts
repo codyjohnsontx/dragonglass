@@ -29,12 +29,19 @@ export interface Timers {
 	clearTimeout(id: number): void;
 }
 
+/** The part of a screen-reader status element `CopyAnnouncer` writes to, so tests can pass a fake. */
+export interface StatusRegion {
+	empty(): void;
+	setText(text: string): void;
+}
+
 /**
  * Serializes announcements to a shared screen-reader status region across
  * concurrent copy clicks: `begin()` marks a new attempt as the latest and
- * cancels any announcement still pending from an earlier one, and a delayed
- * `announce()` from an attempt that is no longer the latest is a no-op.
- * `dispose()` cancels any pending announcement, e.g. when the view closes.
+ * cancels any announcement still pending from an earlier one, and
+ * `announce()` from an attempt that is no longer the latest leaves the region
+ * untouched. `dispose()` cancels any pending announcement and supersedes any
+ * attempt still in flight, e.g. when the view closes.
  */
 export class CopyAnnouncer {
 	private seq = 0;
@@ -48,17 +55,23 @@ export class CopyAnnouncer {
 		return ++this.seq;
 	}
 
-	/** Schedules `onAnnounce` after `delayMs`, unless `attempt` has since been superseded by a later `begin()`. */
-	announce(attempt: number, delayMs: number, onAnnounce: () => void): void {
+	/**
+	 * Clears `region` now and sets it to `message` after `delayMs`, so screen
+	 * readers announce a repeated message, unless `attempt` has since been
+	 * superseded by a later `begin()` or by `dispose()`.
+	 */
+	announce(attempt: number, region: StatusRegion, message: string, delayMs: number): void {
 		if (attempt !== this.seq) return;
+		region.empty();
 		this.pending = this.timers.setTimeout(() => {
 			this.pending = null;
-			if (attempt === this.seq) onAnnounce();
+			if (attempt === this.seq) region.setText(message);
 		}, delayMs);
 	}
 
 	dispose(): void {
 		this.cancelPending();
+		this.seq++;
 	}
 
 	private cancelPending(): void {

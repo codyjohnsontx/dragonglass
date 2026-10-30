@@ -384,8 +384,7 @@ export class ChatView extends ItemView {
 				if (!ok) return;
 				btn.addClass('is-copied');
 				show('check', 'Copied');
-				this.copyStatusEl.empty();
-				this.copyAnnouncer.announce(attempt, 100, () => this.copyStatusEl.setText('Copied to clipboard.'));
+				this.copyAnnouncer.announce(attempt, this.copyStatusEl, 'Copied to clipboard.', 100);
 				if (revert !== null) window.clearTimeout(revert);
 				revert = window.setTimeout(() => {
 					btn.removeClass('is-copied');
