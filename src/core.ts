@@ -6,8 +6,9 @@ import { Conversation, deriveTitle, StoredMessage } from './persistence/conversa
 import { ConversationStore } from './persistence/store';
 import { FetchHttpClient, HttpClient } from './providers/http';
 import { createRequestUrlClient } from './providers/obsidian-http';
+import { loadModelChoices, ModelChoices } from './providers/model-choices';
 import { createProviders, modelFor, setModelFor } from './providers/registry';
-import { ConnectionStatus, ModelInfo, Provider, ProviderError, ProviderId, Usage } from './providers/types';
+import { ConnectionStatus, Provider, ProviderError, ProviderId, Usage } from './providers/types';
 import { DragonglassSettings } from './settings';
 import { createVaultTools } from './tools/vault-tools';
 import { ObsidianVaultPort } from './vault/obsidian-port';
@@ -79,8 +80,9 @@ export class DragonglassCore {
 		return this.provider(id).checkConnection(signal);
 	}
 
-	listModels(id: ProviderId = this.settings.activeProvider, signal?: AbortSignal): Promise<ModelInfo[]> {
-		return this.provider(id).listModels(signal);
+	/** Models to offer for `id`: its own list when it answers, else its built-in suggestions. */
+	modelChoices(id: ProviderId = this.settings.activeProvider, signal?: AbortSignal): Promise<ModelChoices> {
+		return loadModelChoices(this.provider(id), signal);
 	}
 
 	/** True when the active provider sends data off the machine. */

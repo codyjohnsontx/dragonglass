@@ -22,6 +22,9 @@ src/
                           function declarations, thought signatures).
     registry.ts           Builds providers from settings; reads keys lazily;
                           maps custom endpoint settings onto the OpenAI adapter.
+    model-choices.ts      Model menu data: live lists filtered to chat models,
+                          built-in current models when listing fails, and the
+                          per-provider list behind the sidebar menu.
   agent/
     runtime.ts            The agent loop: stream, validate tool calls, execute,
                           feed results back, cap iterations, handle cancel.
@@ -46,6 +49,7 @@ src/
     proposal-card.ts      Diff review card with approve/reject/revert.
     note-picker.ts        Fuzzy picker for attaching notes.
     confirm-modal.ts      Confirmation dialog for destructive actions.
+    model-suggest.ts      Model suggestions under a free-text model id field.
     settings-tab.ts       Declarative settings tab (Obsidian 1.13+ API).
 ```
 

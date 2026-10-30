@@ -12,7 +12,7 @@ function scripted(turns: StreamEvent[][], opts: Partial<Provider['capabilities']
 		capabilities: { streaming: true, toolCalling: true, usageReporting: true, modelDiscovery: false, billed: false, remote: false, ...opts },
 		requests,
 		listModels: () => Promise.resolve([]),
-		checkConnection: () => Promise.resolve({ ok: true, detail: 'ok' }),
+		checkConnection: () => Promise.resolve({ ok: true, detail: 'ok', models: [] }),
 		async *chat(req) {
 			requests.push(req);
 			const turn = turns.shift();

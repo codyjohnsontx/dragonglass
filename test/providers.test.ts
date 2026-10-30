@@ -62,16 +62,16 @@ describe.each([
 	const lastChatBody = () => fake.requests.filter((r) => r.url === '/api/chat').at(-1)!.body!;
 
 	it('checks connection and lists models', async () => {
-		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake' });
+		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake', models: [{ id: 'fake-tools:latest' }, { id: 'fake-plain:latest' }] });
 		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-tools:latest', 'fake-plain:latest']);
 	});
 
 	it('confirms the configured model is installed as part of the connection check', async () => {
-		expect(await provider({ model: 'fake-tools:latest' }).checkConnection()).toEqual({ ok: true, detail: 'Ollama 0.0.0-fake, model fake-tools:latest installed' });
+		expect(await provider({ model: 'fake-tools:latest' }).checkConnection()).toMatchObject({ ok: true, detail: 'Ollama 0.0.0-fake, model fake-tools:latest installed' });
 		// A bare name means the :latest tag, as it does for Ollama itself.
 		expect(await provider({ model: 'fake-tools' }).checkConnection()).toMatchObject({ ok: true });
 		const missing = await provider({ model: 'nonexistent:latest' }).checkConnection();
-		expect(missing).toMatchObject({ ok: false, error: { kind: 'model_not_found' } });
+		expect(missing).toMatchObject({ ok: false, error: { kind: 'model_not_found' }, models: [{ id: 'fake-tools:latest' }, { id: 'fake-plain:latest' }] });
 		if (!missing.ok) {
 			expect(missing.error.userMessage()).toBe(
 				'Model not found: "nonexistent:latest" is not installed on this server (installed: fake-tools:latest, fake-plain:latest). Pick a different model in settings.',
@@ -299,8 +299,8 @@ describe.each([
 	const provider = (key: string | null = 'sk-fake') =>
 		new OpenAIProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/v1`, apiKey: () => key }));
 
-	it('lists models with the bearer key', async () => {
-		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-gpt', 'fake-plain']);
+	it('lists every model with the bearer key', async () => {
+		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-gpt', 'fake-plain', 'gpt-image-1', 'gpt-realtime', 'omni-moderation-latest', 'text-embedding-3-small', 'tts-1', 'whisper-1']);
 		expect(fake.requests.at(-1)!.headers['authorization']).toBe('Bearer sk-fake');
 	});
 
@@ -341,6 +341,26 @@ describe.each([
 		expect(wire[2]).toEqual({ role: 'tool', tool_call_id: 'call_fake_1', content: history[2]!.content });
 	});
 
+	it('sends reasoning_effort none with tools only for GPT-6 Luna', async () => {
+		const sent = () => fake.requests.filter((r) => r.url === '/v1/chat/completions').at(-1)!.body!;
+		await collect(provider().chat({ model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hello' }], tools }));
+		expect(sent()['reasoning_effort']).toBe('none');
+		await collect(provider().chat({ model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(sent()).not.toHaveProperty('reasoning_effort');
+		await collect(provider().chat({ model: 'gpt-6-astra', messages: [{ role: 'user', content: 'hello' }], tools }));
+		expect(sent()).not.toHaveProperty('reasoning_effort');
+	});
+
+	it('explains that a Responses-only model cannot take tools over Chat Completions', async () => {
+		const err = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'read A.md' }], tools })).catch((e: unknown) => e as ProviderError);
+		expect(err).toMatchObject({ kind: 'unsupported_tools', status: 400 });
+		expect(err.userMessage()).toBe(
+			"This model does not support tool calling: gpt-6.1-sol takes tools only through OpenAI's newer Responses API, which Dragonglass does not support yet. Choose a tool-capable model, or ask a question that needs no vault access.",
+		);
+		const events = await collect(provider().chat({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(text(events)).toMatch(/Hello/);
+	});
+
 	it('maps rate limits and server errors', async () => {
 		await expect(collect(provider().chat({ model: 'fake-429', messages: [] }))).rejects.toMatchObject({ kind: 'rate_limit' });
 		const err = await collect(provider().chat({ model: 'fake-500', messages: [] })).catch((e: unknown) => e as ProviderError);
@@ -369,7 +389,7 @@ describe.each([
 	it('talks to a local server with no authentication and never sends the key', async () => {
 		const { provider } = setup({ baseUrl: `${fake.baseUrl}/local/v1`, auth: 'none' });
 		expect(provider.id).toBe('custom');
-		expect(await provider.checkConnection()).toEqual({ ok: true, detail: 'Custom reachable (1 model)' });
+		expect(await provider.checkConnection()).toMatchObject({ ok: true, detail: 'Custom reachable (1 model)' });
 		expect(lastHeaders()['authorization']).toBeUndefined();
 		expect(JSON.stringify(lastHeaders())).not.toContain('custom-fake');
 		expect(provider.capabilities).toMatchObject({ remote: false, billed: false });
@@ -477,7 +497,7 @@ describe.each([
 		expect(headers['x-api-key']).toBe('sk-ant-fake');
 		expect(headers['anthropic-version']).toBe('2023-06-01');
 		expect(headers['authorization']).toBeUndefined();
-		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Anthropic reachable (2 models)' });
+		expect(await provider().checkConnection()).toMatchObject({ ok: true, detail: 'Anthropic reachable (2 models)' });
 	});
 
 	it('fails fast without a key and maps 401', async () => {
@@ -609,12 +629,15 @@ describe.each([
 	const provider = (key: string | null = 'gemini-fake') =>
 		new GeminiProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => key }));
 
-	it('lists only generateContent models, with the key in a header', async () => {
-		expect(await provider().listModels()).toEqual([{ id: 'fake-gemini', label: 'Fake Gemini', contextWindow: 1048576 }]);
+	it('lists generateContent models, with the key in a header', async () => {
+		expect(await provider().listModels()).toEqual([
+			{ id: 'fake-gemini', label: 'Fake Gemini', contextWindow: 1048576 },
+			{ id: 'fake-gemini-tts', label: 'Fake Gemini TTS' },
+		]);
 		const req = fake.requests.at(-1)!;
 		expect(req.headers['x-goog-api-key']).toBe('gemini-fake');
 		expect(req.url).not.toContain('gemini-fake');
-		expect(await provider().checkConnection()).toEqual({ ok: true, detail: 'Gemini reachable (1 model)' });
+		expect(await provider().checkConnection()).toMatchObject({ ok: true, detail: 'Gemini reachable (2 models)' });
 	});
 
 	it('fails fast without a key and maps the 400 invalid-key response to auth', async () => {

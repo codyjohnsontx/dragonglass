@@ -14,6 +14,29 @@ import {
 	toProviderError,
 } from './types';
 import { HttpClient, joinUrl, parseSse } from './http';
+import { OPENAI_RESPONSES_ONLY_TOOLS } from './model-choices';
+
+/**
+ * OpenAI models that take tool calls over Chat Completions only with
+ * `reasoning_effort: "none"` (https://developers.openai.com/api/docs/models/gpt-6-luna).
+ */
+const TOOLS_NEED_NO_REASONING = /^gpt-6-luna(?:-|$)/;
+
+/**
+ * OpenAI's 400 for tools sent over Chat Completions to a model that takes them
+ * only through the Responses API ("Function tools ... are not supported for
+ * <model> in /v1/chat/completions. Please use /v1/responses instead."), said
+ * plainly. Any other error is returned unchanged.
+ */
+function responsesOnlyTools(model: string, err: ProviderError): ProviderError {
+	if (err.status !== 400 || !/tool|function/i.test(err.message)) return err;
+	if (!OPENAI_RESPONSES_ONLY_TOOLS.test(model) && !/\/v1\/responses|responses api/i.test(err.message)) return err;
+	return new ProviderError(
+		'unsupported_tools',
+		`${model} takes tools only through OpenAI's newer Responses API, which Dragonglass does not support yet`,
+		400,
+	);
+}
 
 /**
  * How the key is sent: `Authorization: Bearer <key>`, the bare key in a named
@@ -114,7 +137,7 @@ export class OpenAIProvider implements Provider {
 	async checkConnection(signal?: AbortSignal): Promise<ConnectionStatus> {
 		try {
 			const models = await this.listModels(signal);
-			return { ok: true, detail: `${this.displayName} reachable (${countModels(models.length)})` };
+			return { ok: true, detail: `${this.displayName} reachable (${countModels(models.length)})`, models };
 		} catch (e) {
 			return { ok: false, error: toProviderError(e) };
 		}
@@ -135,6 +158,7 @@ export class OpenAIProvider implements Provider {
 				type: 'function',
 				function: { name: t.name, description: t.description, parameters: t.parameters },
 			}));
+			if (this.id === 'openai' && TOOLS_NEED_NO_REASONING.test(request.model)) body['reasoning_effort'] = 'none';
 		}
 		if (request.temperature !== undefined) body['temperature'] = request.temperature;
 
@@ -151,7 +175,8 @@ export class OpenAIProvider implements Provider {
 			throw toProviderError(e);
 		}
 		if (res.status < 200 || res.status >= 300) {
-			throw errorFromStatus(res.status, await res.errorText());
+			const err = errorFromStatus(res.status, await res.errorText());
+			throw body['tools'] ? responsesOnlyTools(request.model, err) : err;
 		}
 
 		if (!streaming) {

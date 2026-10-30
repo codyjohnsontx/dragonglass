@@ -95,7 +95,7 @@ export class GeminiProvider implements Provider {
 	async checkConnection(signal?: AbortSignal): Promise<ConnectionStatus> {
 		try {
 			const models = await this.listModels(signal);
-			return { ok: true, detail: `Gemini reachable (${countModels(models.length)})` };
+			return { ok: true, detail: `Gemini reachable (${countModels(models.length)})`, models };
 		} catch (e) {
 			return { ok: false, error: toProviderError(e) };
 		}
