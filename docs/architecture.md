@@ -71,9 +71,10 @@ src/
    Write tools return a `ChangeProposal` and *do not write*.
 5. Tool results are appended as `tool` messages and the loop continues until
    the model answers without tools. A call repeated with the same arguments in
-   one turn is answered with an error instead of being run again; a third
-   identical call, or reaching `maxToolIterations`, makes the next request
-   tool-free with an instruction to answer from what was gathered. Read tools
+   one turn is answered with an error instead of being run again. After a
+   third identical call, and on the last request `maxToolIterations` allows,
+   the request goes without tools and with an instruction to answer from what
+   was gathered. Read tools
    accept a wikilink name and resolve it by basename, as Obsidian does, and
    write tools refuse placeholder text such as `[Insert …]`.
 6. Every message and proposal is written to the conversation store as it is
