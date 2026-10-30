@@ -341,6 +341,16 @@ describe.each([
 		expect(wire[2]).toEqual({ role: 'tool', tool_call_id: 'call_fake_1', content: history[2]!.content });
 	});
 
+	it('sends reasoning_effort none with tools only for GPT-6 Luna', async () => {
+		const sent = () => fake.requests.filter((r) => r.url === '/v1/chat/completions').at(-1)!.body!;
+		await collect(provider().chat({ model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hello' }], tools }));
+		expect(sent()['reasoning_effort']).toBe('none');
+		await collect(provider().chat({ model: 'gpt-6-luna', messages: [{ role: 'user', content: 'hello' }] }));
+		expect(sent()).not.toHaveProperty('reasoning_effort');
+		await collect(provider().chat({ model: 'gpt-6-astra', messages: [{ role: 'user', content: 'hello' }], tools }));
+		expect(sent()).not.toHaveProperty('reasoning_effort');
+	});
+
 	it('maps rate limits and server errors', async () => {
 		await expect(collect(provider().chat({ model: 'fake-429', messages: [] }))).rejects.toMatchObject({ kind: 'rate_limit' });
 		const err = await collect(provider().chat({ model: 'fake-500', messages: [] })).catch((e: unknown) => e as ProviderError);

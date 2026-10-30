@@ -16,6 +16,12 @@ import {
 import { HttpClient, joinUrl, parseSse } from './http';
 
 /**
+ * OpenAI models that take tool calls over Chat Completions only with
+ * `reasoning_effort: "none"` (https://developers.openai.com/api/docs/models/gpt-6-luna).
+ */
+const TOOLS_NEED_NO_REASONING = /^gpt-6-luna(?:-|$)/;
+
+/**
  * How the key is sent: `Authorization: Bearer <key>`, the bare key in a named
  * header (`api-key: <key>`), or no credentials at all for local servers.
  */
@@ -135,6 +141,7 @@ export class OpenAIProvider implements Provider {
 				type: 'function',
 				function: { name: t.name, description: t.description, parameters: t.parameters },
 			}));
+			if (this.id === 'openai' && TOOLS_NEED_NO_REASONING.test(request.model)) body['reasoning_effort'] = 'none';
 		}
 		if (request.temperature !== undefined) body['temperature'] = request.temperature;
 

@@ -6,11 +6,11 @@ import { ModelInfo, Provider, ProviderError, ProviderId, toProviderError } from 
  * provider's model docs; update them when a provider retires one.
  */
 export const SUGGESTED_MODELS: Partial<Record<ProviderId, readonly ModelInfo[]>> = {
-	// https://developers.openai.com/api/docs/models
+	// https://developers.openai.com/api/docs/models. Only models that take
+	// tool calls over Chat Completions: GPT-6.1 Sol and Terra need the
+	// Responses API for tools, so they stay out until the adapter moves to it.
 	openai: [
 		{ id: 'gpt-6-astra', label: 'GPT-6 Astra' },
-		{ id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
-		{ id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra' },
 		{ id: 'gpt-6-luna', label: 'GPT-6 Luna' },
 	],
 	// https://platform.claude.com/docs/en/about-claude/models/overview
@@ -86,15 +86,16 @@ export function withConfiguredModel(models: readonly ModelInfo[], configured: st
 }
 
 /**
- * The model list behind the chat sidebar's menu. The list is kept per
- * provider so switching providers never shows the previous provider's models.
+ * The model lists behind the chat sidebar's menu, one per provider, so
+ * switching providers never shows another provider's models and switching
+ * back shows the list already loaded.
  */
 export class ModelMenu {
-	private loaded: { provider: ProviderId; choices: ModelChoices } | null = null;
+	private readonly loaded = new Map<ProviderId, ModelChoices>();
 
 	/** Models held for `provider`; empty until choices for it are offered. */
 	models(provider: ProviderId): ModelInfo[] {
-		return this.loaded?.provider === provider ? this.loaded.choices.models : [];
+		return this.loaded.get(provider)?.models ?? [];
 	}
 
 	/**
@@ -103,9 +104,9 @@ export class ModelMenu {
 	 * Returns whether the menu changed.
 	 */
 	offer(provider: ProviderId, choices: ModelChoices, replace = false): boolean {
-		const held = this.loaded?.provider === provider ? this.loaded.choices : null;
+		const held = this.loaded.get(provider);
 		if (!replace && held && (held.live || !choices.live)) return false;
-		this.loaded = { provider, choices };
+		this.loaded.set(provider, choices);
 		return true;
 	}
 }

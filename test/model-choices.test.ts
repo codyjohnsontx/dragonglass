@@ -136,14 +136,17 @@ describe('ModelMenu', () => {
 	const live = (...models: string[]): ModelChoices => ({ live: true, models: models.map((id) => ({ id })) });
 	const suggested: ModelChoices = { live: false, models: [...SUGGESTED_MODELS.openai!] };
 
-	it('shows each provider only its own list after a switch', () => {
+	it('shows each provider only its own list, and keeps it across a switch and back', () => {
 		const menu = new ModelMenu();
 		expect(menu.offer('openai', live('gpt'))).toBe(true);
 		expect(ids(menu.models('openai'))).toEqual(['gpt']);
 		expect(menu.models('anthropic')).toEqual([]);
 		expect(menu.offer('anthropic', live('claude'))).toBe(true);
 		expect(ids(menu.models('anthropic'))).toEqual(['claude']);
-		expect(menu.models('openai')).toEqual([]);
+		expect(ids(menu.models('openai'))).toEqual(['gpt']);
+		// Back on OpenAI, a failed check's suggestions do not replace the list it already loaded.
+		expect(menu.offer('openai', suggested)).toBe(false);
+		expect(ids(menu.models('openai'))).toEqual(['gpt']);
 	});
 
 	it('swaps suggestions for the live list once it arrives, then keeps it', () => {
