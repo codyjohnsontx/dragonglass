@@ -169,14 +169,51 @@ describe('runAgent', () => {
 		expect(p.requests[2]?.messages.filter((m) => m.role === 'tool').map((m) => m.content)).toEqual(['echo:a', 'echo:b']);
 	});
 
-	it('still stops with the cap error when the tool-free request asks for tools anyway', async () => {
-		const loop = (id: string): StreamEvent[] => [{ type: 'tool_call', call: { id, name: 'echo', argumentsJson: `{"text":"${id}"}` } }, { type: 'done', finishReason: 'tool_calls' }];
-		const p = scripted([loop('a'), loop('b'), loop('c')]);
-		const events = await collect(run(p, { maxIterations: 2 }));
-		const last = events.at(-1) as Extract<RunEvent, { type: 'error' }>;
-		expect(last.type).toBe('error');
-		expect(last.error.message).toMatch(/Stopped after 2 tool rounds/);
-		expect(p.requests).toHaveLength(2);
+	it('never runs tool calls the tool-free final request makes anyway', async () => {
+		let runs = 0;
+		const proposer: AgentTool = {
+			name: 'propose',
+			description: 'propose',
+			readOnly: false,
+			parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+			execute: (args) => {
+				runs++;
+				return Promise.resolve({ content: `proposed ${String(args['text'])}` });
+			},
+		};
+		const call = (id: string): StreamEvent => ({ type: 'tool_call', call: { id, name: 'propose', argumentsJson: `{"text":"${id}"}` } });
+		const tools = () => new ToolRegistry().register(proposer);
+		const p = scripted([
+			[call('a'), { type: 'done', finishReason: 'tool_calls' }],
+			[{ type: 'text', delta: 'Here is what I found.' }, call('b'), { type: 'done', finishReason: 'tool_calls' }],
+		]);
+		const added: { role: string; toolCalls?: unknown }[] = [];
+		const events = await collect(run(p, { maxIterations: 2, tools: tools(), onMessages: (m) => added.push(...m) }));
+		expect(runs).toBe(1);
+		expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(1);
+		expect(events.some((e) => e.type === 'error')).toBe(false);
+		const end = events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>;
+		expect(end).toMatchObject({ type: 'assistant_end', content: 'Here is what I found.', toolCalls: [] });
+		expect(added.at(-1)).toMatchObject({ role: 'assistant', toolCalls: undefined });
+
+		// With no text either, the turn ends with a clear message instead.
+		const q = scripted([
+			[call('a'), { type: 'done', finishReason: 'tool_calls' }],
+			[call('b'), { type: 'done', finishReason: 'tool_calls' }],
+		]);
+		runs = 0;
+		const silent = await collect(run(q, { maxIterations: 2, tools: tools() }));
+		expect(runs).toBe(1);
+		expect((silent.at(-1) as Extract<RunEvent, { type: 'error' }>).error.message).toMatch(/Stopped after 2 tool rounds without a final answer/);
+	});
+
+	it('treats the only request as the final one when one request is allowed', async () => {
+		const p = scripted([[{ type: 'tool_call', call: { id: 'a', name: 'echo', argumentsJson: '{"text":"a"}' } }, { type: 'text', delta: 'answer' }, { type: 'done', finishReason: 'stop' }]]);
+		const events = await collect(run(p, { maxIterations: 1 }));
+		expect(p.requests[0]?.tools).toBeUndefined();
+		expect(p.requests[0]?.messages[0]?.content).toContain(FINAL_ANSWER_INSTRUCTION);
+		expect(events.some((e) => e.type === 'tool_result' || e.type === 'error')).toBe(false);
+		expect((events.at(-1) as Extract<RunEvent, { type: 'assistant_end' }>).content).toBe('answer');
 	});
 
 	it('does not rerun a repeated call and ends a loop of identical calls with a tool-free answer', async () => {

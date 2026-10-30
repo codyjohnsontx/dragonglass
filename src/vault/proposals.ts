@@ -289,12 +289,18 @@ export function applyOperations(before: string, ops: EditOperation[]): string {
  * which a model writes when it proposes an edit before gathering the content.
  * Wikilinks (`[[Todo list]]`) and Markdown links (`[todo](url)`) do not count.
  */
-const PLACEHOLDER = /(?<!\[)\[(?:insert|todo|placeholder)\b[^\]\n]*\](?![\]([])/gi;
+// The character before the bracket is matched as a group rather than with a
+// lookbehind, which older mobile WebViews do not support.
+const PLACEHOLDER = /(^|[^[])(\[(?:insert|todo|placeholder)\b[^\]\n]*\])(?![\]([])/gi;
+
+function placeholders(text: string): string[] {
+	return [...text.matchAll(PLACEHOLDER)].map((m) => m[2] ?? '');
+}
 
 /** Refuse a proposal that adds placeholder text the note did not already have. */
 export function rejectNewPlaceholders(before: string, after: string): void {
-	const existing = new Set((before.match(PLACEHOLDER) ?? []).map((m) => m.toLowerCase()));
-	const added = (after.match(PLACEHOLDER) ?? []).find((m) => !existing.has(m.toLowerCase()));
+	const existing = new Set(placeholders(before).map((m) => m.toLowerCase()));
+	const added = placeholders(after).find((m) => !existing.has(m.toLowerCase()));
 	if (added) {
 		throw new ProposalError(
 			`The proposal contains placeholder text (${truncate(added, 80)}). Search and read the notes that hold this information first, then propose the real content; if it cannot be found, tell the user instead of proposing a placeholder.`,

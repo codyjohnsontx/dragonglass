@@ -59,7 +59,7 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 
 	while (iterations < opts.maxIterations) {
 		iterations++;
-		const finalRound = toolsEnabled && iterations > 1 && (forceFinal || iterations === opts.maxIterations);
+		const finalRound = toolsEnabled && (forceFinal || iterations === opts.maxIterations);
 		const sendTools = toolsEnabled && !finalRound;
 		if (opts.signal.aborted) {
 			yield { type: 'error', error: new ProviderError('cancelled', 'Generation stopped.') };
@@ -130,18 +130,26 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			return;
 		}
 
-		const assistant: ChatMessage = { role: 'assistant', content, toolCalls: toolCalls.length ? toolCalls : undefined };
+		// No tools were on offer for the final request, so calls it makes anyway are dropped, never run.
+		const calls = finalRound ? [] : toolCalls;
+		const assistant: ChatMessage = { role: 'assistant', content, toolCalls: calls.length ? calls : undefined };
 		if (thinking) assistant.thinking = thinking;
 		messages.push(assistant);
 		const added: ChatMessage[] = [assistant];
-		yield { type: 'assistant_end', content, thinking, toolCalls, usage, warnings };
+		yield { type: 'assistant_end', content, thinking, toolCalls: calls, usage, warnings };
 
-		if (toolCalls.length === 0) {
+		if (calls.length === 0) {
 			opts.onMessages?.(added);
+			if (finalRound && content.trim() === '') {
+				yield {
+					type: 'error',
+					error: new ProviderError('unknown', `Stopped after ${iterations} tool rounds without a final answer. Ask again to continue.`),
+				};
+			}
 			return;
 		}
 
-		for (const call of toolCalls) {
+		for (const call of calls) {
 			let result: ToolResult;
 			if (opts.signal.aborted) {
 				result = { content: 'Not run: generation stopped.', isError: true };
@@ -171,7 +179,6 @@ export async function* runAgent(opts: RunOptions): AsyncIterable<RunEvent> {
 			yield { type: 'error', error: new ProviderError('cancelled', 'Generation stopped.') };
 			return;
 		}
-		if (finalRound) break; // tool calls despite no tools on offer; do not go round again
 	}
 	yield {
 		type: 'error',

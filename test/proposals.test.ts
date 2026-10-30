@@ -41,6 +41,13 @@ describe('rejectNewPlaceholders', () => {
 		}
 		expect(() => rejectNewPlaceholders('Owner: [TODO]\n', 'Owner: [TODO]\nMore text\n')).not.toThrow();
 	});
+	it('finds placeholders at the start of the text, right after other text and next to links', () => {
+		for (const text of ['[insert here]', 'x[todo]', 'See [[Plan]] [placeholder]', '[[Todo]][todo: owner]', 'a\n[Insert decisions]\n']) {
+			expect(() => rejectNewPlaceholders('', text)).toThrow(ProposalError);
+		}
+		expect(() => rejectNewPlaceholders('', '[[Todo]]')).not.toThrow();
+		expect(() => rejectNewPlaceholders('', '[todo](https://example.com) [[Placeholder]]')).not.toThrow();
+	});
 });
 
 describe('ProposalEngine', () => {
