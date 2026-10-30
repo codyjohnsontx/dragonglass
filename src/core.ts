@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages } from './agent/context';
+import { buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -146,12 +146,13 @@ export class DragonglassCore {
 		const noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
 		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
 		const messages = toProviderMessages(conv.messages, contextBlock);
+		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null);
 
 		let current: StoredMessage | null = null;
 		const events = runAgent({
 			provider,
 			model,
-			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote }),
+			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map }),
 			messages,
 			tools: this.createTools(noteTokens),
 			toolsEnabled: this.settings.toolsEnabled,

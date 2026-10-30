@@ -175,6 +175,27 @@ describe.each([
 		expect(lastChatBody()).not.toHaveProperty('think');
 	});
 
+	it('replays thinking on the assistant turns of the current user turn only', async () => {
+		const call = { id: 'c1', name: 'read_note', argumentsJson: '{"path":"A.md"}' };
+		await collect(
+			provider().chat({
+				model: 'fake-think',
+				messages: [
+					{ role: 'user', content: 'first' },
+					{ role: 'assistant', content: 'old answer', thinking: 'old plan' },
+					{ role: 'user', content: 'second' },
+					{ role: 'assistant', content: '', thinking: 'read A, then answer', toolCalls: [call] },
+					{ role: 'tool', content: 'A body', toolCallId: 'c1', toolName: 'read_note' },
+				],
+				tools,
+			}),
+		);
+		const sent = lastChatBody()['messages'] as Array<Record<string, unknown>>;
+		expect(sent[1]).toEqual({ role: 'assistant', content: 'old answer' });
+		expect(sent[3]).toMatchObject({ role: 'assistant', thinking: 'read A, then answer' });
+		expect(sent[3]?.['tool_calls']).toEqual([{ function: { name: 'read_note', arguments: { path: 'A.md' } } }]);
+	});
+
 	it('warns when the prompt count says Ollama cut the prompt', async () => {
 		const long = 'word '.repeat(6000); // ~7,500 tokens by the estimate, well over a 4096 window
 		const events = await collect(provider({ numCtx: 4096 }).chat({ model: 'fake-truncate', messages: [{ role: 'user', content: long }] }));
@@ -200,6 +221,8 @@ describe('Ollama context accounting', () => {
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) }], undefined)).toBe(104);
 		expect(estimatePromptTokens([{ role: 'user', content: 'x'.repeat(400) + '\n\t   '.repeat(100) }], undefined)).toBe(105);
 		expect(estimatePromptTokens([{ role: 'user', content: '' }], tools)).toBeGreaterThan(4);
+		// Replayed thinking is part of the prompt.
+		expect(estimatePromptTokens([{ role: 'assistant', content: '', thinking: 'x'.repeat(400) }], undefined)).toBe(104);
 		// CJK counts about one token per character; other scripts about two characters per token.
 		expect(estimatePromptTokens([{ role: 'user', content: '秘密'.repeat(200) }], undefined)).toBe(404);
 		expect(estimatePromptTokens([{ role: 'user', content: 'слово'.repeat(80) }], undefined)).toBe(204);

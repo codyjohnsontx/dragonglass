@@ -61,6 +61,7 @@ export class ProposalEngine {
 		if (this.vault.exists(path)) {
 			throw new ProposalError(`A file already exists at ${path}. Use an edit instead.`);
 		}
+		rejectNewPlaceholders('', content);
 		return {
 			id: this.newId(),
 			conversationId,
@@ -86,6 +87,7 @@ export class ProposalEngine {
 		if (before === null) throw new ProposalError(`No note found at ${path}.`);
 		const after = applyOperations(before, ops);
 		if (after === before) throw new ProposalError('The proposed edit makes no changes.');
+		rejectNewPlaceholders(before, after);
 		return {
 			id: this.newId(),
 			conversationId,
@@ -280,6 +282,24 @@ export function applyOperations(before: string, ops: EditOperation[]): string {
 		}
 	}
 	return text;
+}
+
+/**
+ * Bracketed fill-in text such as `[Insert decisions here]` or `[TODO: owner]`,
+ * which a model writes when it proposes an edit before gathering the content.
+ * Wikilinks (`[[Todo list]]`) and Markdown links (`[todo](url)`) do not count.
+ */
+const PLACEHOLDER = /(?<!\[)\[(?:insert|todo|placeholder)\b[^\]\n]*\](?![\]([])/gi;
+
+/** Refuse a proposal that adds placeholder text the note did not already have. */
+export function rejectNewPlaceholders(before: string, after: string): void {
+	const existing = new Set((before.match(PLACEHOLDER) ?? []).map((m) => m.toLowerCase()));
+	const added = (after.match(PLACEHOLDER) ?? []).find((m) => !existing.has(m.toLowerCase()));
+	if (added) {
+		throw new ProposalError(
+			`The proposal contains placeholder text (${truncate(added, 80)}). Search and read the notes that hold this information first, then propose the real content; if it cannot be found, tell the user instead of proposing a placeholder.`,
+		);
+	}
 }
 
 function truncate(s: string, n: number): string {

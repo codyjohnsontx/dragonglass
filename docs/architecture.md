@@ -70,7 +70,12 @@ src/
    (`agent/tools.ts`). Only then does the tool run. Read tools return text.
    Write tools return a `ChangeProposal` and *do not write*.
 5. Tool results are appended as `tool` messages and the loop continues until
-   the model answers without tools or `maxToolIterations` is hit.
+   the model answers without tools. A call repeated with the same arguments in
+   one turn is answered with an error instead of being run again; a third
+   identical call, or reaching `maxToolIterations`, makes the next request
+   tool-free with an instruction to answer from what was gathered. Read tools
+   accept a wikilink name and resolve it by basename, as Obsidian does, and
+   write tools refuse placeholder text such as `[Insert …]`.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
 
@@ -108,7 +113,9 @@ requires its thought signature to be replayed with function calls, reports an
 invalid key as HTTP 400, and can stop with a safety reason and no text, which
 is surfaced as an error. Ollama sends `options.num_ctx` on every request (its
 server default of 4096 silently cuts prompts that do not fit), streams a
-thinking model's reasoning as `thinking` events, and emits a `warning` event
+thinking model's reasoning as `thinking` events and replays it on the
+assistant turns after the last user message so the plan survives tool rounds,
+and emits a `warning` event
 when `prompt_eval_count` says the prompt was cut anyway: a count well under
 the estimate for a prompt that could not have fit, or a count of exactly half
 the window plus two tokens, which is what Ollama's runner leaves after cutting

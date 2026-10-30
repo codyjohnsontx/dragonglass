@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOperations, ProposalEngine, ProposalError } from '../src/vault/proposals';
+import { applyOperations, ProposalEngine, ProposalError, rejectNewPlaceholders } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 
 function engine(vault: MemoryVaultPort) {
@@ -26,6 +26,20 @@ describe('applyOperations', () => {
 	});
 	it('applies operations in order', () => {
 		expect(applyOperations('x', [{ type: 'replace_all', content: 'hello' }, { type: 'append', content: 'world' }])).toBe('hello\nworld');
+	});
+});
+
+describe('rejectNewPlaceholders', () => {
+	it('refuses bracketed fill-in text the note did not already have', () => {
+		for (const text of ['- [Insert decisions here]', '[insert owner]', 'Owner: [TODO]', '[todo: check budget]', '[Placeholder for summary]']) {
+			expect(() => rejectNewPlaceholders('', text)).toThrow(ProposalError);
+		}
+	});
+	it('leaves links, checkboxes, ordinary brackets and existing placeholders alone', () => {
+		for (const text of ['See [[Todo list]] and [[Insert Coin]]', '[todo](https://example.com)', '- [ ] buy milk', '- [x] done', '[Insertion sort] notes', 'TODO: later']) {
+			expect(() => rejectNewPlaceholders('', text)).not.toThrow();
+		}
+		expect(() => rejectNewPlaceholders('Owner: [TODO]\n', 'Owner: [TODO]\nMore text\n')).not.toThrow();
 	});
 });
 
