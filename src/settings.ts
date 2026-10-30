@@ -85,9 +85,9 @@ export const MIN_NUM_CTX = 2048;
 export const DEFAULT_SETTINGS: DragonglassSettings = {
 	activeProvider: 'ollama',
 	ollama: { baseUrl: 'http://127.0.0.1:11434', model: '', numCtx: 16_384, think: true },
-	openai: { apiKeySecretId: '', model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
-	anthropic: { apiKeySecretId: '', model: 'claude-sonnet-4-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 8192 },
-	gemini: { apiKeySecretId: '', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
+	openai: { apiKeySecretId: '', model: 'gpt-6-luna', baseUrl: 'https://api.openai.com/v1' },
+	anthropic: { apiKeySecretId: '', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 8192 },
+	gemini: { apiKeySecretId: '', model: 'gemini-3.8-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
 	custom: { baseUrl: '', model: '', apiKeySecretId: '', auth: 'bearer', authHeader: '', streaming: true, toolCalling: true },
 	includeActiveNote: true,
 	includeSelection: true,

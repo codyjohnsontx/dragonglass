@@ -1,7 +1,10 @@
-import { App, Notice, PluginSettingTab, SettingDefinitionItem } from 'obsidian';
+import { App, Notice, PluginSettingTab, SettingDefinitionItem, SettingDefinitionRender } from 'obsidian';
 import type DragonglassPlugin from '../main';
 import { ProviderId } from '../providers/types';
 import { DragonglassSettings, MIN_NUM_CTX } from '../settings';
+import { ModelSuggest } from './model-suggest';
+
+const CLOUD_MODEL_DESC = 'Pick from the list or type any model id. The list shows the chat models your key can use, or current models until the key works.';
 
 /**
  * Declarative settings tab (Obsidian 1.13+). Keys are dotted paths into the
@@ -58,11 +61,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 							validate: (v) => (/^https?:\/\/\S+$/.test(v.trim()) ? undefined : 'Enter a URL starting with http:// or https://'),
 						},
 					},
-					{
-						name: 'Model',
-						desc: 'A model you have pulled, for example llama3.1 or qwen2.5. Tool calling needs a tool-capable model.',
-						control: { type: 'text', key: 'ollama.model', placeholder: 'llama3.1' },
-					},
+					this.modelSetting('ollama', 'A model you have pulled, for example llama3.1 or qwen2.5. Tool calling needs a tool-capable model.', 'llama3.1'),
 					{
 						name: 'Context window',
 						desc: 'Tokens of prompt plus reply per request (Ollama option num_ctx). Ollama\'s own default of 4096 cannot hold one long note and silently cuts the prompt. Larger windows use more memory. Capped at what the model supports.',
@@ -89,11 +88,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						desc: 'Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes.',
 						control: { type: 'secret', key: 'openai.apiKeySecretId' },
 					},
-					{
-						name: 'Model',
-						desc: 'For example gpt-4o-mini or gpt-4.1.',
-						control: { type: 'text', key: 'openai.model', placeholder: 'gpt-4o-mini' },
-					},
+					this.modelSetting('openai', CLOUD_MODEL_DESC, 'gpt-6-luna'),
 					{
 						name: 'Test OpenAI connection',
 						desc: 'Lists models with your key. Makes one small request to OpenAI.',
@@ -110,11 +105,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						desc: 'Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to Anthropic.',
 						control: { type: 'secret', key: 'anthropic.apiKeySecretId' },
 					},
-					{
-						name: 'Model',
-						desc: 'For example claude-sonnet-4-5 or claude-haiku-4-5. The chat sidebar lists the models your key can use.',
-						control: { type: 'text', key: 'anthropic.model', placeholder: 'claude-sonnet-4-5' },
-					},
+					this.modelSetting('anthropic', CLOUD_MODEL_DESC, 'claude-sonnet-5-5'),
 					{
 						name: 'Max output tokens',
 						desc: 'Anthropic requires a cap on each reply. Raise it if long answers or note drafts get cut off; it must not exceed what the model allows.',
@@ -136,11 +127,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						desc: 'A Gemini API key from Google AI Studio. Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to Google.',
 						control: { type: 'secret', key: 'gemini.apiKeySecretId' },
 					},
-					{
-						name: 'Model',
-						desc: 'For example gemini-2.5-flash or gemini-2.5-pro. The chat sidebar lists the models your key can use.',
-						control: { type: 'text', key: 'gemini.model', placeholder: 'gemini-2.5-flash' },
-					},
+					this.modelSetting('gemini', CLOUD_MODEL_DESC, 'gemini-3.8-flash'),
 					{
 						name: 'Test Gemini connection',
 						desc: 'Lists models with your key. Makes one small request to Google.',
@@ -196,11 +183,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						desc: 'Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to the base URL above.',
 						control: { type: 'secret', key: 'custom.apiKeySecretId' },
 					},
-					{
-						name: 'Model',
-						desc: 'The model id exactly as the service names it. Once the connection works the chat sidebar lists the models the server reports.',
-						control: { type: 'text', key: 'custom.model', placeholder: 'model-id' },
-					},
+					this.modelSetting('custom', 'The model id exactly as the service names it. Once the connection works the list offers the models the server reports.', 'model-id'),
 					{
 						name: 'Tool calling',
 						desc: 'Lets the model use vault tools. Turn off for servers or models that reject tool definitions or answer with broken tool calls. When a server refuses tools the plugin also retries once without them.',
@@ -295,6 +278,24 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				],
 			},
 		];
+	}
+
+	/** A free-text model id field that suggests the provider's models, or current ones before a key works. */
+	private modelSetting(id: ProviderId, desc: string, placeholder: string): SettingDefinitionRender {
+		return {
+			name: 'Model',
+			desc,
+			render: (setting) => {
+				setting.addText((text) => {
+					const save = async (value: string) => {
+						this.plugin.settings[id].model = value;
+						await this.plugin.saveSettings();
+					};
+					text.setPlaceholder(placeholder).setValue(this.plugin.settings[id].model).onChange(save);
+					new ModelSuggest(this.app, text.inputEl, () => this.plugin.core.modelChoices(id), (value) => void save(value));
+				});
+			},
+		};
 	}
 
 	private async test(id: ProviderId): Promise<void> {

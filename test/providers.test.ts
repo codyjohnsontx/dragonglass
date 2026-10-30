@@ -299,7 +299,7 @@ describe.each([
 	const provider = (key: string | null = 'sk-fake') =>
 		new OpenAIProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/v1`, apiKey: () => key }));
 
-	it('lists models with the bearer key', async () => {
+	it('lists only chat models with the bearer key', async () => {
 		expect((await provider().listModels()).map((m) => m.id)).toEqual(['fake-gpt', 'fake-plain']);
 		expect(fake.requests.at(-1)!.headers['authorization']).toBe('Bearer sk-fake');
 	});
@@ -609,7 +609,7 @@ describe.each([
 	const provider = (key: string | null = 'gemini-fake') =>
 		new GeminiProvider(makeClient(), () => ({ baseUrl: `${fake.baseUrl}/gemini/v1beta`, apiKey: () => key }));
 
-	it('lists only generateContent models, with the key in a header', async () => {
+	it('lists only generateContent chat models, with the key in a header', async () => {
 		expect(await provider().listModels()).toEqual([{ id: 'fake-gemini', label: 'Fake Gemini', contextWindow: 1048576 }]);
 		const req = fake.requests.at(-1)!;
 		expect(req.headers['x-goog-api-key']).toBe('gemini-fake');

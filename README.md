@@ -102,17 +102,22 @@ Two settings matter for local models:
 
 ### OpenAI
 
+For the three cloud providers, the **Model** field and the sidebar's model menu
+list the chat models your key can use. Until the key works they offer a short
+list of each provider's current models instead.
+
 1. In **API key**, create a new keychain secret and paste your key. The key is
    stored by Obsidian's secret storage (backed by the OS keychain on desktop),
    never in plugin files or notes.
-2. Enter a model such as `gpt-4o-mini` and select **Test OpenAI connection**.
+2. Pick a model from the **Model** field's list (or type any model id) and
+   select **Test OpenAI connection**.
 
 ### Anthropic
 
 1. In the **Anthropic** group, create a keychain secret holding your Anthropic
    API key (from the Anthropic Console). It is sent only to Anthropic.
-2. Enter a model such as `claude-sonnet-4-5`, or pick one from the model menu
-   in the sidebar once the key works, and select **Test Anthropic connection**.
+2. Pick a model from the **Model** field's list (or type any model id) and
+   select **Test Anthropic connection**.
 3. **Max output tokens** caps each reply (Anthropic requires a cap). Raise it
    if long answers or drafted notes are cut off.
 
@@ -126,8 +131,8 @@ from your machine to Anthropic.
 1. In the **Google Gemini** group, create a keychain secret holding a Gemini
    API key from Google AI Studio. It is sent only to Google, in a request
    header rather than the URL.
-2. Enter a model such as `gemini-2.5-flash`, or pick one from the sidebar model
-   menu, and select **Test Gemini connection**.
+2. Pick a model from the **Model** field's list (or type any model id) and
+   select **Test Gemini connection**.
 
 ### OpenAI-compatible endpoint
 

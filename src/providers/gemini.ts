@@ -19,6 +19,7 @@ import {
 	Usage,
 } from './types';
 import { HttpClient, joinUrl, parseSse } from './http';
+import { isGeminiChatModel } from './model-choices';
 
 export interface GeminiConfig {
 	baseUrl: string;
@@ -84,8 +85,10 @@ export class GeminiProvider implements Provider {
 		const parsed = safeJson(res.text) as { models?: GeminiModel[] } | null;
 		return (parsed?.models ?? [])
 			.filter((m) => typeof m.name === 'string' && (m.supportedGenerationMethods ?? []).includes('generateContent'))
-			.map((m) => {
-				const info: ModelInfo = { id: stripModelsPrefix(m.name as string) };
+			.map((m) => ({ m, id: stripModelsPrefix(m.name as string) }))
+			.filter(({ id }) => isGeminiChatModel(id))
+			.map(({ m, id }) => {
+				const info: ModelInfo = { id };
 				if (m.displayName) info.label = m.displayName;
 				if (typeof m.inputTokenLimit === 'number') info.contextWindow = m.inputTokenLimit;
 				return info;

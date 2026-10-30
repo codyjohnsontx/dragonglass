@@ -3,7 +3,8 @@ import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
 import { Conversation, StoredMessage, TurnUsage, usageByTurn } from '../persistence/conversation';
-import { ModelInfo, PROVIDER_IDS, ProviderErrorKind, ProviderId, ToolCall, toProviderError } from '../providers/types';
+import { ModelMenu, withConfiguredModel } from '../providers/model-choices';
+import { PROVIDER_IDS, ProviderErrorKind, ProviderId, ToolCall } from '../providers/types';
 import { ActiveContext } from '../vault/port';
 import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
@@ -30,7 +31,9 @@ export class ChatView extends ItemView {
 	 * unless the user asks; a new selection is included as the setting says.
 	 */
 	private sentSelection: { path: string | null; text: string } | null = null;
-	private models: ModelInfo[] = [];
+	private readonly modelMenu: ModelMenu;
+	/** Bumped per connection check so a check for a provider switched away from cannot set the light. */
+	private statusSeq = 0;
 
 	private headerEl!: HTMLElement;
 	private messagesEl!: HTMLElement;
@@ -68,6 +71,7 @@ export class ChatView extends ItemView {
 		this.includeActive = core.getSettings().includeActiveNote;
 		this.includeSelection = core.getSettings().includeSelection;
 		this.navigation = false;
+		this.modelMenu = new ModelMenu((id) => core.modelChoices(id));
 	}
 
 	getViewType(): string {
@@ -138,10 +142,9 @@ export class ChatView extends ItemView {
 		providerSelect.addEventListener('change', () => void this.switchProvider(providerSelect.value as ProviderId));
 		const modelSelect = modelRow.createEl('select', { cls: 'dropdown dg-model-select' });
 		const current = this.core.activeModel();
-		const ids = new Set(this.models.map((m) => m.id));
-		if (current && !ids.has(current)) modelSelect.createEl('option', { text: current, value: current });
-		if (!current && this.models.length === 0) modelSelect.createEl('option', { text: 'No model selected', value: '' });
-		for (const m of this.models) modelSelect.createEl('option', { text: m.label ?? m.id, value: m.id });
+		const models = withConfiguredModel(this.modelMenu.models(settings.activeProvider), current);
+		if (models.length === 0) modelSelect.createEl('option', { text: 'No model selected', value: '' });
+		for (const m of models) modelSelect.createEl('option', { text: m.label ?? m.id, value: m.id });
 		modelSelect.value = current;
 		modelSelect.addEventListener('change', () => void this.core.setActiveModel(modelSelect.value));
 		this.iconButton(modelRow, 'refresh-cw', 'Refresh model list', () => void this.refreshModels());
@@ -151,9 +154,8 @@ export class ChatView extends ItemView {
 
 	private async switchProvider(id: ProviderId): Promise<void> {
 		await this.core.setActiveProvider(id);
-		this.models = [];
 		await this.renderHeader();
-		void this.refreshStatus();
+		void this.refreshStatus(true, undefined, true);
 		this.renderContextBar();
 	}
 
@@ -166,20 +168,25 @@ export class ChatView extends ItemView {
 
 	/**
 	 * Re-check the connection and show the result in the header light. Loads
-	 * the model list when it is empty and the server answers, including when
-	 * the configured model is missing, so the menu offers the ones it has.
-	 * With `quiet` false a failure is also raised as a Notice.
+	 * the model menu with `reloadModels`, when the check fails, or when the
+	 * menu does not hold the provider's own list yet. The menu falls back to
+	 * the provider's suggested models when it cannot list its own, such as
+	 * before a key is entered. With `quiet` false a failure is also raised as
+	 * a Notice.
 	 */
-	private async refreshStatus(quiet = true, signal?: AbortSignal): Promise<void> {
+	private async refreshStatus(quiet = true, signal?: AbortSignal, reloadModels = false): Promise<void> {
+		const seq = ++this.statusSeq;
 		const prior = this.lastStatus;
 		this.setStatus('checking', 'Checking connection…');
-		const status = await this.core.checkConnection(undefined, signal);
+		const provider = this.core.getSettings().activeProvider;
+		const status = await this.core.checkConnection(provider, signal);
+		if (seq !== this.statusSeq) return;
 		if (signal?.aborted) {
 			if (prior) this.setStatus(prior.state, prior.title);
 			return;
 		}
-		const reachable = status.ok || status.error.kind === 'model_not_found';
-		if (reachable && this.models.length === 0) await this.loadModels(quiet);
+		if (reloadModels || !status.ok || !this.modelMenu.hasLiveList(provider)) await this.loadModels(provider);
+		if (seq !== this.statusSeq) return;
 		if (status.ok) {
 			this.setStatus('ok', status.detail);
 		} else {
@@ -188,10 +195,9 @@ export class ChatView extends ItemView {
 		}
 	}
 
-	/** The refresh button: forget the cached list and check again, reporting failure as a Notice. */
+	/** The refresh button: check again and reload the list, reporting failure as a Notice. */
 	private async refreshModels(): Promise<void> {
-		this.models = [];
-		await this.refreshStatus(false);
+		await this.refreshStatus(false, undefined, true);
 	}
 
 	private setStatus(state: 'ok' | 'error' | 'checking', title: string): void {
@@ -204,14 +210,12 @@ export class ChatView extends ItemView {
 		setIcon(this.statusEl, state === 'ok' ? 'circle-check' : state === 'error' ? 'circle-alert' : 'loader');
 	}
 
-	private async loadModels(quiet: boolean): Promise<void> {
-		try {
-			this.models = await this.core.listModels();
-			if (!this.core.activeModel() && this.models[0]) await this.core.setActiveModel(this.models[0].id);
-			await this.renderHeader();
-		} catch (e) {
-			if (!quiet) new Notice(toProviderError(e).userMessage(), 8000);
-		}
+	private async loadModels(provider: ProviderId): Promise<void> {
+		const choices = await this.modelMenu.refresh(provider);
+		// Superseded by a newer load, or the user switched providers meanwhile.
+		if (!choices || this.core.getSettings().activeProvider !== provider) return;
+		if (!this.core.activeModel() && choices.models[0]) await this.core.setActiveModel(choices.models[0].id);
+		await this.renderHeader();
 	}
 
 	// ---------------------------------------------------------- conversation

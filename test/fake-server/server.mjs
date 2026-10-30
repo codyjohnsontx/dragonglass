@@ -100,7 +100,9 @@ async function route(req, res, body) {
 			return json(res, 401, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } });
 		}
 		if (req.method === 'GET' && path === '/v1/models') {
-			return json(res, 200, { object: 'list', data: [{ id: 'fake-gpt', object: 'model' }, { id: 'fake-plain', object: 'model' }] });
+			// The non-chat ids mirror what the real /v1/models lists next to chat models.
+			const ids = ['fake-gpt', 'fake-plain', 'text-embedding-3-small', 'whisper-1', 'tts-1', 'gpt-image-1', 'omni-moderation-latest', 'gpt-realtime'];
+			return json(res, 200, { object: 'list', data: ids.map((id) => ({ id, object: 'model' })) });
 		}
 		if (req.method === 'POST' && path === '/v1/chat/completions') return openaiChat(res, body ?? {});
 	}
@@ -154,6 +156,7 @@ async function route(req, res, body) {
 				models: [
 					{ name: 'models/fake-gemini', displayName: 'Fake Gemini', inputTokenLimit: 1048576, outputTokenLimit: 65536, supportedGenerationMethods: ['generateContent', 'countTokens'] },
 					{ name: 'models/fake-embedding', displayName: 'Fake Embedding', supportedGenerationMethods: ['embedContent'] },
+					{ name: 'models/fake-gemini-tts', displayName: 'Fake Gemini TTS', supportedGenerationMethods: ['generateContent'] },
 				],
 			});
 		}
