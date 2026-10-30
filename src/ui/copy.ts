@@ -22,8 +22,3 @@ export async function copyToClipboard(text: string, clipboard: ClipboardWriter |
 		return false;
 	}
 }
-
-/** Text for the shared live region that announces a copy attempt to screen readers. */
-export function copyStatusMessage(ok: boolean): string {
-	return ok ? 'Copied to clipboard.' : 'Could not copy to clipboard.';
-}

@@ -9,7 +9,7 @@ import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
-import { copyStatusMessage, copyToClipboard } from './copy';
+import { copyToClipboard } from './copy';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -39,7 +39,7 @@ export class ChatView extends ItemView {
 	private inputEl!: HTMLTextAreaElement;
 	private sendBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
-	/** Shared visually-hidden live region announcing copy success/failure to screen readers. */
+	/** Shared visually-hidden live region announcing a successful copy to screen readers. */
 	private copyStatusEl!: HTMLElement;
 	private liveEl: HTMLElement | null = null;
 	private liveText = '';
@@ -370,9 +370,9 @@ export class ChatView extends ItemView {
 		let revert: number | null = null;
 		btn.addEventListener('click', () => {
 			void copyToClipboard(text, activeWindow.navigator.clipboard).then((ok) => {
-				this.copyStatusEl.empty();
-				window.setTimeout(() => this.copyStatusEl.setText(copyStatusMessage(ok)), 100);
 				if (!ok) return;
+				this.copyStatusEl.empty();
+				window.setTimeout(() => this.copyStatusEl.setText('Copied to clipboard.'), 100);
 				btn.addClass('is-copied');
 				show('check', 'Copied');
 				if (revert !== null) window.clearTimeout(revert);
