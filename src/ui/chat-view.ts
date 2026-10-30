@@ -39,6 +39,8 @@ export class ChatView extends ItemView {
 	private inputEl!: HTMLTextAreaElement;
 	private sendBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
+	/** Shared visually-hidden live region announcing a successful copy to screen readers. */
+	private copyStatusEl!: HTMLElement;
 	private liveEl: HTMLElement | null = null;
 	private liveText = '';
 	/** Live-turn feedback: a status line until the first answer token, and the thinking block. */
@@ -86,6 +88,7 @@ export class ChatView extends ItemView {
 		root.addClass('dragonglass-view');
 		this.headerEl = root.createDiv({ cls: 'dg-header' });
 		this.messagesEl = root.createDiv({ cls: 'dg-messages' });
+		this.copyStatusEl = root.createDiv({ cls: 'dg-copy-status', attr: { role: 'status', 'aria-live': 'polite' } });
 		this.contextBarEl = root.createDiv({ cls: 'dg-context-bar' });
 		this.composerEl = root.createDiv({ cls: 'dg-composer' });
 		this.buildComposer();
@@ -368,6 +371,8 @@ export class ChatView extends ItemView {
 		btn.addEventListener('click', () => {
 			void copyToClipboard(text, activeWindow.navigator.clipboard).then((ok) => {
 				if (!ok) return;
+				this.copyStatusEl.empty();
+				window.setTimeout(() => this.copyStatusEl.setText('Copied to clipboard.'), 100);
 				btn.addClass('is-copied');
 				show('check', 'Copied');
 				if (revert !== null) window.clearTimeout(revert);
