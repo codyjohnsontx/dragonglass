@@ -18,9 +18,11 @@ import { OPENAI_RESPONSES_ONLY_TOOLS } from './model-choices';
 
 /**
  * OpenAI models that take tool calls over Chat Completions only with
- * `reasoning_effort: "none"` (https://developers.openai.com/api/docs/models/gpt-6-luna).
+ * `reasoning_effort: "none"` (https://developers.openai.com/api/docs/models/gpt-6-luna,
+ * https://developers.openai.com/api/docs/models/gpt-6-sol). Distinct from the
+ * Responses-only gpt-6.1-sol; see OPENAI_RESPONSES_ONLY_TOOLS.
  */
-const TOOLS_NEED_NO_REASONING = /^gpt-6-luna(?:-|$)/;
+const TOOLS_NEED_NO_REASONING = /^gpt-6-(?:luna|sol)(?:-|$)/;
 
 /**
  * OpenAI's 400 for tools sent over Chat Completions to a model that takes them
