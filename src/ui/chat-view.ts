@@ -9,7 +9,7 @@ import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
-import { copyToClipboard, messageClipboardText } from './copy';
+import { copyToClipboard } from './copy';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -305,7 +305,7 @@ export class ChatView extends ItemView {
 			if (m.content) {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
 				void MarkdownRenderer.render(this.app, m.content, body, '', this);
-				this.addCopyButton(wrap, messageClipboardText(m));
+				this.addCopyButton(wrap, m.content);
 			}
 			// A call whose result never arrived (the run died first) has no result row to live on.
 			const unanswered = (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
