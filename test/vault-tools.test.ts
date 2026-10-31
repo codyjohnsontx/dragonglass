@@ -211,29 +211,39 @@ describe('vault tools', () => {
 			expect(search.parameters.properties!['limit']!.description).toBe('Max results (default 20). Fewer than 10 counts as 10.');
 		});
 
-		it('lists the notes linked from a result the query names when that note lacks the other words', async () => {
+		it('lists the notes linked from a result the query names when that note lacks the other words, and reads them in full right after it', async () => {
 			const vault = new MemoryVaultPort({
 				'People/Marcus Nakamura A..md': '# Marcus Nakamura A.\n\n## Projects\n\n- [[Violet Canvas]]\n- [[Lantern Vector]]\n- [[Echo Current]]\n',
-				'Projects/Violet Canvas.md': '---\nowner: "[[Marcus Nakamura A.]]"\n---\n# Violet Canvas\n\nChalk up before the crux on the project route.\n\nLaunch date: May 3, 2026.\n',
+				'Projects/Violet Canvas.md': '---\nowner: "[[Marcus Nakamura A.]]"\n---\n# Violet Canvas\n\n## Overview\n\nChalk up before the crux on the project route.\n\nLaunch date: May 3, 2026.\n',
 				'Projects/Lantern Vector.md': '# Lantern Vector\n\nQuantization to four bits halves latency.\n',
-				'Projects/Echo Current.md': `# Echo Current\n\n${'Compost turned every two weeks. '.repeat(8)}The cucumbers start climbing the trellis.\n`,
+				'Projects/Echo Current.md': `# Echo Current\n\n${'Compost turned every two weeks. '.repeat(20)}The cucumbers start climbing the trellis.\n`,
+				'Areas/Climbing.md': '# Climbing\n\nA climbing project list for Marcus and Nakamura fans.\n',
 			});
 			const registry = new ToolRegistry();
-			for (const t of vaultTools(vault)) registry.register(t);
+			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 4000 })) registry.register(t);
 			const search = registry.get('search_notes')!;
 			const r = await search.execute({ query: 'Marcus Nakamura climbing project' }, ctx);
-			const linked = r.content.slice(r.content.indexOf('\n\nMarcus Nakamura A. (People/Marcus Nakamura A..md) does not mention')).split('\n');
-			expect(linked.slice(2, 6)).toEqual([
+			const [list, fullText] = r.content.split('\n\nFull text of ');
+			const linked = list!.slice(list!.indexOf('Marcus Nakamura A. (People/Marcus Nakamura A..md) does not mention')).split('\n');
+			expect(linked.slice(0, 5)).toEqual([
 				'Marcus Nakamura A. (People/Marcus Nakamura A..md) does not mention climbing. The notes it links to:',
 				'Violet Canvas (Projects/Violet Canvas.md)',
-				'  # Violet Canvas Chalk up before the crux on the project route. Launch date: May 3, 2026.',
+				'  Chalk up before the crux on the project route. Launch date: May 3, 2026.',
 				'Lantern Vector (Projects/Lantern Vector.md)',
+				'  Quantization to four bits halves latency.',
 			]);
 			// A linked note that has the missing word shows the passage around it.
-			expect(linked[8]).toContain('cucumbers start climbing');
-			expect(linked[8]).not.toContain('# Echo Current');
+			expect(linked[6]).toContain('cucumbers start climbing');
+			expect(linked[6]).toMatch(/^  …/);
 
-			// The named note has every word, or the query names no result: no list.
+			// Full text: the named note, then the notes it links to, then the other results by rank.
+			const order = [...fullText!.matchAll(/<<<note path="([^"]+)">>>/g)].map((m) => m[1]);
+			const hubAt = order.indexOf('People/Marcus Nakamura A..md');
+			expect(order.slice(hubAt, hubAt + 4)).toEqual(['People/Marcus Nakamura A..md', 'Projects/Violet Canvas.md', 'Projects/Lantern Vector.md', 'Projects/Echo Current.md']);
+			expect(order).toContain('Areas/Climbing.md');
+			expect(new Set(order).size).toBe(order.length);
+
+			// The named note has every word, or the query names no result: no list, and full text in rank order.
 			expect((await search.execute({ query: 'Marcus Nakamura projects' }, ctx)).content).not.toContain('The notes it links to');
 			expect((await search.execute({ query: 'climbing route' }, ctx)).content).not.toContain('The notes it links to');
 		});

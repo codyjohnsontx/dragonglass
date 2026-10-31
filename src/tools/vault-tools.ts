@@ -206,9 +206,10 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 						return formatHit(h, terms.length, excerpt);
 					})
 					.join('\n');
-				const links = await linkedNotesSection(vault, hits, terms);
+				const linked = await linkedFromNamedResult(vault, hits, terms);
+				const links = linked ? linkedSection(linked) : '';
 				const budget = opts.autoReadTokens ?? 0;
-				const fullText = budget > 0 ? autoReadSection(hits, contents, budget, opts.maxReadChars) : '';
+				const fullText = budget > 0 ? autoReadSection(autoReadOrder(hits, contents, linked), budget, opts.maxReadChars) : '';
 				return ok(`${scope}${list}${links ? `\n\n${links}` : ''}${fullText ? `\n\n${fullText}` : ''}`);
 			} catch (e) {
 				return wrapError(e);
@@ -229,34 +230,73 @@ const MIN_SEARCH_RESULTS = 10;
 
 /** Notes listed, with an excerpt each, from a result the query names. */
 const MAX_LINKED = 10;
+/** Characters each side of a linked note's excerpt center: two or three sentences, enough to tell what the note is about. */
+const LINKED_RADIUS = 150;
+const HEADING_LINE = /^#{1,6}\s.*$/gm;
+
+interface ShownNote {
+	name: string;
+	path: string;
+	/** Null when the note cannot be read right now. */
+	content: string | null;
+}
+
+interface LinkedNotes {
+	hub: SearchHit;
+	/** Query terms the hub does not contain. */
+	missing: string[];
+	notes: ShownNote[];
+}
 
 /**
  * The notes linked from the best result whose name the query spells out but
- * whose text lacks the query's other words, each with an excerpt. Asked for
- * "Marcus Nakamura climbing project", search finds the person note, which
- * lists six projects by name only; the climbing one never says "climbing", so
- * the model answered from whatever the search showed instead of following the
- * links. The excerpt is around the missing words when a linked note has them,
- * otherwise its opening, so the model can tell which link to follow.
+ * whose text lacks the query's other words. Asked for "Marcus Nakamura
+ * climbing project", search finds the person note, which lists six projects by
+ * name only; the climbing one never says "climbing", so the model answered
+ * from whatever else the search showed instead of following the links.
  */
-async function linkedNotesSection(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<string> {
+async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<LinkedNotes | null> {
 	const hub = hits.find((h) => {
 		const named = searchTerms(h.name);
 		return named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
 	});
-	if (!hub) return '';
-	const missing = terms.filter((t) => !hub.matched.includes(t));
-	const linked = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path).slice(0, MAX_LINKED);
-	if (linked.length === 0) return '';
+	if (!hub) return null;
+	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path).slice(0, MAX_LINKED);
+	if (paths.length === 0) return null;
+	const notes = await Promise.all(paths.map(async (path) => ({ name: baseName(path), path, content: await vault.readNote(path).catch(() => null) })));
+	return { hub, missing: terms.filter((t) => !hub.matched.includes(t)), notes };
+}
+
+/**
+ * The linked notes with an excerpt each, headings left out: around the missing
+ * words when a note has them, otherwise its opening. A one-line excerpt ("clean
+ * up the chalk before the project route") was not enough for the model to see
+ * a climbing project, so it is two or three sentences.
+ */
+function linkedSection({ hub, missing, notes }: LinkedNotes): string {
 	const finders = missing.map(wordStartFinder);
-	const lines = await Promise.all(
-		linked.map(async (path) => {
-			const content = await vault.readNote(path).catch(() => null);
-			const excerpt = content === null ? '(could not be read just now)' : bestExcerpt(content, finders);
-			return `${baseName(path)} (${path})\n  ${excerpt}`;
-		}),
-	);
+	const lines = notes.map(({ name, path, content }) => {
+		const excerpt = content === null ? '(could not be read just now)' : bestExcerpt(content.replace(HEADING_LINE, ''), finders, LINKED_RADIUS);
+		return `${name} (${path})\n  ${excerpt}`;
+	});
 	return [`${hub.name} (${hub.path}) does not mention ${missing.join(', ')}. The notes it links to:`, ...lines].join('\n');
+}
+
+/**
+ * The order search results get their full text in: by rank, except that the
+ * notes linked from a named result come right after it. Even with the right
+ * project named in the excerpts, the model answered without reading it ("no
+ * launch date is given"), so its text has to be in the result.
+ */
+function autoReadOrder(hits: SearchHit[], contents: Array<string | null | undefined>, linked: LinkedNotes | null): ShownNote[] {
+	const ranked = hits.map((h, i) => ({ name: h.name, path: h.path, content: contents[i] ?? null }));
+	if (!linked) return ranked;
+	const at = hits.indexOf(linked.hub) + 1;
+	const before = ranked.slice(0, at);
+	const seen = new Set(before.map((n) => n.path));
+	const follow = linked.notes.filter((n) => !seen.has(n.path));
+	for (const n of follow) seen.add(n.path);
+	return [...before, ...follow, ...ranked.slice(at).filter((n) => !seen.has(n.path))];
 }
 
 /** Notes named when a folder-restricted search has better matches outside the folder. */
@@ -289,20 +329,20 @@ const NOTE_FRAME_TOKENS = 20;
 const MAX_NOT_SHOWN = 10;
 
 /**
- * The full text of the best results, in rank order, within `budget` tokens,
+ * The full text of the best results, in the order given, within `budget` tokens,
  * so the model has the notes in front of it instead of excerpts. A result
  * that does not fit is cut to what is left if at least half of it fits, and
  * skipped otherwise so a shorter one further down can still be included.
  */
-function autoReadSection(hits: SearchHit[], contents: Array<string | null>, budget: number, maxChars: number): string {
+function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): string {
 	const shown: string[] = [];
 	const notShown: string[] = [];
 	let left = budget;
-	hits.forEach((hit, i) => {
-		const content = contents[i];
+	notes.forEach((hit) => {
+		const content = hit.content;
 		const label = `${hit.name} (${hit.path})`;
 		const cut = `${hit.name} (${hit.path}, cut)`;
-		if (content === null || content === undefined) {
+		if (content === null) {
 			notShown.push(label);
 			return;
 		}

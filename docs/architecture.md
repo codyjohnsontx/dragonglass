@@ -92,7 +92,11 @@ src/
    ranks on the in-memory index (decision 15) and appends the full text of its
    best results within the auto-read budget. A search restricted to a folder
    names better matches outside it, and searches the whole vault when the
-   folder has none.
+   folder has none. It returns at least 10 results whatever `limit` or `mode`
+   the model asks for, and when the query names a result that lacks its other
+   words (a person note, asked about their climbing project), it lists the
+   notes that result links to, each with an excerpt, and auto-reads them right
+   after it.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
 
