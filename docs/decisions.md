@@ -227,3 +227,13 @@ at 500 entries like the recursive one: a folder of 1,910 notes cost one run
 note of the same name in another folder: a guessed `Meetings/X.md` was
 silently read as `Projects/X.md` and answered from; the error now names that
 note and the model decides.
+
+A local model also passes `search_notes` a folder it picked from the vault map
+before seeing anything: in live runs qwen3:8b restricted almost every first
+search to `Projects` or `Meetings`, including for a warranty kept in a daily
+note and for a project whose owner is only reachable through `People/`. Telling
+it in the parameter description to leave the folder out did not change that,
+so the result does the work: a restricted search with no match returns the
+whole vault's results and says so, and one whose matches outside the folder
+rank higher names up to three of them first. The folder still narrows a
+search that is answered inside it.

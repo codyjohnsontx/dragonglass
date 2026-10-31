@@ -1,7 +1,7 @@
 import { AgentTool, ToolResult } from '../agent/tools';
 import { estimateTokens, prefixWithinTokens } from '../providers/types';
 import { bodyStart, searchTerms, WordStartFinder, wordStartFinder } from '../search/tokenize';
-import { SearchHit, VaultSearchIndex } from '../search/vault-index';
+import { SearchHit, SearchMode, VaultSearchIndex } from '../search/vault-index';
 import { VaultPort } from '../vault/port';
 import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
 import { EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
@@ -153,7 +153,7 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 			type: 'object',
 			properties: {
 				query: { type: 'string', description: 'Words to look for. Use several related words rather than narrowing to one.' },
-				folder: { type: 'string', description: 'Restrict to this folder (optional).' },
+				folder: { type: 'string', description: 'Restrict to this folder (optional); if nothing there matches, the whole vault is searched.' },
 				limit: { type: 'integer', description: 'Max results (default 20).', minimum: 1, maximum: 100 },
 				mode: {
 					type: 'string',
@@ -171,7 +171,17 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				const opts = options();
 				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults, 100);
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
-				const hits = await index.search(query, { folder, limit, mode });
+				let hits = await index.search(query, { folder, limit, mode });
+				let scope = '';
+				if (folder !== '' && hits.length === 0) {
+					hits = await index.search(query, { folder: '', limit, mode });
+					if (hits.length > 0) scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
+				} else if (folder !== '') {
+					const elsewhere = await betterElsewhere(index, query, folder, mode, hits[0]!);
+					if (elsewhere.length > 0) {
+						scope = `Searched only ${folder}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
+					}
+				}
 				if (hits.length === 0) return ok(`No notes matched "${query}".`);
 				// A hit that cannot be read right now is still listed, without an excerpt or full text.
 				const contents = await Promise.all(hits.map((h) => vault.readNote(h.path).catch(() => null)));
@@ -185,12 +195,31 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 					.join('\n');
 				const budget = opts.autoReadTokens ?? 0;
 				const fullText = budget > 0 ? autoReadSection(hits, contents, budget, opts.maxReadChars) : '';
-				return ok(fullText ? `${list}\n\n${fullText}` : list);
+				return ok(`${scope}${list}${fullText ? `\n\n${fullText}` : ''}`);
 			} catch (e) {
 				return wrapError(e);
 			}
 		},
 	};
+}
+
+/** Notes named when a folder-restricted search has better matches outside the folder. */
+const MAX_ELSEWHERE = 3;
+
+/**
+ * Notes outside `folder` that rank above the best result inside it, as
+ * "Name (path)". A local model picks the folder from the vault map before it
+ * has seen anything (Projects for a question whose answer is linked from
+ * People), and the restricted search then never shows the note that answers.
+ * A folder with no match at all gets the whole vault's results instead
+ * (Projects for a warranty kept in a daily note).
+ */
+async function betterElsewhere(index: VaultSearchIndex, query: string, folder: string, mode: SearchMode, best: SearchHit): Promise<string[]> {
+	const all = await index.search(query, { folder: '', limit: MAX_ELSEWHERE + 1, mode });
+	return all
+		.filter((h) => !h.path.startsWith(`${folder}/`) && h.score > best.score)
+		.slice(0, MAX_ELSEWHERE)
+		.map((h) => `${h.name} (${h.path})`);
 }
 
 function formatHit(hit: SearchHit, termCount: number, excerpt: string): string {

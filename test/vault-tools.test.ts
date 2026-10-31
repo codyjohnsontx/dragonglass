@@ -123,6 +123,30 @@ describe('vault tools', () => {
 			return { vault, registry };
 		}
 
+		it('names better matches outside a folder the search was restricted to, and searches the whole vault when it has none', async () => {
+			const { registry } = searchSetup();
+			const search = registry.get('search_notes')!;
+			const wrongFolder = await search.execute({ query: 'risks', folder: 'Meetings' }, ctx);
+			const lines = wrongFolder.content.split('\n');
+			expect(lines[0]).toBe(
+				'Searched only Meetings/. Notes elsewhere match better: Risks (Projects/Risks.md). Search again without folder if the results below do not answer the question.',
+			);
+			expect(lines[2]).toBe('Standup (Meetings/Standup.md)');
+
+			// A folder with no match searches the whole vault instead and says so.
+			const nothingThere = await search.execute({ query: 'pancakes', folder: 'Projects/' }, ctx);
+			expect(nothingThere.isError).toBeUndefined();
+			expect(nothingThere.content.split('\n').slice(0, 3)).toEqual([
+				'No notes in Projects/ matched "pancakes"; these results are from the whole vault.',
+				'',
+				'Recipes (Recipes.md)',
+			]);
+
+			// The folder's best result is also the vault's: no note.
+			expect((await search.execute({ query: 'risks', folder: 'Projects' }, ctx)).content).toMatch(/^Risks \(Projects\/Risks\.md\)/);
+			expect((await search.execute({ query: 'zzzz', folder: 'Projects' }, ctx)).content).toBe('No notes matched "zzzz".');
+		});
+
 		it('matches notes with any term', async () => {
 			const { vault } = searchSetup();
 			const hits = await searchVault(vault, 'project meeting', '', 20);
