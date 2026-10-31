@@ -89,7 +89,9 @@ src/
    Obsidian does, but never into a folder other than one the path names, and
    write tools refuse placeholder text such as `[Insert …]`. `search_notes`
    ranks on the in-memory index (decision 15) and appends the full text of its
-   best results within the auto-read budget.
+   best results within the auto-read budget. A search restricted to a folder
+   names better matches outside it, and searches the whole vault when the
+   folder has none.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
 

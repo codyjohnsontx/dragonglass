@@ -9,7 +9,9 @@
  * `--auto-read-tokens 0` runs search with excerpts only. Correct means the
  * final answer contains the planted answer, or every word of it longer than
  * two letters (case, commas and $ ignored);
- * read the printed answers to confirm. Talks only to the given Ollama URL.
+ * read the printed answers to confirm. `--out` also records each round's
+ * thinking, full tool arguments and the head of each tool result, to see why
+ * a question missed. Talks only to the given Ollama URL.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -69,6 +71,7 @@ for (const q of questions) {
 	const tools = new ToolRegistry();
 	for (const tool of createVaultTools(vault, new ProposalEngine(vault), options, index)) tools.register(tool);
 	const calls: string[] = [];
+	const transcript: { thinking?: string; call?: string; result?: string }[] = [];
 	let final = '';
 	let toolRounds = 0;
 	let answerTextSeen = false;
@@ -88,8 +91,10 @@ for (const q of questions) {
 		if (ev.type === 'assistant_end') {
 			if (ev.content) final = ev.content;
 			if (ev.toolCalls.length) toolRounds++;
+			if (ev.thinking) transcript.push({ thinking: ev.thinking });
 		} else if (ev.type === 'tool_result') {
 			calls.push(`${ev.call.name}${ev.result.isError ? '!' : ''} ${ev.call.argumentsJson.slice(0, 120)}`);
+			transcript.push({ call: `${ev.call.name} ${ev.call.argumentsJson}`, result: ev.result.content.slice(0, 1500) });
 			if (q.answers.some((a) => ev.result.content.includes(`<<<note path="${a}">>>`))) answerTextSeen = true;
 		} else if (ev.type === 'error') {
 			error = ev.error.message;
@@ -97,7 +102,7 @@ for (const q of questions) {
 	}
 	const seconds = Math.round((performance.now() - started) / 1000);
 	const correct = q.answer ? judge(final, q.answer) : null;
-	records.push({ id: q.id, kind: q.kind, question: q.question, expected: q.answer, correct, toolRounds, calls, answerTextSeen, seconds, final, error });
+	records.push({ id: q.id, kind: q.kind, question: q.question, expected: q.answer, correct, toolRounds, calls, answerTextSeen, seconds, final, error, transcript });
 	console.log(`${q.id} ${q.kind}: ${correct ? 'correct' : 'WRONG'}, ${toolRounds} tool rounds (${calls.join('; ')}), ${seconds} s, answer note read: ${answerTextSeen ? 'yes' : 'no'}${error ? `, error ${error}` : ''}`);
 	console.log(`   expected ${q.answer}; answered: ${final.replace(/\s+/g, ' ').slice(0, 240)}`);
 }
