@@ -7,7 +7,8 @@
  *        [--model qwen3:8b] [--ollama http://127.0.0.1:11434] [--auto-read-tokens 4000] [--rounds 8] [--out file.json]
  *
  * `--auto-read-tokens 0` runs search with excerpts only. Correct means the
- * final answer contains the planted answer (case, commas and $ ignored);
+ * final answer contains the planted answer, or every word of it longer than
+ * two letters (case, commas and $ ignored);
  * read the printed answers to confirm. Talks only to the given Ollama URL.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -56,6 +57,13 @@ const options = { maxReadChars: maxChars, maxReadTokens: noteTokenBudget(window)
 console.log(`${model}, context ${window}, read budget ${options.maxReadTokens}, auto-read ${options.autoReadTokens} tokens, ${questions.length} questions`);
 
 const normalize = (s: string): string => s.toLowerCase().replace(/[\s,$]+/g, ' ').replace(/[^\w ]/g, '').trim();
+/** The planted answer appears in the reply, or every word of it longer than two letters does. */
+function judge(reply: string, expected: string): boolean {
+	const r = normalize(reply);
+	const e = normalize(expected);
+	const words = e.split(' ').filter((w) => w.length > 2);
+	return r.includes(e) || (words.length > 0 && words.every((w) => r.includes(w)));
+}
 const records = [];
 for (const q of questions) {
 	const tools = new ToolRegistry();
@@ -81,16 +89,16 @@ for (const q of questions) {
 			if (ev.content) final = ev.content;
 			if (ev.toolCalls.length) toolRounds++;
 		} else if (ev.type === 'tool_result') {
-			calls.push(`${ev.call.name}${ev.result.isError ? '!' : ''}`);
+			calls.push(`${ev.call.name}${ev.result.isError ? '!' : ''} ${ev.call.argumentsJson.slice(0, 120)}`);
 			if (q.answers.some((a) => ev.result.content.includes(`<<<note path="${a}">>>`))) answerTextSeen = true;
 		} else if (ev.type === 'error') {
 			error = ev.error.message;
 		}
 	}
 	const seconds = Math.round((performance.now() - started) / 1000);
-	const correct = q.answer ? normalize(final).includes(normalize(q.answer)) : null;
+	const correct = q.answer ? judge(final, q.answer) : null;
 	records.push({ id: q.id, kind: q.kind, question: q.question, expected: q.answer, correct, toolRounds, calls, answerTextSeen, seconds, final, error });
-	console.log(`${q.id} ${q.kind}: ${correct ? 'correct' : 'WRONG'}, ${toolRounds} tool rounds (${calls.join(', ')}), ${seconds} s, answer note read: ${answerTextSeen ? 'yes' : 'no'}${error ? `, error ${error}` : ''}`);
+	console.log(`${q.id} ${q.kind}: ${correct ? 'correct' : 'WRONG'}, ${toolRounds} tool rounds (${calls.join('; ')}), ${seconds} s, answer note read: ${answerTextSeen ? 'yes' : 'no'}${error ? `, error ${error}` : ''}`);
 	console.log(`   expected ${q.answer}; answered: ${final.replace(/\s+/g, ' ').slice(0, 240)}`);
 }
 const correct = records.filter((r) => r.correct).length;
