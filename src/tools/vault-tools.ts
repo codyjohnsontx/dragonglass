@@ -338,10 +338,10 @@ function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): 
 	const shown: string[] = [];
 	const notShown: string[] = [];
 	let left = budget;
-	notes.forEach((hit) => {
-		const content = hit.content;
-		const label = `${hit.name} (${hit.path})`;
-		const cut = `${hit.name} (${hit.path}, cut)`;
+	notes.forEach((note) => {
+		const content = note.content;
+		const label = `${note.name} (${note.path})`;
+		const cut = `${note.name} (${note.path}, cut)`;
 		if (content === null) {
 			notShown.push(label);
 			return;
@@ -349,11 +349,11 @@ function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): 
 		const tokens = estimateTokens(content.slice(0, maxChars));
 		const room = left - NOTE_FRAME_TOKENS;
 		if (tokens <= room) {
-			shown.push(formatNote(hit.path, content, maxChars));
+			shown.push(formatNote(note.path, content, maxChars));
 			left -= tokens + NOTE_FRAME_TOKENS;
 			if (content.length > maxChars) notShown.push(cut);
 		} else if (room > 0 && room >= tokens / 2) {
-			shown.push(formatNote(hit.path, content, maxChars, room));
+			shown.push(formatNote(note.path, content, maxChars, room));
 			left = 0;
 			notShown.push(cut);
 		} else {
