@@ -153,7 +153,7 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 			type: 'object',
 			properties: {
 				query: { type: 'string', description: 'Words to look for. Use several related words rather than narrowing to one.' },
-				folder: { type: 'string', description: 'Restrict to this folder (optional).' },
+				folder: { type: 'string', description: 'Restrict to this folder (optional); if nothing there matches, the whole vault is searched.' },
 				limit: { type: 'integer', description: 'Max results (default 20).', minimum: 1, maximum: 100 },
 				mode: {
 					type: 'string',
