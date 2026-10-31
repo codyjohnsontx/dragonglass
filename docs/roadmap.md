@@ -30,6 +30,9 @@ without redesigning the provider or tool architecture.
   configurable base URL, bearer / custom-header / no authentication, and
   tool-calling and streaming overrides (Moonshot, OpenRouter, Groq, LM Studio,
   vLLM, llama.cpp).
+- **Search index**: in-memory BM25 over note names, headings and content,
+  kept current from vault events, and search results that carry the full
+  text of the best matches within a token budget.
 - **OpenAI Responses API** for models that take tool calls only there
   (GPT-6.1 Sol and Terra), statelessly with `store: false`; other OpenAI
   models and the custom endpoint stay on Chat Completions.
@@ -46,7 +49,8 @@ without redesigning the provider or tool architecture.
    reviewed file operations with schema validation.
 5. **Bases**: read and propose `.base` files once the format is stable.
 6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
-   with an on-disk index; never required.
+   fused with the keyword index, only if a measurement on a real vault shows
+   they help; never required.
 7. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
 8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only

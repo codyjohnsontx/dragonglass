@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from './agent/context';
+import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -10,6 +10,7 @@ import { loadModelChoices, ModelChoices } from './providers/model-choices';
 import { createProviders, modelFor, setModelFor } from './providers/registry';
 import { ConnectionStatus, Provider, ProviderError, ProviderId, Usage } from './providers/types';
 import { DragonglassSettings } from './settings';
+import { VaultSearchIndex } from './search/vault-index';
 import { createVaultTools } from './tools/vault-tools';
 import { ObsidianVaultPort } from './vault/obsidian-port';
 import { ChangeProposal, ProposalEngine } from './vault/proposals';
@@ -30,6 +31,7 @@ export class DragonglassCore {
 	readonly vault: ObsidianVaultPort;
 	readonly store: ConversationStore;
 	readonly proposals: ProposalEngine;
+	readonly searchIndex: VaultSearchIndex;
 	private readonly providers;
 	private readonly fetchClient = new FetchHttpClient();
 	private readonly requestUrlClient: HttpClient;
@@ -42,12 +44,19 @@ export class DragonglassCore {
 		this.vault = new ObsidianVaultPort(app, plugin);
 		this.store = new ConversationStore(this.vault);
 		this.proposals = new ProposalEngine(this.vault);
+		this.searchIndex = new VaultSearchIndex(this.vault);
+		// After layout ready: Obsidian reports every file as created while it loads the vault.
+		app.workspace.onLayoutReady(() => void this.searchIndex.start());
 		this.requestUrlClient = createRequestUrlClient();
 		this.providers = createProviders(
 			() => (this.settings.transport === 'requestUrl' ? this.requestUrlClient : this.fetchClient),
 			() => this.settings,
 			{ getSecret: (id) => app.secretStorage.getSecret(id) },
 		);
+	}
+
+	dispose(): void {
+		this.searchIndex.dispose();
 	}
 
 	updateSettings(settings: DragonglassSettings): void {
@@ -90,11 +99,11 @@ export class DragonglassCore {
 		return this.provider().capabilities.remote;
 	}
 
-	/** Note tokens per prompt for this provider and model; see `noteTokenBudget` in agent/context. */
-	private async noteTokenBudget(provider: Provider, model: string, signal?: AbortSignal): Promise<number | undefined> {
+	/** The model's context window when the provider reports it; note budgets in agent/context derive from it. */
+	private async contextWindow(provider: Provider, model: string, signal?: AbortSignal): Promise<number | undefined> {
 		if (!provider.contextWindow) return undefined;
 		try {
-			return noteTokenBudget(await provider.contextWindow(model, signal));
+			return await provider.contextWindow(model, signal);
 		} catch {
 			return undefined;
 		}
@@ -102,18 +111,19 @@ export class DragonglassCore {
 
 	/**
 	 * The vault tools for one send. Each send gets its own registry so the
-	 * note budget a read tool applies is the one computed for that send's
+	 * note budgets the read tools apply are the ones computed for that send's
 	 * provider and model, even when two sends overlap.
 	 */
-	private createTools(maxReadTokens: number | undefined): ToolRegistry {
+	private createTools(contextWindow: number | undefined): ToolRegistry {
 		const tools = new ToolRegistry();
-		for (const t of createVaultTools(this.vault, this.proposals, () => ({
+		const maxReadTokens = noteTokenBudget(contextWindow);
+		const options = () => ({
 			maxReadChars: this.settings.maxCharsPerNote,
 			maxReadTokens,
 			maxSearchResults: 20,
-		}))) {
-			tools.register(t);
-		}
+			autoReadTokens: autoReadBudget(this.settings.autoReadTokens, contextWindow),
+		});
+		for (const t of createVaultTools(this.vault, this.proposals, options, this.searchIndex)) tools.register(t);
 		return tools;
 	}
 
@@ -143,7 +153,8 @@ export class DragonglassCore {
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
 
-		const noteTokens = await this.noteTokenBudget(provider, model, opts.signal);
+		const contextWindow = await this.contextWindow(provider, model, opts.signal);
+		const noteTokens = noteTokenBudget(contextWindow);
 		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null);
@@ -154,7 +165,7 @@ export class DragonglassCore {
 			model,
 			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map }),
 			messages,
-			tools: this.createTools(noteTokens),
+			tools: this.createTools(contextWindow),
 			toolsEnabled: this.settings.toolsEnabled,
 			conversationId: conv.id,
 			signal: opts.signal,

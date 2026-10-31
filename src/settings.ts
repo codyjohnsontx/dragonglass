@@ -70,6 +70,12 @@ export interface DragonglassSettings {
 	toolsEnabled: boolean;
 	maxToolIterations: number;
 	maxCharsPerNote: number;
+	/**
+	 * Estimated tokens of full note text search_notes includes after its
+	 * results (0 turns it off). Capped at a quarter of the model's context
+	 * window when that is known; see `autoReadBudget`.
+	 */
+	autoReadTokens: number;
 	/** `fetch` streams; `requestUrl` is the no-CORS, no-streaming fallback. */
 	transport: Transport;
 	showUsage: boolean;
@@ -94,6 +100,7 @@ export const DEFAULT_SETTINGS: DragonglassSettings = {
 	toolsEnabled: true,
 	maxToolIterations: 8,
 	maxCharsPerNote: 20_000,
+	autoReadTokens: 4000,
 	transport: 'fetch',
 	showUsage: true,
 	usageWarningTokens: 0,
@@ -137,7 +144,7 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 	for (const key of ['includeActiveNote', 'includeSelection', 'toolsEnabled', 'showUsage'] as const) {
 		if (typeof r[key] === 'boolean') out[key] = r[key];
 	}
-	for (const key of ['maxToolIterations', 'maxCharsPerNote', 'usageWarningTokens'] as const) {
+	for (const key of ['maxToolIterations', 'maxCharsPerNote', 'usageWarningTokens', 'autoReadTokens'] as const) {
 		if (typeof r[key] === 'number' && Number.isFinite(r[key])) out[key] = r[key];
 	}
 	if (r['transport'] === 'fetch' || r['transport'] === 'requestUrl') out.transport = r['transport'];

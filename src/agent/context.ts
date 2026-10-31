@@ -94,6 +94,19 @@ const NOTE_SHARE_OF_CONTEXT = 0.5;
 const MIN_NOTE_TOKENS = 250;
 
 /**
+ * Tokens of full note text one search may append: the user's setting, but
+ * no more than a quarter of the context window when it is known, so a
+ * search or two still leaves room for the conversation. Zero turns it off.
+ */
+export function autoReadBudget(setting: number, contextWindow: number | undefined): number {
+	const wanted = Math.max(0, Math.floor(setting));
+	if (!contextWindow || contextWindow <= 0) return wanted;
+	return Math.min(wanted, Math.floor(contextWindow * AUTO_READ_SHARE_OF_CONTEXT));
+}
+
+const AUTO_READ_SHARE_OF_CONTEXT = 0.25;
+
+/**
  * Split a shared token budget among items of the given estimated sizes. Items
  * that fit in an even share keep their full size and the rest is shared by
  * the larger ones, so one long note beside a short selection still gets

@@ -101,6 +101,8 @@ describe('mergeSettings', () => {
 		expect(merged.maxToolIterations).toBe(DEFAULT_SETTINGS.maxToolIterations);
 		expect(merged.transport).toBe('requestUrl');
 		expect('extra' in merged).toBe(false);
+		expect(mergeSettings({ autoReadTokens: 1500 }).autoReadTokens).toBe(1500);
+		expect(mergeSettings({ autoReadTokens: 'all' }).autoReadTokens).toBe(4000);
 	});
 
 	it('merges the Ollama context window and thinking switch, rejecting windows too small to work', () => {

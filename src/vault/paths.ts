@@ -69,3 +69,11 @@ export function baseName(path: string): string {
 	const name = idx < 0 ? path : path.slice(idx + 1);
 	return name.replace(/\.md$/i, '');
 }
+
+/** Whether `path` lies inside one of `folders` (vault-relative, no trailing slash), at any depth. */
+export function isUnderAny(path: string, folders: ReadonlySet<string>): boolean {
+	for (let i = path.lastIndexOf('/'); i > 0; i = path.lastIndexOf('/', i - 1)) {
+		if (folders.has(path.slice(0, i))) return true;
+	}
+	return false;
+}

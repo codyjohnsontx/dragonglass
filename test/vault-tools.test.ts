@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { ToolRegistry, parseToolArguments } from '../src/agent/tools';
-import { createVaultTools, searchTerms, searchVault } from '../src/tools/vault-tools';
+import { searchFields, searchTerms, weightedMatches, wordStartFinder } from '../src/search/tokenize';
+import { SearchMode, VaultSearchIndex } from '../src/search/vault-index';
+import { createVaultTools, DEFAULT_TOOL_OPTIONS, VaultToolOptions } from '../src/tools/vault-tools';
 import { ProposalEngine } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 
 const ctx = { conversationId: 'c1', signal: new AbortController().signal };
+
+const noYield = () => Promise.resolve();
+
+function searchVault(vault: MemoryVaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any') {
+	return new VaultSearchIndex(vault, noYield).search(query, { folder, limit, mode });
+}
+
+function vaultTools(vault: MemoryVaultPort, options: VaultToolOptions | (() => VaultToolOptions) = DEFAULT_TOOL_OPTIONS) {
+	return createVaultTools(vault, new ProposalEngine(vault), options, new VaultSearchIndex(vault, noYield));
+}
 
 function setup() {
 	const vault = new MemoryVaultPort({
@@ -13,7 +25,7 @@ function setup() {
 		'Journal/2024-01-01.md': 'Nothing about launches here.\n',
 	});
 	const registry = new ToolRegistry();
-	for (const t of createVaultTools(vault, new ProposalEngine(vault))) registry.register(t);
+	for (const t of vaultTools(vault)) registry.register(t);
 	return { vault, registry };
 }
 
@@ -47,16 +59,19 @@ describe('vault tools', () => {
 		}
 		// An existing path is read as given, with no notice.
 		expect((await read.execute({ path: 'Projects/Milestones.md' }, ctx)).content).toMatch(/^<<<note path=/);
-		// A guessed folder falls back to the one note with that basename.
+		// A guessed folder does not resolve into another folder; the error names the note instead.
 		const wrongFolder = await read.execute({ path: 'Notes/milestones.md' }, ctx);
-		expect(wrongFolder.isError).toBeFalsy();
-		expect(wrongFolder.content).toMatch(/^\(Resolved Notes\/milestones\.md to Projects\/Milestones\.md; use the full path next time\.\)\n<<<note path="Projects\/Milestones\.md">>>/);
+		expect(wrongFolder.isError).toBe(true);
+		expect(wrongFolder.content).toBe(
+			'Error: no note at Notes/milestones.md. A note with that name is in another folder: Projects/Milestones.md. Call again with one of these paths only if it is the note you mean.',
+		);
 		vault.seed('Archive/Milestones.md', 'old');
-		for (const path of ['Milestones.md', 'Notes/Milestones.md']) {
-			const several = await read.execute({ path }, ctx);
-			expect(several.isError).toBe(true);
-			expect(several.content).toContain('several notes match that name: Archive/Milestones.md, Projects/Milestones.md');
-		}
+		const several = await read.execute({ path: 'Milestones.md' }, ctx);
+		expect(several.isError).toBe(true);
+		expect(several.content).toContain('several notes match that name: Archive/Milestones.md, Projects/Milestones.md');
+		expect((await read.execute({ path: 'Notes/Milestones.md' }, ctx)).content).toContain(
+			'Notes with that name are in other folders: Archive/Milestones.md, Projects/Milestones.md.',
+		);
 		// A partial path picks between them, as Obsidian links do.
 		expect((await read.execute({ path: 'Archive/Milestones' }, ctx)).content).toContain('<<<note path="Archive/Milestones.md">>>\nold');
 		// Validation still applies to whatever was given.
@@ -67,7 +82,7 @@ describe('vault tools', () => {
 	it('truncates long notes', async () => {
 		const vault = new MemoryVaultPort({ 'Big.md': 'x'.repeat(100) });
 		const registry = new ToolRegistry();
-		for (const t of createVaultTools(vault, new ProposalEngine(vault), { maxReadChars: 10, maxSearchResults: 5 })) registry.register(t);
+		for (const t of vaultTools(vault, { maxReadChars: 10, maxSearchResults: 5 })) registry.register(t);
 		const r = await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx);
 		expect(r.content).toContain('[truncated: showing 10 of 100 characters]');
 	});
@@ -76,7 +91,7 @@ describe('vault tools', () => {
 		const vault = new MemoryVaultPort({ 'Big.md': 'x'.repeat(100) });
 		const registry = new ToolRegistry();
 		let maxReadChars = 100;
-		for (const t of createVaultTools(vault, new ProposalEngine(vault), () => ({ maxReadChars, maxSearchResults: 5 }))) registry.register(t);
+		for (const t of vaultTools(vault, () => ({ maxReadChars, maxSearchResults: 5 }))) registry.register(t);
 		expect((await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx)).content).not.toContain('[truncated');
 		maxReadChars = 10;
 		expect((await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx)).content).toContain('[truncated: showing 10 of 100 characters]');
@@ -104,15 +119,43 @@ describe('vault tools', () => {
 				'Recipes.md': '# Recipes\n\nPancakes and waffles.\n',
 			});
 			const registry = new ToolRegistry();
-			for (const t of createVaultTools(vault, new ProposalEngine(vault))) registry.register(t);
+			for (const t of vaultTools(vault)) registry.register(t);
 			return { vault, registry };
 		}
 
-		it('matches notes with any term and ranks by how many terms they contain', async () => {
+		it('matches notes with any term', async () => {
 			const { vault } = searchSetup();
 			const hits = await searchVault(vault, 'project meeting', '', 20);
-			expect(hits.map((h) => h.path)).toEqual(['Meetings/Planning.md', 'Meetings/Standup.md', 'Projects/Budget.md', 'Projects/Risks.md']);
-			expect(hits[0]!.matched).toEqual(['project', 'meeting']);
+			expect(hits.map((h) => h.path).sort()).toEqual(['Meetings/Planning.md', 'Meetings/Standup.md', 'Projects/Budget.md', 'Projects/Risks.md']);
+			expect(hits.find((h) => h.path === 'Meetings/Planning.md')!.matched).toEqual(['project', 'meeting']);
+		});
+
+		it('ranks rare words over common ones and more of the query over less', async () => {
+			const notes: Record<string, string> = {
+				'Projects/Nimbus Bridge.md': '# Nimbus Bridge\n\nBudget: $46,300 remaining.\n',
+				'Meetings/2024-05-01 Nimbus Bridge sync.md': '# Nimbus Bridge sync\n\nProject status reviewed.\n',
+				'Projects/Other.md': '# Other\n\nProject budget remaining is fine.\n',
+			};
+			for (let i = 0; i < 30; i++) notes[`Notes/Status ${i}.md`] = `Project status update number ${i}.\n`;
+			const vault = new MemoryVaultPort(notes);
+			const hits = await searchVault(vault, 'nimbus bridge project budget remaining', '', 50);
+			expect(hits.slice(0, 3).map((h) => h.path)).toEqual([
+				'Projects/Nimbus Bridge.md',
+				'Meetings/2024-05-01 Nimbus Bridge sync.md',
+				'Projects/Other.md',
+			]);
+			expect(hits).toHaveLength(33);
+		});
+
+		it('ranks a word itself over longer words it starts', async () => {
+			const vault = new MemoryVaultPort({
+				'Video notes.md': 'Video editing tips.',
+				'Nimbus VI.md': 'Sixth of the series.',
+				'Views.md': 'Viewing angles.',
+			});
+			const hits = await searchVault(vault, 'vi', '', 20);
+			expect(hits.map((h) => h.path)[0]).toBe('Nimbus VI.md');
+			expect(hits).toHaveLength(3);
 		});
 
 		it('requires every term in "all" mode', async () => {
@@ -127,10 +170,13 @@ describe('vault tools', () => {
 		it('boosts name and heading matches over body mentions', async () => {
 			const { vault } = searchSetup();
 			const hits = await searchVault(vault, 'risks', '', 20);
-			expect(hits.map((h) => h.path)).toEqual(['Projects/Risks.md', 'Meetings/Planning.md', 'Meetings/Standup.md']);
-			const actions = await searchVault(vault, 'action', '', 20);
-			expect(actions.map((h) => h.path)).toEqual(['Meetings/Planning.md']);
-			expect(actions[0]!.score).toBeGreaterThan(5);
+			expect(hits[0]!.path).toBe('Projects/Risks.md');
+			expect(hits.map((h) => h.path).sort()).toEqual(['Meetings/Planning.md', 'Meetings/Standup.md', 'Projects/Risks.md']);
+			const headings = new MemoryVaultPort({
+				'Body.md': 'Intro.\n\nThe action list is short.\n',
+				'Heading.md': 'Intro.\n\n## Action\nThe list is short.\n',
+			});
+			expect((await searchVault(headings, 'action', '', 20)).map((h) => h.path)).toEqual(['Heading.md', 'Body.md']);
 		});
 
 		it('ignores stopwords unless the query has nothing else', async () => {
@@ -148,7 +194,7 @@ describe('vault tools', () => {
 			});
 			const hits = await searchVault(vault, 'AI risks', '', 20);
 			expect(hits.map((h) => h.path)).toEqual(['AI risks.md', 'Chat.md', 'Plain.md']);
-			expect(hits[1]!.score).toBe(4);
+			expect(hits[1]!.matched).toEqual(['ai']);
 			expect((await searchVault(vault, 'risk', '', 20)).map((h) => h.path)).toEqual(['AI risks.md', 'Plain.md']);
 		});
 
@@ -159,7 +205,7 @@ describe('vault tools', () => {
 			});
 			const hits = await searchVault(vault, 'ai', '', 20);
 			expect(hits.map((h) => h.path)).toEqual(['Starts.md']);
-			expect(hits[0]!.score).toBe(4);
+			expect(weightedMatches(searchFields('Starts', '(ai) and _ai and 🙂ai'), wordStartFinder('ai'))).toBe(3);
 		});
 
 		it('matches terms in scripts without spaces between words anywhere', async () => {
@@ -174,7 +220,9 @@ describe('vault tools', () => {
 			});
 			const hits = await searchVault(vault, '会议', '', 20);
 			expect(hits.map((h) => h.path)).toEqual(['Notes/项目会议.md', 'Journal/今天.md']);
-			expect(hits[1]!.excerpt).toBe('今天的会议记录');
+			const tools = vaultTools(vault);
+			const out = await tools.find((t) => t.name === 'search_notes')!.execute({ query: '会议' }, ctx);
+			expect(out.content).toContain('今天 (Journal/今天.md)\n  今天的会议记录');
 			expect((await searchVault(vault, 'โครงการ', '', 20)).map((h) => h.path)).toEqual(['Thai.md']);
 			expect((await searchVault(vault, 'ai', '', 20)).map((h) => h.path)).toEqual(['工具.md']);
 			expect((await searchVault(vault, 'python', '', 20)).map((h) => h.path)).toEqual(['学习.md']);
@@ -224,6 +272,84 @@ describe('vault tools', () => {
 		});
 	});
 
+	describe('full text of the best results', () => {
+		function autoReadSetup(autoReadTokens: number, maxReadChars = 20_000) {
+			const vault = new MemoryVaultPort({
+				'Projects/Nimbus.md': '# Nimbus\n\nNimbus budget: $46,300 remaining.\n',
+				'Meetings/Nimbus sync.md': `# Nimbus sync\n\n${'Discussed the nimbus timeline at length. '.repeat(40)}`,
+				'Notes/Nimbus idea.md': 'A short nimbus idea.',
+				'Notes/Weather.md': 'Nimbus clouds bring rain.',
+			});
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault, { maxReadChars, maxSearchResults: 20, autoReadTokens })) registry.register(t);
+			return registry.get('search_notes')!;
+		}
+
+		it('appends whole notes in rank order within the budget and names the ones left out', async () => {
+			const search = autoReadSetup(200);
+			expect(search.description).toMatch(/full text of the best matches that fit/);
+			const r = await search.execute({ query: 'nimbus budget' }, ctx);
+			const [list, rest] = r.content.split('\n\nFull text of ');
+			expect(list!.split('\n')[0]).toBe('Nimbus (Projects/Nimbus.md) - matches nimbus, budget');
+			expect(rest).toMatch(/^the 3 best matches that fit:\n\n<<<note path="Projects\/Nimbus\.md">>>\n# Nimbus\n\nNimbus budget: \$46,300 remaining\.\n\n<<<end note>>>/);
+			// The long meeting note does not fit and less than half of it would, so shorter results after it still get in.
+			expect(rest).not.toContain('<<<note path="Meetings/Nimbus sync.md">>>');
+			expect(rest).toContain('<<<note path="Notes/Nimbus idea.md">>>');
+			expect(rest).toContain('<<<note path="Notes/Weather.md">>>');
+			expect(rest).toMatch(/\n\nNot shown in full: Nimbus sync \(Meetings\/Nimbus sync\.md\)\. read_note one of them if the text above does not answer the question\.$/);
+		});
+
+		it('lists a result it cannot read right now without an excerpt or its text', async () => {
+			const vault = new MemoryVaultPort({ 'A.md': 'nimbus alpha', 'B.md': 'nimbus beta' });
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 4000 })) registry.register(t);
+			const search = registry.get('search_notes')!;
+			expect((await search.execute({ query: 'nimbus' }, ctx)).content).toContain('<<<note path="A.md">>>');
+			const readNote = vault.readNote.bind(vault);
+			vault.readNote = (path) => (path === 'A.md' ? Promise.reject(new Error('busy')) : readNote(path));
+			const r = await search.execute({ query: 'nimbus' }, ctx);
+			expect(r.isError).toBeFalsy();
+			expect(r.content).toContain('A (A.md)\n  (could not be read just now)');
+			expect(r.content).toContain('<<<note path="B.md">>>');
+			expect(r.content).not.toContain('<<<note path="A.md">>>');
+			expect(r.content).toContain('Not shown in full: A (A.md).');
+		});
+
+		it('cuts a note that does not fit when at least half of it does', async () => {
+			const r = await autoReadSetup(400).execute({ query: 'timeline' }, ctx);
+			expect(r.content).toContain('Full text of the best match that fit:');
+			expect(r.content).toMatch(/<<<note path="Meetings\/Nimbus sync\.md">>>[\s\S]*\[truncated: showing \d+ of 1655 characters\]\n<<<end note>>>/);
+			expect(r.content).toContain('Not shown in full: Nimbus sync (Meetings/Nimbus sync.md, cut).');
+		});
+
+		it('keeps the per-note character cap', async () => {
+			const r = await autoReadSetup(4000, 100).execute({ query: 'timeline' }, ctx);
+			expect(r.content).toContain('[truncated: showing 100 of 1655 characters]');
+			expect(r.content).toContain('Not shown in full: Nimbus sync (Meetings/Nimbus sync.md, cut).');
+		});
+
+		it('shows excerpts only when the budget is zero or nothing fits', async () => {
+			const off = autoReadSetup(0);
+			expect(off.description).toMatch(/Excerpts are short: read_note a result before relying on its content/);
+			expect((await off.execute({ query: 'nimbus' }, ctx)).content).not.toContain('<<<note');
+			expect((await autoReadSetup(30).execute({ query: 'timeline' }, ctx)).content).not.toContain('<<<note');
+		});
+	});
+
+	it('caps folder listings at 500 entries', async () => {
+		const notes: Record<string, string> = {};
+		for (let i = 0; i < 520; i++) notes[`Big/${String(i).padStart(3, '0')}.md`] = '';
+		const vault = new MemoryVaultPort(notes);
+		const registry = new ToolRegistry();
+		for (const t of vaultTools(vault)) registry.register(t);
+		for (const args of [{ folder: 'Big' }, { folder: 'Big', recursive: true }]) {
+			const lines = (await registry.get('list_files')!.execute(args, ctx)).content.split('\n');
+			expect(lines).toHaveLength(501);
+			expect(lines[499]).toBe('Big/499.md');
+			expect(lines[500]).toBe('… 20 more; use search_notes or a subfolder to narrow down');
+		}
+	});
+
 	it('returns metadata with links and backlinks as wikilink names beside their paths', async () => {
 		const { registry } = setup();
 		const tool = registry.get('get_note_metadata')!;
@@ -241,8 +367,8 @@ describe('vault tools', () => {
 		expect(byName.content).toMatch(/^\(Resolved Milestones\.md to Projects\/Milestones\.md/);
 		expect(JSON.parse(byName.content.slice(byName.content.indexOf('{'))).backlinks).toEqual(['Launch (Projects/Launch.md)']);
 		const wrongFolder = await tool.execute({ path: 'Notes/Milestones.md' }, ctx);
-		expect(wrongFolder.content).toMatch(/^\(Resolved Notes\/Milestones\.md to Projects\/Milestones\.md/);
-		expect(JSON.parse(wrongFolder.content.slice(wrongFolder.content.indexOf('{'))).backlinks).toEqual(['Launch (Projects/Launch.md)']);
+		expect(wrongFolder.isError).toBe(true);
+		expect(wrongFolder.content).toContain('A note with that name is in another folder: Projects/Milestones.md.');
 		expect((await tool.execute({ path: 'Nowhere' }, ctx)).content).toMatch(/no note at Nowhere\.md\. Use list_files or search_notes/);
 	});
 

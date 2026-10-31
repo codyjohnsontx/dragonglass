@@ -219,6 +219,11 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						desc: 'Longer notes are truncated before being sent. For Ollama the cap is also lowered to half the context window when that is smaller.',
 						control: { type: 'number', key: 'maxCharsPerNote', min: 1000, max: 500000, step: 1000 },
 					},
+					{
+						name: 'Note text in search results',
+						desc: 'Search results include the full text of the best matches, up to about this many tokens, so the model can answer without reading each note. Capped at a quarter of the context window when the provider reports it. Set to zero for excerpts only.',
+						control: { type: 'number', key: 'autoReadTokens', min: 0, max: 100000, step: 500 },
+					},
 				],
 			},
 			{

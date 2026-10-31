@@ -101,6 +101,17 @@ Two settings matter for local models:
   answers. Expect 15 to 110 seconds of thinking per turn on an 8B model on a
   laptop.
 
+Search runs on an index the plugin builds in memory when Obsidian starts
+(about a second for 20,000 notes, in the background) and keeps current as
+notes change; nothing is written to disk. Each search hands the model the
+full text of as many of its best matches as fit a token budget, after the
+usual list of excerpts, so a small model answers from the notes instead of from
+short excerpts. **Note text in search results** (under Context) sets that
+budget, 4,000 tokens by default and never more than a quarter of the context
+window when the provider reports one; zero turns it off. A match too long for
+what is left is cut if at least half of it fits and skipped otherwise, and each
+note is also held to **Max characters per note**.
+
 ### OpenAI
 
 For the three cloud providers, the **Model** field and the sidebar's model menu
@@ -278,8 +289,9 @@ a different URL. To verify live:
 - No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
   yet.
 - No semantic search or stemming; search matches any query word at the start
-  of a word in note names and content, ranking notes that contain more of the
-  words first.
+  of a word in note names and content, ranking rarer words and notes that
+  contain more of the words first. A paraphrase that shares no word with the
+  note ("guarantee" for "warranty") is not found.
 - Cost estimates are not shown, only token counts from the provider.
 - Desktop verified only. The code avoids desktop-only APIs but mobile has not
   been exercised.
@@ -322,10 +334,13 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 - No telemetry. No account. No server of ours.
 - The whole vault is never uploaded. What goes to the provider you picked is
   your message, the context you attach (the active note, a selection, attached
-  notes), the content of every note the model reads or searches through its
-  tools, and a short overview of the vault: the note count and the names of
-  the top-level folders. With a cloud provider, all of that leaves your
-  machine.
+  notes), the content of every note the model reads through its tools, the
+  results of its searches (an excerpt per matching note plus the full text of
+  the best matches that fit **Note text in search results**, 4,000 tokens by
+  default), and a short overview of the vault: the note count and the names of
+  the top-level folders. Search itself reads every note locally to build its
+  index; only those results are sent. With a cloud provider, all of that leaves
+  your machine.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content is treated as data: the model is told not to follow

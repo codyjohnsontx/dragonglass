@@ -23,6 +23,7 @@ export default class DragonglassPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.core.dispose();
 		void this.core.store.flush();
 	}
 
