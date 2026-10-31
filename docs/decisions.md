@@ -141,7 +141,8 @@ repeated word cannot bury a note that matches more of the query. Each
 result shows `Name (path)` so the model sees the wikilink form, which words
 matched, and an excerpt of the body (frontmatter skipped) around the passage
 where the most matched words sit together. The old numeric score is not shown:
-it meant nothing to the model. `mode: "all"` keeps strict AND for narrowing.
+it meant nothing to the model. `mode: "all"` ranks notes with every word first
+(it was strict AND until decision 15 backfilled it).
 There is still no stemming or semantic search. Ranking is superseded by 15;
 the matching rules stand.
 
@@ -237,3 +238,14 @@ so the result does the work: a restricted search with no match returns the
 whole vault's results and says so, and one whose matches outside the folder
 rank higher names up to three of them first. The folder still narrows a
 search that is answered inside it.
+
+One question still failed every run: the climbing project a person owns, whose
+note never says "climbing" and is reachable only through the person's note.
+The model asked for one result or for every word and cut the answer off, and
+when it did find the person note it did not follow its links. So a search
+returns at least 10 results whatever `limit` it asks for, `mode: "all"` fills
+up to that with notes that have some of the words, and when the query names a
+result of two or more words that lacks the other query words, the notes it
+links to are listed with an excerpt and read in full right after it. They get
+at most half the auto-read budget so the ranked results keep the rest; a
+one-word name is a topic, not a person, and does not trigger this.
