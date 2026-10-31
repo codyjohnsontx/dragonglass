@@ -245,10 +245,10 @@ describe('vault tools', () => {
 			expect(linked[6]).toContain('cucumbers start climbing');
 			expect(linked[6]).toMatch(/^  …/);
 
-			// Full text: the named note, then the notes it links to that the search did not find, then the results by rank.
+			// Full text: the named note, then the notes it links to, then the other results by rank.
 			const order = [...fullText!.matchAll(/<<<note path="([^"]+)">>>/g)].map((m) => m[1]);
 			const hubAt = order.indexOf('People/Marcus Nakamura A..md');
-			expect(order.slice(hubAt, hubAt + 4)).toEqual(['People/Marcus Nakamura A..md', 'Projects/Lantern Vector.md', 'Projects/Violet Canvas.md', 'Projects/Echo Current.md']);
+			expect(order.slice(hubAt, hubAt + 4)).toEqual(['People/Marcus Nakamura A..md', 'Projects/Violet Canvas.md', 'Projects/Lantern Vector.md', 'Projects/Echo Current.md']);
 			expect(order).toContain('Areas/Climbing.md');
 			expect(new Set(order).size).toBe(order.length);
 			// An embedded attachment is not a note: it is neither listed nor read.
@@ -275,12 +275,12 @@ describe('vault tools', () => {
 				'Asyncio.md': '# Asyncio\n\nEvent loops.\n',
 				'Typing.md': '# Typing\n\nProtocols.\n',
 				'Notes/Backoff.md': '# Backoff\n\nA retry decorator with jitter.\n',
-				'People/Ada Lovelace.md': '# Ada Lovelace\n\n- [[Analytical Notes]]\n- [[Bernoulli Table]]\n- [[Loom Cards]]\n- [[Difference Engine]]\n',
+				'People/Ada Lovelace.md': '# Ada Lovelace\n\n- [[Difference Engine]]\n- [[Analytical Notes]]\n- [[Bernoulli Table]]\n- [[Loom Cards]]\n',
+				'Projects/Difference Engine.md': `# Difference Engine\n\nDifference engines. ${filler(23)}`,
 				'Projects/Analytical Notes.md': `# Analytical Notes\n\n${filler(80)}`,
 				'Projects/Bernoulli Table.md': `# Bernoulli Table\n\n${filler(80)}`,
 				'Projects/Loom Cards.md': `# Loom Cards\n\n${filler(80)}`,
 				'Notes/Engines overview.md': `# Engines overview\n\nThe engines. ${filler(45)}`,
-				'Projects/Difference Engine.md': `# Difference Engine\n\nDifference engines. ${filler(23)}`,
 			});
 			const registry = new ToolRegistry();
 			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 1200 })) registry.register(t);
@@ -291,17 +291,18 @@ describe('vault tools', () => {
 			expect(topic).not.toContain('The notes it links to');
 			expect(topic).not.toContain('<<<note path="Asyncio.md">>>');
 
-			// The linked notes the search did not find take at most half the budget, so the ranked results after them,
-			// including one the named note also links to, are still read in full.
+			// The linked notes come right after the named note, a lower-ranked result among them, and take at most
+			// half the budget, so the ranked result after them is still read in full.
 			const r = (await search.execute({ query: 'Ada Lovelace engines' }, ctx)).content;
 			expect(r).toContain('Ada Lovelace (People/Ada Lovelace.md) does not mention engines. The notes it links to:');
+			expect(r.indexOf('Engines overview (Notes/Engines overview.md)')).toBeLessThan(r.indexOf('Difference Engine (Projects/Difference Engine.md)'));
 			const order = [...r.matchAll(/<<<note path="([^"]+)">>>/g)].map((m) => m[1]);
-			expect(order).toEqual(['People/Ada Lovelace.md', 'Projects/Analytical Notes.md', 'Notes/Engines overview.md', 'Projects/Difference Engine.md']);
-			for (const path of ['Notes/Engines overview.md', 'Projects/Difference Engine.md']) {
-				const note = r.slice(r.indexOf(`<<<note path="${path}">>>`));
-				expect(note.slice(0, note.indexOf('<<<end note>>>'))).not.toContain('[truncated');
-			}
-			expect(r).toContain('Not shown in full: Bernoulli Table (Projects/Bernoulli Table.md); Loom Cards (Projects/Loom Cards.md).');
+			expect(order).toEqual(['People/Ada Lovelace.md', 'Projects/Difference Engine.md', 'Projects/Analytical Notes.md', 'Notes/Engines overview.md']);
+			const overview = r.slice(r.indexOf('<<<note path="Notes/Engines overview.md">>>'));
+			expect(overview.slice(0, overview.indexOf('<<<end note>>>'))).not.toContain('[truncated');
+			expect(r).toContain(
+				'Not shown in full: Analytical Notes (Projects/Analytical Notes.md, cut); Bernoulli Table (Projects/Bernoulli Table.md); Loom Cards (Projects/Loom Cards.md).',
+			);
 		});
 
 		it('boosts name and heading matches over body mentions', async () => {
