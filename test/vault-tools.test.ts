@@ -195,6 +195,12 @@ describe('vault tools', () => {
 			expect(none.slice(0, 2)).toEqual(['No note has every word; these results have some of them.', '']);
 			expect(none.some((l) => l.startsWith('Recipes (Recipes.md)'))).toBe(true);
 			expect((await search.execute({ query: 'zzzz qqqq', mode: 'all' }, ctx)).content).toBe('No notes matched "zzzz qqqq".');
+			// With a folder and no note anywhere having every word, the notes with some of them still come from that folder.
+			const inFolder = (await search.execute({ query: 'project waffles', folder: 'Projects', mode: 'all' }, ctx)).content.split('\n');
+			expect(inFolder.slice(0, 2)).toEqual(['No note has every word; these results have some of them.', '']);
+			const listed = inFolder.filter((l) => / \(.+\.md\)/.test(l));
+			expect(listed.length).toBeGreaterThan(0);
+			expect(listed.every((l) => l.includes('(Projects/'))).toBe(true);
 			expect(() => parseToolArguments(search, '{"query":"x","mode":"some"}')).toThrow(/one of any, all/);
 		});
 
@@ -213,7 +219,10 @@ describe('vault tools', () => {
 
 		it('lists the notes linked from a result the query names when that note lacks the other words, and reads them in full right after it', async () => {
 			const vault = new MemoryVaultPort({
-				'People/Marcus Nakamura A..md': '# Marcus Nakamura A.\n\n## Projects\n\n- [[Violet Canvas]]\n- [[Lantern Vector]]\n- [[Echo Current]]\n',
+				'People/Marcus Nakamura A..md': '# Marcus Nakamura A.\n\n![[marcus.jpg]]\n\n## Projects\n\n- [[Violet Canvas]]\n- [[Lantern Vector]]\n- [[Echo Current]]\n',
+				'People/marcus.jpg': '\u00ff\u00d8\u00ff\u00e0 JFIF binary',
+				'People/Priya Shah B..md': '# Priya Shah B.\n\n## Projects\n\n- [[Granite Loop]]\n',
+				'Projects/Granite Loop.md': '# Granite Loop\n\nHangboard twice a week before the redpoint.\n',
 				'Projects/Violet Canvas.md': '---\nowner: "[[Marcus Nakamura A.]]"\n---\n# Violet Canvas\n\n## Overview\n\nChalk up before the crux on the project route.\n\nLaunch date: May 3, 2026.\n',
 				'Projects/Lantern Vector.md': '# Lantern Vector\n\nQuantization to four bits halves latency.\n',
 				'Projects/Echo Current.md': `# Echo Current\n\n${'Compost turned every two weeks. '.repeat(20)}The cucumbers start climbing the trellis.\n`,
@@ -242,6 +251,13 @@ describe('vault tools', () => {
 			expect(order.slice(hubAt, hubAt + 4)).toEqual(['People/Marcus Nakamura A..md', 'Projects/Violet Canvas.md', 'Projects/Lantern Vector.md', 'Projects/Echo Current.md']);
 			expect(order).toContain('Areas/Climbing.md');
 			expect(new Set(order).size).toBe(order.length);
+			// An embedded attachment is not a note: it is neither listed nor read.
+			expect(r.content).not.toContain('People/marcus.jpg');
+			expect(r.content).not.toContain('JFIF');
+
+			// A one-letter suffix on the name is an initial the query need not repeat.
+			const priya = (await search.execute({ query: 'Priya Shah climbing project' }, ctx)).content;
+			expect(priya).toContain('Priya Shah B. (People/Priya Shah B..md) does not mention climbing. The notes it links to:\nGranite Loop (Projects/Granite Loop.md)\n  Hangboard twice a week before the redpoint.');
 
 			// The named note has every word, or the query names no result: no list, and full text in rank order.
 			expect((await search.execute({ query: 'Marcus Nakamura projects' }, ctx)).content).not.toContain('The notes it links to');

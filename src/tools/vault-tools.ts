@@ -177,8 +177,10 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				let searched = folder;
 				if (folder !== '' && hits.length === 0) {
 					hits = await index.search(query, { folder: '', limit, mode });
-					searched = '';
-					if (hits.length > 0) scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
+					if (hits.length > 0) {
+						searched = '';
+						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
+					}
 				} else if (folder !== '') {
 					const elsewhere = await betterElsewhere(index, query, folder, mode, hits[0]!);
 					if (elsewhere.length > 0) {
@@ -249,19 +251,20 @@ interface LinkedNotes {
 }
 
 /**
- * The notes linked from the best result whose name the query spells out but
- * whose text lacks the query's other words. Asked for "Marcus Nakamura
- * climbing project", search finds the person note, which lists six projects by
- * name only; the climbing one never says "climbing", so the model answered
- * from whatever else the search showed instead of following the links.
+ * The notes linked from the best result whose name the query spells out
+ * (initials aside) but whose text lacks the query's other words. Asked for
+ * "Marcus Nakamura climbing project", search finds the person note, which
+ * lists six projects by name only; the climbing one never says "climbing", so
+ * the model answered from whatever else the search showed instead of
+ * following the links.
  */
 async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<LinkedNotes | null> {
 	const hub = hits.find((h) => {
-		const named = searchTerms(h.name);
-		return named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
+		const named = searchTerms(h.name).filter((t) => [...t].length > 1);
+		return named.length > 0 && named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
 	});
 	if (!hub) return null;
-	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path).slice(0, MAX_LINKED);
+	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path && p.toLowerCase().endsWith('.md')).slice(0, MAX_LINKED);
 	if (paths.length === 0) return null;
 	const notes = await Promise.all(paths.map(async (path) => ({ name: baseName(path), path, content: await vault.readNote(path).catch(() => null) })));
 	return { hub, missing: terms.filter((t) => !hub.matched.includes(t)), notes };
