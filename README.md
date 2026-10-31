@@ -333,8 +333,9 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
   your message, the context you attach (the active note, a selection, attached
   notes), the content of every note the model reads or searches through its
   tools (each search includes the full text of its best matches, up to
-  **Note text in search results**, 4,000 tokens by default), and a short overview of the vault: the note count and the names of
-  the top-level folders. With a cloud provider, all of that leaves your
+  **Note text in search results**, 4,000 tokens by default), and a short
+  overview of the vault: the note count and the names of the top-level
+  folders. With a cloud provider, all of that leaves your
   machine.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
