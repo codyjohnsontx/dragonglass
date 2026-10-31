@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
@@ -11,6 +11,7 @@ import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
+import { isSendKey, sendShortcutLabel } from './composer-keys';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -76,6 +77,18 @@ export class ChatView extends ItemView {
 		this.includeActive = core.getSettings().includeActiveNote;
 		this.includeSelection = core.getSettings().includeSelection;
 		this.navigation = false;
+		// Mod+Enter is Obsidian's "open link in new tab" hotkey, which the app
+		// scope claims before any element listener sees the key. A view scope is
+		// consulted first while this view is focused, so the composer gets it.
+		// The handler catches every key because Scope only passes a key it did
+		// not handle on to the app scope when the matching handler is a
+		// catch-all; a Mod+Enter handler returning nothing would swallow it.
+		this.scope = new Scope(this.app.scope);
+		this.scope.register(null, null, (evt) => {
+			if (evt.target !== this.inputEl || !isSendKey(evt, Platform.isMacOS)) return;
+			void this.submit();
+			return false;
+		});
 	}
 
 	getViewType(): string {
@@ -508,16 +521,13 @@ export class ChatView extends ItemView {
 
 	private buildComposer(): void {
 		const c = this.composerEl;
+		const shortcut = sendShortcutLabel(Platform.isMacOS);
 		this.inputEl = c.createEl('textarea', {
 			cls: 'dg-input',
-			attr: { placeholder: 'Message Dragonglass… (Enter to send, Shift+Enter for newline)', rows: '3' },
+			attr: { placeholder: `Message Dragonglass… (${shortcut} to send)`, rows: '3' },
 		});
-		this.inputEl.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-				e.preventDefault();
-				void this.submit();
-			}
-		});
+		// Enter and Shift+Enter insert a new line as in any textarea; the send
+		// shortcut is registered on the view scope in the constructor.
 		const row = c.createDiv({ cls: 'dg-composer-row' });
 		this.sendBtn = row.createEl('button', { cls: 'mod-cta dg-send', text: 'Send' });
 		this.sendBtn.addEventListener('click', () => void (this.abort ? this.stop() : this.submit()));

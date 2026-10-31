@@ -216,6 +216,8 @@ Open the sidebar with the gem icon in the ribbon or the command
 **Dragonglass AI: Open chat**.
 
 - Ask questions: "What does my Launch note say about the date?"
+- Send a message with **Cmd+Enter** (**Ctrl+Enter** on Windows and Linux).
+  Enter on its own adds a new line, so longer messages can be written out.
 - Copy a reply: select text in the sidebar and copy it as usual, or select
   **Copy** under a reply to put its Markdown on the clipboard.
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
