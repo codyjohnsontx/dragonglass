@@ -527,13 +527,7 @@ export class ChatView extends ItemView {
 		// shortcut is registered on the view scope in the constructor.
 		const row = c.createDiv({ cls: 'dg-composer-row' });
 		this.sendBtn = row.createEl('button', { cls: 'mod-cta dg-send', text: 'Send' });
-		this.setSendButtonTitle(`Send (${shortcut})`);
 		this.sendBtn.addEventListener('click', () => void (this.abort ? this.stop() : this.submit()));
-	}
-
-	private setSendButtonTitle(title: string): void {
-		this.sendBtn.setAttribute('title', title);
-		this.sendBtn.setAttribute('aria-label', title);
 	}
 
 	private stop(): void {
@@ -551,7 +545,6 @@ export class ChatView extends ItemView {
 		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
 		this.abort = new AbortController();
 		this.sendBtn.setText('Stop');
-		this.setSendButtonTitle('Stop generating');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
 		// The header light reflects the last check; a send is the moment it matters,
@@ -570,7 +563,6 @@ export class ChatView extends ItemView {
 			this.liveEl = null;
 			this.endLiveTurn();
 			this.sendBtn.setText('Send');
-			this.setSendButtonTitle(`Send (${sendShortcutLabel(Platform.isMacOS)})`);
 			this.sendBtn.addClass('mod-cta');
 			this.sendBtn.removeClass('mod-warning');
 			if (this.conv === conv) this.renderMessages();
