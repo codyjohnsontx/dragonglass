@@ -247,6 +247,23 @@ describe('VaultSearchIndex', () => {
 		expect((await index.stats()).notes).toBe(2001);
 	});
 
+	it('keeps a note searchable when reading it fails, and retries at the next search', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'alpha', 'B.md': 'beta' });
+		const index = new VaultSearchIndex(vault, noYield);
+		await index.start();
+		const readNote = vault.readNote.bind(vault);
+		let failures = 2;
+		vault.readNote = (path) => (path === 'A.md' && failures-- > 0 ? Promise.reject(new Error('busy')) : readNote(path));
+		await vault.processNote('A.md', () => 'gamma');
+		// The failed read leaves the indexed note in place instead of dropping it, and does not spin.
+		expect(await paths(index, 'alpha')).toEqual(['A.md']);
+		expect(await paths(index, 'gamma')).toEqual([]);
+		// Retried at each later search until the read works.
+		expect(await paths(index, 'gamma')).toEqual(['A.md']);
+		expect(await paths(index, 'alpha')).toEqual([]);
+		expect(failures).toBe(-1);
+	});
+
 	it('stops following the vault once disposed', async () => {
 		const vault = new MemoryVaultPort({ 'A.md': 'alpha' });
 		const index = new VaultSearchIndex(vault, noYield);

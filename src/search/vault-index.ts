@@ -39,6 +39,8 @@ const SLICE_MS = 10;
 export class VaultSearchIndex {
 	private readonly index = new Bm25Index();
 	private readonly pending = new Set<string>();
+	/** Notes whose read failed; tried again at the next search, keeping what was indexed meanwhile. */
+	private readonly retry = new Set<string>();
 	private built: Promise<void> | null = null;
 	private queue: Promise<unknown> = Promise.resolve();
 	private unsubscribe: (() => void) | null = null;
@@ -120,6 +122,8 @@ export class VaultSearchIndex {
 	 * it re-indexes each note once and drops the old paths in one pass.
 	 */
 	private async catchUp(): Promise<void> {
+		for (const path of this.retry) this.pending.add(path);
+		this.retry.clear();
 		const slice = new Slicer(this.yieldToUi);
 		while (this.pending.size > 0 && !this.disposed) {
 			const paths = [...this.pending];
@@ -156,8 +160,10 @@ export class VaultSearchIndex {
 		try {
 			content = await this.vault.readNote(path);
 		} catch {
-			content = null;
+			this.retry.add(path);
+			return;
 		}
+		this.retry.delete(path);
 		if (content === null) {
 			if (this.index.has(path)) this.index.remove(path);
 		} else {
