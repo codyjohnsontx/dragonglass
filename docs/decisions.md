@@ -140,4 +140,56 @@ result shows `Name (path)` so the model sees the wikilink form, which words
 matched, and an excerpt of the body (frontmatter skipped) around the passage
 where the most matched words sit together. The old numeric score is not shown:
 it meant nothing to the model. `mode: "all"` keeps strict AND for narrowing.
-There is still no stemming or semantic search; that would need an index.
+There is still no stemming or semantic search. Ranking is superseded by 15;
+the matching rules stand.
+
+## 15. Search index in memory, with note text in results
+
+Every `search_notes` call used to lowercase and scan every note on the UI
+thread: about 205 ms per call at 20,000 notes inside Obsidian, linear in vault
+size, and its ranking counted "project" the same as "Nimbus", so at that size
+the answer note came first for under half of the questions in a generated
+benchmark (`scripts/retrieval-lab/`). Search now runs on a BM25 index
+(`src/search/`) built from the vault's cached note text when the layout is
+ready, in slices that yield to the UI (0.8 s in Node for 20,000 notes), and
+kept current from vault create, modify, delete and rename events, which are
+queued and applied before the next search so a burst of edits costs one
+re-index per note (0.06 ms each). Postings are typed arrays in one block with
+the dictionary sorted, plus a small delta compacted from time to time: about
+10 MB at 20,000 notes. Searches take 2 to 7 ms there.
+
+The matching rules of 14 are kept exactly, so a note matches the same queries
+as before: an index token is a run of letters and digits starting at a word
+start, a query word matches every token it is a prefix of (one sorted range),
+characters of unspaced scripts each start a token with the character after
+them, and a query word with punctuation inside ("2024-10", "c++") or a longer
+unspaced word needs all its tokens and is then checked against each candidate
+note's text. A test compares the index with a word-start scan of every note on
+generated notes. Only ranking changed: BM25 (k1 1.2, b 0.75) over weighted
+counts (a word in the name counts three times, in a heading twice), so rare
+words outweigh common ones and long notes do not win on volume; a word the
+query word only starts ("video" for "vi") counts a quarter, which ranks the
+exact word first without dropping the match. Ranking by the number of matched
+words first scored worse on the benchmark and was dropped.
+
+The index is not persisted. Building takes about as long as loading a saved
+copy would, and a file would add stale-state handling and sync conflicts for
+users who sync their config folder. No dependency: the index is a few hundred
+lines.
+
+A faster, better-ranked search alone did not change how a local model behaves:
+in live runs qwen3:8b still answered from 160-character excerpts or guessed
+paths instead of reading. So `search_notes` appends the full text of its best
+results in rank order, in the `<<<note>>>` delimiters `read_note` uses, within
+a token budget (the **Note text in search results** setting, 4,000 tokens,
+never more than a quarter of the context window), then names the results not
+shown in full. A result that does not fit is cut if at least half of it fits
+and skipped otherwise. With a cloud provider this sends up to that much note
+text per search, about one `read_note`.
+
+Two smaller fixes came from the same runs. `list_files` caps a folder listing
+at 500 entries like the recursive one: a folder of 1,910 notes cost one run
+200 s of prompt processing. A note path with a folder no longer resolves to a
+note of the same name in another folder: a guessed `Meetings/X.md` was
+silently read as `Projects/X.md` and answered from; the error now names that
+note and the model decides.

@@ -1,5 +1,7 @@
 import { AgentTool, ToolResult } from '../agent/tools';
-import { prefixWithinTokens } from '../providers/types';
+import { estimateTokens, prefixWithinTokens } from '../providers/types';
+import { bodyStart, searchTerms, WordStartFinder, wordStartFinder } from '../search/tokenize';
+import { SearchHit, VaultSearchIndex } from '../search/vault-index';
 import { VaultPort } from '../vault/port';
 import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
 import { EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
@@ -17,24 +19,29 @@ export interface VaultToolOptions {
 	maxReadTokens?: number;
 	/** Max search results. */
 	maxSearchResults: number;
+	/** Estimated tokens of full note text search_notes appends after its results; 0 or unset for excerpts only. */
+	autoReadTokens?: number;
 }
 
 export const DEFAULT_TOOL_OPTIONS: VaultToolOptions = { maxReadChars: 24_000, maxSearchResults: 20 };
 
 /**
  * Tools read their options on every call so a settings change, or a provider
- * with a smaller context window, takes effect without re-registering.
+ * with a smaller context window, takes effect without re-registering. Pass
+ * the plugin's long-lived search index; without one, search builds its own
+ * on first use.
  */
 export function createVaultTools(
 	vault: VaultPort,
 	proposals: ProposalEngine,
 	options: VaultToolOptions | (() => VaultToolOptions) = DEFAULT_TOOL_OPTIONS,
+	index: VaultSearchIndex = new VaultSearchIndex(vault),
 ): AgentTool[] {
 	const opts = typeof options === 'function' ? options : () => options;
 	return [
 		listFilesTool(vault),
 		readNoteTool(vault, opts),
-		searchNotesTool(vault, opts),
+		searchNotesTool(vault, index, opts),
 		getNoteMetadataTool(vault),
 		getActiveNoteTool(vault, opts),
 		proposeCreateNoteTool(proposals),
@@ -60,13 +67,13 @@ function listFilesTool(vault: VaultPort): AgentTool {
 	return {
 		name: 'list_files',
 		description:
-			'List notes and folders in the vault. With no folder, lists the top level. Use this to discover what exists before reading or searching.',
+			`List notes and folders in the vault. With no folder, lists the top level. Shows at most ${MAX_LISTED} entries. Use this to discover what exists before reading or searching.`,
 		readOnly: true,
 		parameters: {
 			type: 'object',
 			properties: {
 				folder: { type: 'string', description: 'Folder path relative to the vault root. Omit or "" for the root.' },
-				recursive: { type: 'boolean', description: 'Include everything under the folder (max 500 entries).' },
+				recursive: { type: 'boolean', description: 'Include every note under the folder, not just its direct children.' },
 			},
 		},
 		execute(args) {
@@ -79,19 +86,26 @@ function listFilesTool(vault: VaultPort): AgentTool {
 						.filter((f) => f.path.startsWith(prefix))
 						.map((f) => f.path)
 						.sort();
-					const limited = files.slice(0, 500);
-					const more = files.length > limited.length ? `\n… ${files.length - limited.length} more` : '';
-					return Promise.resolve(ok(limited.length ? `${limited.join('\n')}${more}` : '(no notes)'));
+					return Promise.resolve(ok(files.length ? capListing(files) : '(no notes)'));
 				}
 				const info = vault.listFolder(folder);
 				if (!info) return Promise.resolve(fail(`Error: folder not found: ${folder || '/'}`));
 				const lines = info.children.map((c) => (vault.isFolder(c) ? `${c}/` : c)).sort();
-				return Promise.resolve(ok(lines.length ? lines.join('\n') : '(empty folder)'));
+				return Promise.resolve(ok(lines.length ? capListing(lines) : '(empty folder)'));
 			} catch (e) {
 				return Promise.resolve(wrapError(e));
 			}
 		},
 	};
+}
+
+/** Entries list_files shows; a folder of thousands of notes would otherwise fill the model's context with names. */
+const MAX_LISTED = 500;
+
+function capListing(lines: string[]): string {
+	const shown = lines.slice(0, MAX_LISTED);
+	const more = lines.length > shown.length ? `\n… ${lines.length - shown.length} more; use search_notes or a subfolder to narrow down` : '';
+	return `${shown.join('\n')}${more}`;
 }
 
 function readNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
@@ -125,13 +139,16 @@ function readNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentT
 	};
 }
 
-function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
+function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () => VaultToolOptions): AgentTool {
+	const autoRead = (options().autoReadTokens ?? 0) > 0;
 	return {
 		name: 'search_notes',
 		description:
 			'Search note names, headings and content for words (case-insensitive). A note matches if it contains any of the words; ' +
-			'notes containing more of them come first. Returns each note as "Name (path)" with an excerpt around the best match. ' +
-			'Excerpts are short: read_note a result before relying on its content.',
+			'notes with more of them, and with rarer ones, come first. Returns each note as "Name (path)" with an excerpt around the best match' +
+			(autoRead
+				? ', then the full text of the best matches that fit, so one search usually answers the question. read_note only results whose text is not included.'
+				: '. Excerpts are short: read_note a result before relying on its content.'),
 		readOnly: true,
 		parameters: {
 			type: 'object',
@@ -152,12 +169,17 @@ function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): Age
 				const query = typeof args['query'] === 'string' ? args['query'].trim() : '';
 				if (!query) return fail('Error: query must not be empty.');
 				const folder = validateVaultPath(args['folder'] ?? '', { markdown: false, allowRoot: true, configDir: vault.configDir });
-				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : options().maxSearchResults, 100);
+				const opts = options();
+				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults, 100);
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
-				const hits = await searchVault(vault, query, folder, limit, mode);
+				const hits = await index.search(query, { folder, limit, mode });
 				if (hits.length === 0) return ok(`No notes matched "${query}".`);
+				const contents = await Promise.all(hits.map(async (h) => (await vault.readNote(h.path)) ?? ''));
 				const termCount = searchTerms(query).length;
-				return ok(hits.map((h) => formatHit(h, termCount)).join('\n'));
+				const list = hits.map((h, i) => formatHit(h, termCount, bestExcerpt(contents[i] ?? '', h.matched.map(wordStartFinder)))).join('\n');
+				const budget = opts.autoReadTokens ?? 0;
+				const fullText = budget > 0 ? autoReadSection(hits, contents, budget, opts.maxReadChars) : '';
+				return ok(fullText ? `${list}\n\n${fullText}` : list);
 			} catch (e) {
 				return wrapError(e);
 			}
@@ -165,123 +187,53 @@ function searchNotesTool(vault: VaultPort, options: () => VaultToolOptions): Age
 	};
 }
 
-function formatHit(hit: SearchHit, termCount: number): string {
+function formatHit(hit: SearchHit, termCount: number, excerpt: string): string {
 	const matched = termCount > 1 ? ` - matches ${hit.matched.join(', ')}` : '';
-	return `${hit.name} (${hit.path})${matched}\n  ${hit.excerpt}`;
+	return `${hit.name} (${hit.path})${matched}\n  ${excerpt}`;
 }
 
-export interface SearchHit {
-	path: string;
-	/** Basename without extension, the form wikilinks use. */
-	name: string;
-	/** Query terms found in the note, in query order. */
-	matched: string[];
-	/** Ranking score within notes matching the same number of terms. */
-	score: number;
-	excerpt: string;
-}
-
-export type SearchMode = 'any' | 'all';
+/** Estimated tokens of the delimiters around one note. */
+const NOTE_FRAME_TOKENS = 20;
+/** Paths listed by name in the "not shown in full" line. */
+const MAX_NOT_SHOWN = 10;
 
 /**
- * Words dropped from a query unless it has nothing else, so "risks and
- * action items" does not match every note that contains "and".
+ * The full text of the best results, in rank order, within `budget` tokens,
+ * so the model has the notes in front of it instead of excerpts. A result
+ * that does not fit is cut to what is left if at least half of it fits, and
+ * skipped otherwise so a shorter one further down can still be included.
  */
-const STOPWORDS = new Set([
-	'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'in', 'is', 'it', 'my', 'of', 'on', 'or', 'the', 'to', 'with',
-]);
-
-/**
- * Lowercased query words with surrounding punctuation trimmed, so `"project`
- * and `items?` match like the bare words; inner characters stay ("2024-10"),
- * as does a trailing + or # ("c++", "c#").
- */
-export function searchTerms(query: string): string[] {
-	const trimmed = query.toLowerCase().split(/\s+/).map((t) => t.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}+#]+$/u, ''));
-	const words = [...new Set(trimmed.filter((t) => t.length > 0))];
-	const meaningful = words.filter((t) => !STOPWORDS.has(t));
-	return meaningful.length > 0 ? meaningful : words;
-}
-
-/**
- * Notes matching any query term (or every term in `all` mode) at the start of
- * a word, ranked by how many distinct terms they contain, then by score: a
- * term in the note's name counts most, then in a heading, then a few
- * occurrences in the content. Frontmatter key names are not searched.
- */
-export async function searchVault(vault: VaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any'): Promise<SearchHit[]> {
-	const terms = searchTerms(query).map((term) => ({ term, find: wordStartFinder(term) }));
-	const prefix = folder === '' ? '' : `${folder}/`;
-	const hits: SearchHit[] = [];
-	for (const file of vault.listMarkdownFiles()) {
-		if (!file.path.startsWith(prefix)) continue;
-		const nameLower = file.name.toLowerCase();
-		const content = (await vault.readNote(file.path)) ?? '';
-		const contentLower = withoutFrontmatterKeys(content).toLowerCase();
-		const headingsLower = headingLines(contentLower).join('\n');
-		const found: typeof terms = [];
-		let score = 0;
-		for (const t of terms) {
-			const inName = t.find(nameLower, 1).length > 0;
-			const count = t.find(contentLower, 3).length;
-			if (!inName && count === 0) continue;
-			found.push(t);
-			if (inName) score += 10;
-			if (t.find(headingsLower, 1).length > 0) score += 5;
-			if (count > 0) score += 1 + count;
+function autoReadSection(hits: SearchHit[], contents: string[], budget: number, maxChars: number): string {
+	const shown: string[] = [];
+	const notShown: string[] = [];
+	let left = budget;
+	hits.forEach((hit, i) => {
+		const content = contents[i] ?? '';
+		const label = `${hit.name} (${hit.path})`;
+		const cut = `${hit.name} (${hit.path}, cut)`;
+		const tokens = estimateTokens(content.slice(0, maxChars));
+		const room = left - NOTE_FRAME_TOKENS;
+		if (tokens <= room) {
+			shown.push(formatNote(hit.path, content, maxChars));
+			left -= tokens + NOTE_FRAME_TOKENS;
+			if (content.length > maxChars) notShown.push(cut);
+		} else if (room > 0 && room >= tokens / 2) {
+			shown.push(formatNote(hit.path, content, maxChars, room));
+			left = 0;
+			notShown.push(cut);
+		} else {
+			notShown.push(label);
 		}
-		if (found.length === 0 || (mode === 'all' && found.length < terms.length)) continue;
-		const matched = found.map((t) => t.term);
-		hits.push({ path: file.path, name: file.name, matched, score, excerpt: bestExcerpt(content, found.map((t) => t.find)) });
+	});
+	if (shown.length === 0) return '';
+	const count = shown.length === 1 ? 'the best match' : `the ${shown.length} best matches`;
+	const lines = [`Full text of ${count} that fit:`, '', shown.join('\n\n')];
+	if (notShown.length > 0) {
+		const named = notShown.slice(0, MAX_NOT_SHOWN).join('; ');
+		const more = notShown.length > MAX_NOT_SHOWN ? `; and ${notShown.length - MAX_NOT_SHOWN} more` : '';
+		lines.push('', `Not shown in full: ${named}${more}. read_note one of them if the text above does not answer the question.`);
 	}
-	hits.sort((a, b) => b.matched.length - a.matched.length || b.score - a.score || a.path.localeCompare(b.path));
-	return hits.slice(0, limit);
-}
-
-function headingLines(content: string): string[] {
-	return content.split('\n').filter((line) => /^#{1,6}\s/.test(line));
-}
-
-const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
-
-/** Scripts written without spaces between words, where a word start cannot be found from the text alone. */
-const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
-
-/** Offsets (at most `max`) where a term starts a word in `text`. */
-type WordStartFinder = (text: string, max: number) => number[];
-
-/**
- * Finds `term` at word starts, so "risk" finds "risks" but "ai" not "email".
- * A term in an unspaced script such as Chinese or Thai matches anywhere, and
- * a character of such a script ends the word before it ("学习python" has
- * "python" at a word start).
- */
-function wordStartFinder(term: string): WordStartFinder {
-	const anywhere = UNSPACED_SCRIPT.test(term);
-	return (text, max) => {
-		const offsets: number[] = [];
-		for (let at = text.indexOf(term); at >= 0 && offsets.length < max; ) {
-			const before = [...text.slice(Math.max(0, at - 2), at)].pop() ?? '';
-			const starts = anywhere || !LETTER_OR_DIGIT.test(before) || UNSPACED_SCRIPT.test(before);
-			if (starts) offsets.push(at);
-			at = text.indexOf(term, at + (starts ? term.length : 1));
-		}
-		return offsets;
-	};
-}
-
-/** Frontmatter key names (`date:`), blanked so a query word does not match every note with that property. */
-const FRONTMATTER_KEY = /^([ \t]*)[\p{L}\p{N}_][\p{L}\p{N}_ .-]*:(?=[ \t\r]|$)/gmu;
-
-function withoutFrontmatterKeys(content: string): string {
-	const start = bodyStart(content);
-	return content.slice(0, start).replace(FRONTMATTER_KEY, '$1') + content.slice(start);
-}
-
-/** Offset where the note body starts, after a leading YAML frontmatter block. */
-function bodyStart(content: string): number {
-	const m = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/.exec(content);
-	return m ? m[0].length : 0;
+	return lines.join('\n');
 }
 
 /**
@@ -359,10 +311,12 @@ function linkLabel(path: string): string {
  * Find the note a model-supplied path means. Accepts a vault path, or a
  * wikilink the way it appears in notes (`Budget`, `Budget.md`, `[[Budget]]`,
  * `[[Projects/Budget|the budget]]`), which Obsidian resolves by basename or
- * by path suffix. A path in the wrong folder falls back to its basename.
- * When the path does not exist and exactly one note matches,
+ * by path suffix. When the path does not exist and exactly one note matches,
  * that note is used and `notice` says so; several matches are listed in the
- * error so the model can pick one.
+ * error so the model can pick one. A path with a folder never resolves to a
+ * note in another folder: a guessed `Meetings/Launch.md` silently read as
+ * `Projects/Launch.md` gets answered from the wrong note, so the error names
+ * the note with that name instead.
  */
 export function resolveNotePath(vault: VaultPort, raw: unknown): { path: string; notice: string } | { error: string } {
 	let input = raw;
@@ -379,17 +333,27 @@ export function resolveNotePath(vault: VaultPort, raw: unknown): { path: string;
 		.listMarkdownFiles()
 		.map((f) => f.path)
 		.sort();
-	let matches = notes.filter((p) => `/${p.toLowerCase()}`.endsWith(wanted));
-	if (matches.length === 0) matches = notes.filter((p) => baseName(p).toLowerCase() === wantedName);
+	const bySuffix = notes.filter((p) => `/${p.toLowerCase()}`.endsWith(wanted));
+	const byName = bySuffix.length > 0 ? [] : notes.filter((p) => baseName(p).toLowerCase() === wantedName);
+	if (path.includes('/') && byName.length > 0) {
+		const where = byName.length === 1 ? 'A note with that name is in another folder' : 'Notes with that name are in other folders';
+		return {
+			error: `Error: no note at ${path}. ${where}: ${listPaths(byName)}. Call again with one of these paths only if it is the note you mean.`,
+		};
+	}
+	const matches = bySuffix.length > 0 ? bySuffix : byName;
 	if (matches.length === 1) {
 		const match = matches[0] as string;
 		return { path: match, notice: `(Resolved ${path} to ${match}; use the full path next time.)\n` };
 	}
 	if (matches.length > 1) {
-		const shown = matches.slice(0, 10).join(', ') + (matches.length > 10 ? ', …' : '');
-		return { error: `Error: no note at ${path}, and several notes match that name: ${shown}. Call again with one of these paths.` };
+		return { error: `Error: no note at ${path}, and several notes match that name: ${listPaths(matches)}. Call again with one of these paths.` };
 	}
 	return { error: `Error: no note at ${path}. Use list_files or search_notes to find the right path.` };
+}
+
+function listPaths(paths: string[]): string {
+	return paths.slice(0, 10).join(', ') + (paths.length > 10 ? ', …' : '');
 }
 
 function getActiveNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {

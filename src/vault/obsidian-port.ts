@@ -1,5 +1,5 @@
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { ActiveContext, NoteMetadata, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
+import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
@@ -7,6 +7,8 @@ import { StoreBackend } from '../persistence/store';
 export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	readonly configDir: string;
 	private lastMarkdownLeaf: WorkspaceLeaf | null = null;
+	private readonly changeListeners = new Set<(change: VaultChange) => void>();
+	private listeningToVault = false;
 
 	constructor(
 		private readonly app: App,
@@ -102,6 +104,25 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		const file = view?.file ?? this.app.workspace.getActiveFile();
 		const selection = view?.editor.getSelection() ?? '';
 		return { path: file instanceof TFile ? file.path : null, selection: selection.length > 0 ? selection : null };
+	}
+
+	/**
+	 * Vault events are registered on the first listener. Subscribe after the
+	 * layout is ready: before that, Obsidian reports every existing file as
+	 * created while it loads the vault.
+	 */
+	onChange(listener: (change: VaultChange) => void): () => void {
+		if (!this.listeningToVault) {
+			this.listeningToVault = true;
+			const emit = (change: VaultChange) => this.changeListeners.forEach((l) => l(change));
+			const { vault } = this.app;
+			this.plugin.registerEvent(vault.on('create', (f) => emit({ type: 'create', path: f.path })));
+			this.plugin.registerEvent(vault.on('modify', (f) => emit({ type: 'modify', path: f.path })));
+			this.plugin.registerEvent(vault.on('delete', (f) => emit({ type: 'delete', path: f.path })));
+			this.plugin.registerEvent(vault.on('rename', (f, oldPath) => emit({ type: 'rename', path: f.path, oldPath })));
+		}
+		this.changeListeners.add(listener);
+		return () => this.changeListeners.delete(listener);
 	}
 
 	// --- plugin-private files (snapshots, conversations) ---

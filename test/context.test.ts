@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { allocateTokens, buildSystemPrompt, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from '../src/agent/context';
+import { allocateTokens, autoReadBudget, buildSystemPrompt, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from '../src/agent/context';
 import { estimateTokens } from '../src/providers/types';
 import { MemoryVaultPort } from './memory-vault';
 import { StoredMessage } from '../src/persistence/conversation';
 import { DEFAULT_SETTINGS } from '../src/settings';
+
+describe('autoReadBudget', () => {
+	it('is the setting, capped at a quarter of a known context window', () => {
+		expect(DEFAULT_SETTINGS.autoReadTokens).toBe(4000);
+		expect(autoReadBudget(4000, undefined)).toBe(4000);
+		expect(autoReadBudget(4000, 32_768)).toBe(4000);
+		expect(autoReadBudget(4000, 16_384)).toBe(4000);
+		expect(autoReadBudget(4000, 8192)).toBe(2048);
+		expect(autoReadBudget(0, 8192)).toBe(0);
+		expect(autoReadBudget(-5, undefined)).toBe(0);
+	});
+});
 
 describe('context building', () => {
 	it('tells the model note content is data and that it cannot write', () => {

@@ -36,6 +36,12 @@ src/
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
                           active note, propose create, propose edit).
+  search/
+    tokenize.ts           Search matching rules: query words, word starts,
+                          frontmatter keys, unspaced scripts, index tokens.
+    bm25.ts               In-memory BM25 index in typed arrays.
+    vault-index.ts        Builds the index from the vault in slices, follows
+                          vault events, serializes builds and searches.
   vault/
     port.ts               Narrow VaultPort interface over Obsidian's vault.
     obsidian-port.ts      VaultPort + StoreBackend implemented on App.
@@ -80,7 +86,10 @@ src/
    up, one more request goes without tools and with an instruction to answer
    from what was gathered; tool calls the model makes anyway are dropped, not
    run. Read tools accept a wikilink name and resolve it by basename, as
-   Obsidian does, and write tools refuse placeholder text such as `[Insert …]`.
+   Obsidian does, but never into a folder other than one the path names, and
+   write tools refuse placeholder text such as `[Insert …]`. `search_notes`
+   ranks on the in-memory index (decision 15) and appends the full text of its
+   best results within the auto-read budget.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
 
@@ -157,6 +166,16 @@ settings on each access, so changes apply without rebuilding providers.
 Adding a provider means adding one adapter file (or reusing one, as `custom`
 does), an id in `PROVIDER_IDS`, a settings block and a registry entry; the
 runtime and chat view do not change.
+
+## Search index
+
+`DragonglassCore` owns one `VaultSearchIndex` for the plugin's lifetime. It
+starts when the workspace layout is ready (before that, Obsidian reports every
+file as created), reads notes through `VaultPort.readNote` (Obsidian's cached
+text), and subscribes to `VaultPort.onChange`. Changes are only queued; the
+next search applies them first. Builds, catch-ups and searches run one at a
+time on a promise chain, so a search never sees the index mid-compaction. The
+index lives only in memory and is rebuilt on every start.
 
 ## Persistence
 

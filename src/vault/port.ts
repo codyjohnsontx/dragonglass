@@ -30,6 +30,11 @@ export interface NoteMetadata {
 	backlinks: string[];
 }
 
+/** A file or folder that was created, changed, deleted or renamed, as the vault reports it. */
+export type VaultChange =
+	| { type: 'create' | 'modify' | 'delete'; path: string }
+	| { type: 'rename'; path: string; oldPath: string };
+
 export interface ActiveContext {
 	path: string | null;
 	selection: string | null;
@@ -57,4 +62,6 @@ export interface VaultPort {
 	listPluginFiles(relativeDir: string): Promise<string[]>;
 	deletePluginFile(relativePath: string): Promise<void>;
 	getActiveContext(): ActiveContext;
+	/** Hear about vault changes from now on; returns a function that stops listening. */
+	onChange(listener: (change: VaultChange) => void): () => void;
 }

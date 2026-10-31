@@ -1,5 +1,5 @@
 import { StoreBackend } from '../src/persistence/store';
-import { ActiveContext, NoteMetadata, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
+import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
 import { baseName, parentFolder } from '../src/vault/paths';
 
 /** In-memory VaultPort + StoreBackend for tests. Mirrors Obsidian semantics closely enough. */
@@ -9,6 +9,7 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	folders = new Set<string>();
 	pluginFiles = new Map<string, string>();
 	active: ActiveContext = { path: null, selection: null };
+	private listeners = new Set<(change: VaultChange) => void>();
 	private clock = 1_700_000_000_000;
 
 	constructor(initial: Record<string, string> = {}) {
@@ -16,7 +17,9 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	}
 
 	seed(path: string, content: string): void {
+		const existed = this.files.has(path);
 		this.files.set(path, content);
+		this.emit({ type: existed ? 'modify' : 'create', path });
 		let folder = parentFolder(path);
 		while (folder) {
 			this.folders.add(folder);
@@ -96,7 +99,50 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		const current = this.files.get(path);
 		if (current === undefined) return Promise.reject(new Error(`No note at ${path}`));
 		this.files.set(path, fn(current));
+		this.emit({ type: 'modify', path });
 		return Promise.resolve();
+	}
+
+	/** Delete a note, or a folder and everything in it, reporting each path like Obsidian does. */
+	delete(path: string): void {
+		const prefix = `${path}/`;
+		for (const p of [...this.files.keys()]) {
+			if (p !== path && !p.startsWith(prefix)) continue;
+			this.files.delete(p);
+			this.emit({ type: 'delete', path: p });
+		}
+		for (const f of [...this.folders]) if (f === path || f.startsWith(prefix)) this.folders.delete(f);
+		if (this.folders.has(path)) this.emit({ type: 'delete', path });
+	}
+
+	/** Rename a note or a folder; a folder reports one rename, for itself. */
+	rename(oldPath: string, newPath: string): void {
+		const prefix = `${oldPath}/`;
+		for (const [p, content] of [...this.files]) {
+			if (p !== oldPath && !p.startsWith(prefix)) continue;
+			this.files.delete(p);
+			this.files.set(newPath + p.slice(oldPath.length), content);
+		}
+		for (const f of [...this.folders]) {
+			if (f !== oldPath && !f.startsWith(prefix)) continue;
+			this.folders.delete(f);
+			this.folders.add(newPath + f.slice(oldPath.length));
+		}
+		let folder = parentFolder(newPath);
+		while (folder) {
+			this.folders.add(folder);
+			folder = parentFolder(folder);
+		}
+		this.emit({ type: 'rename', path: newPath, oldPath });
+	}
+
+	onChange(listener: (change: VaultChange) => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	private emit(change: VaultChange): void {
+		this.listeners.forEach((l) => l(change));
 	}
 
 	writePluginFile(rel: string, content: string): Promise<void> {
