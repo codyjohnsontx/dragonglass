@@ -27,7 +27,8 @@ export function searchTerms(query: string): string[] {
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
 /** Scripts written without spaces between words, where a word start cannot be found from the text alone. */
-const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+const UNSPACED_CHARS = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\p{Script=Thai}\\p{Script=Lao}\\p{Script=Khmer}\\p{Script=Myanmar}';
+const UNSPACED_SCRIPT = new RegExp(`[${UNSPACED_CHARS}]`, 'u');
 
 /** Offsets (at most `max`) where a term starts a word in `text`. */
 export type WordStartFinder = (text: string, max: number) => number[];
@@ -108,7 +109,7 @@ export function tokenCounts(fields: SearchFields): Map<string, number> {
 	return counts;
 }
 
-const RUN = /[\p{L}\p{N}]+/gu;
+const RUN = new RegExp(`[\\p{L}\\p{N}${UNSPACED_CHARS}]+`, 'gu');
 
 function forEachToken(text: string, emit: (token: string) => void): void {
 	for (const m of text.matchAll(RUN)) {

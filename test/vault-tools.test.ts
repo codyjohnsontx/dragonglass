@@ -2,14 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { ToolRegistry, parseToolArguments } from '../src/agent/tools';
 import { searchFields, searchTerms, weightedMatches, wordStartFinder } from '../src/search/tokenize';
 import { SearchMode, VaultSearchIndex } from '../src/search/vault-index';
-import { createVaultTools } from '../src/tools/vault-tools';
+import { createVaultTools, DEFAULT_TOOL_OPTIONS, VaultToolOptions } from '../src/tools/vault-tools';
 import { ProposalEngine } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 
 const ctx = { conversationId: 'c1', signal: new AbortController().signal };
 
+const noYield = () => Promise.resolve();
+
 function searchVault(vault: MemoryVaultPort, query: string, folder: string, limit: number, mode: SearchMode = 'any') {
-	return new VaultSearchIndex(vault).search(query, { folder, limit, mode });
+	return new VaultSearchIndex(vault, noYield).search(query, { folder, limit, mode });
+}
+
+function vaultTools(vault: MemoryVaultPort, options: VaultToolOptions | (() => VaultToolOptions) = DEFAULT_TOOL_OPTIONS) {
+	return createVaultTools(vault, new ProposalEngine(vault), options, new VaultSearchIndex(vault, noYield));
 }
 
 function setup() {
@@ -19,7 +25,7 @@ function setup() {
 		'Journal/2024-01-01.md': 'Nothing about launches here.\n',
 	});
 	const registry = new ToolRegistry();
-	for (const t of createVaultTools(vault, new ProposalEngine(vault))) registry.register(t);
+	for (const t of vaultTools(vault)) registry.register(t);
 	return { vault, registry };
 }
 
@@ -76,7 +82,7 @@ describe('vault tools', () => {
 	it('truncates long notes', async () => {
 		const vault = new MemoryVaultPort({ 'Big.md': 'x'.repeat(100) });
 		const registry = new ToolRegistry();
-		for (const t of createVaultTools(vault, new ProposalEngine(vault), { maxReadChars: 10, maxSearchResults: 5 })) registry.register(t);
+		for (const t of vaultTools(vault, { maxReadChars: 10, maxSearchResults: 5 })) registry.register(t);
 		const r = await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx);
 		expect(r.content).toContain('[truncated: showing 10 of 100 characters]');
 	});
@@ -85,7 +91,7 @@ describe('vault tools', () => {
 		const vault = new MemoryVaultPort({ 'Big.md': 'x'.repeat(100) });
 		const registry = new ToolRegistry();
 		let maxReadChars = 100;
-		for (const t of createVaultTools(vault, new ProposalEngine(vault), () => ({ maxReadChars, maxSearchResults: 5 }))) registry.register(t);
+		for (const t of vaultTools(vault, () => ({ maxReadChars, maxSearchResults: 5 }))) registry.register(t);
 		expect((await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx)).content).not.toContain('[truncated');
 		maxReadChars = 10;
 		expect((await registry.get('read_note')!.execute({ path: 'Big.md' }, ctx)).content).toContain('[truncated: showing 10 of 100 characters]');
@@ -113,7 +119,7 @@ describe('vault tools', () => {
 				'Recipes.md': '# Recipes\n\nPancakes and waffles.\n',
 			});
 			const registry = new ToolRegistry();
-			for (const t of createVaultTools(vault, new ProposalEngine(vault))) registry.register(t);
+			for (const t of vaultTools(vault)) registry.register(t);
 			return { vault, registry };
 		}
 
@@ -214,7 +220,7 @@ describe('vault tools', () => {
 			});
 			const hits = await searchVault(vault, '会议', '', 20);
 			expect(hits.map((h) => h.path)).toEqual(['Notes/项目会议.md', 'Journal/今天.md']);
-			const tools = createVaultTools(vault, new ProposalEngine(vault));
+			const tools = vaultTools(vault);
 			const out = await tools.find((t) => t.name === 'search_notes')!.execute({ query: '会议' }, ctx);
 			expect(out.content).toContain('今天 (Journal/今天.md)\n  今天的会议记录');
 			expect((await searchVault(vault, 'โครงการ', '', 20)).map((h) => h.path)).toEqual(['Thai.md']);
@@ -275,7 +281,7 @@ describe('vault tools', () => {
 				'Notes/Weather.md': 'Nimbus clouds bring rain.',
 			});
 			const registry = new ToolRegistry();
-			for (const t of createVaultTools(vault, new ProposalEngine(vault), { maxReadChars, maxSearchResults: 20, autoReadTokens })) registry.register(t);
+			for (const t of vaultTools(vault, { maxReadChars, maxSearchResults: 20, autoReadTokens })) registry.register(t);
 			return registry.get('search_notes')!;
 		}
 
@@ -319,7 +325,7 @@ describe('vault tools', () => {
 		for (let i = 0; i < 520; i++) notes[`Big/${String(i).padStart(3, '0')}.md`] = '';
 		const vault = new MemoryVaultPort(notes);
 		const registry = new ToolRegistry();
-		for (const t of createVaultTools(vault, new ProposalEngine(vault))) registry.register(t);
+		for (const t of vaultTools(vault)) registry.register(t);
 		for (const args of [{ folder: 'Big' }, { folder: 'Big', recursive: true }]) {
 			const lines = (await registry.get('list_files')!.execute(args, ctx)).content.split('\n');
 			expect(lines).toHaveLength(501);

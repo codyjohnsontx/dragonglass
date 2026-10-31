@@ -28,14 +28,13 @@ export const DEFAULT_TOOL_OPTIONS: VaultToolOptions = { maxReadChars: 24_000, ma
 /**
  * Tools read their options on every call so a settings change, or a provider
  * with a smaller context window, takes effect without re-registering. Pass
- * the plugin's long-lived search index; without one, search builds its own
- * on first use.
+ * the plugin's long-lived search index.
  */
 export function createVaultTools(
 	vault: VaultPort,
 	proposals: ProposalEngine,
-	options: VaultToolOptions | (() => VaultToolOptions) = DEFAULT_TOOL_OPTIONS,
-	index: VaultSearchIndex = new VaultSearchIndex(vault),
+	options: VaultToolOptions | (() => VaultToolOptions),
+	index: VaultSearchIndex,
 ): AgentTool[] {
 	const opts = typeof options === 'function' ? options : () => options;
 	return [
