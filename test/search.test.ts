@@ -24,6 +24,16 @@ describe('search tokens', () => {
 		expect([...tokenCounts(searchFields('', 'กิน')).keys()]).toEqual(['กิ', 'ิน', 'น']);
 	});
 
+	// ー and ｰ are Script=Common and 〱 Script=Common too; their Script_Extensions put them with kana (decision 14).
+	it('counts kana marks shared with other scripts as unspaced, and ends words at them', () => {
+		expect([...tokenCounts(searchFields('', 'サーバーsql')).keys()]).toEqual(['サー', 'ーバ', 'バー', 'ー', 'sql']);
+		expect([...tokenCounts(searchFields('', 'すーぱーsql')).keys()]).toEqual(['すー', 'ーぱ', 'ぱー', 'ー', 'sql']);
+		expect([...tokenCounts(searchFields('', 'こ〱sql')).keys()]).toEqual(['こ〱', '〱', 'sql']);
+		expect(weightedMatches(searchFields('', 'サーバーsql ｻｰﾊﾞｰsql'), wordStartFinder('sql'))).toBe(2);
+		expect(termLookup('サーバー')).toEqual({ kind: 'check', exact: ['サー', 'ーバ', 'バー'], prefixes: [] });
+		expect([...tokenCounts(searchFields('', 'donʼt')).keys()]).toEqual(['donʼt']);
+	});
+
 	it('looks most words up as token prefixes and checks the rest on candidates', () => {
 		expect(termLookup('risk')).toEqual({ kind: 'prefix', prefix: 'risk', word: true });
 		expect(termLookup('会议')).toEqual({ kind: 'prefix', prefix: '会议', word: false });
@@ -40,7 +50,7 @@ describe('search tokens', () => {
 		const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
 		const pick = <T,>(items: T[]): T => items[Math.floor(rnd() * items.length)]!;
 		const words = ['risk', 'risks', 'ai', 'email', 'said', 'c++', 'c#', 'c', '2024-10-01', '2024', '10', 'o\'neil', 'co-op', 'café', 'cafés',
-			'会议', '今天的会议记录', '学习python编程', 'データベースのsql設計', 'โครงการ', 'ไม่กินข้าว', 'ไม่', '_ai', '(ai)', '🙂ai', 'x2ai', 'e-mail', 'ai-risks', 'İstanbul'];
+			'会议', '今天的会议记录', '学习python编程', 'データベースのsql設計', 'サーバーsql', 'すーぱーsql', 'โครงการ', 'ไม่กินข้าว', 'ไม่', '_ai', '(ai)', '🙂ai', 'x2ai', 'e-mail', 'ai-risks', 'İstanbul'];
 		const notes: Record<string, string> = {};
 		for (let n = 0; n < 60; n++) {
 			const body = Array.from({ length: 12 }, () => pick(words)).join(pick([' ', ', ', '\n', '/']));
@@ -50,7 +60,7 @@ describe('search tokens', () => {
 		}
 		const vault = new MemoryVaultPort(notes);
 		const index = new VaultSearchIndex(vault, noYield);
-		const queries = ['risk', 'ai', 'c++', 'c#', '2024-10', '10', 'o\'neil', '会议', '会', '项目', 'python', 'sql', 'データ', 'cafe', 'co-op', 'ai-risks', 'mail',
+		const queries = ['risk', 'ai', 'c++', 'c#', '2024-10', '10', 'o\'neil', '会议', '会', '项目', 'python', 'sql', 'データ', 'サーバー', 'ーsql', 'cafe', 'co-op', 'ai-risks', 'mail',
 			'istanbul', 'กิน', 'ไม่', 'ข้าว', 'risk ai', '"risks," 2024 会议?', 'e-mail c'];
 		let compared = 0;
 		for (const query of queries) {
