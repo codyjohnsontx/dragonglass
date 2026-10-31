@@ -195,10 +195,16 @@ describe('vault tools', () => {
 			expect(none.slice(0, 2)).toEqual(['No note has every word; these results have some of them.', '']);
 			expect(none.some((l) => l.startsWith('Recipes (Recipes.md)'))).toBe(true);
 			expect((await search.execute({ query: 'zzzz qqqq', mode: 'all' }, ctx)).content).toBe('No notes matched "zzzz qqqq".');
-			// With a folder and no note anywhere having every word, the notes with some of them still come from that folder.
+			// With a folder and no note anywhere having every word, the notes with some of them still come from that folder,
+			// and better matches elsewhere are still named.
 			const inFolder = (await search.execute({ query: 'project waffles', folder: 'Projects', mode: 'all' }, ctx)).content.split('\n');
-			expect(inFolder.slice(0, 2)).toEqual(['No note has every word; these results have some of them.', '']);
-			const listed = inFolder.filter((l) => / \(.+\.md\)/.test(l));
+			expect(inFolder.slice(0, 4)).toEqual([
+				'Searched only Projects/. Notes elsewhere match better: Recipes (Recipes.md). Search again without folder if the results below do not answer the question.',
+				'',
+				'No note has every word; these results have some of them.',
+				'',
+			]);
+			const listed = inFolder.slice(4).filter((l) => / \(.+\.md\)/.test(l));
 			expect(listed.length).toBeGreaterThan(0);
 			expect(listed.every((l) => l.includes('(Projects/'))).toBe(true);
 			// A folder with no note having any of the words still falls back to the whole vault, as in "any" mode.

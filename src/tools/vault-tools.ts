@@ -181,27 +181,35 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 						searched = '';
 						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
 					}
-				} else if (folder !== '') {
-					const elsewhere = await betterElsewhere(index, query, folder, mode, hits[0]!);
-					if (elsewhere.length > 0) {
-						scope = `Searched only ${folder}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
-					}
 				}
+				let topMode: SearchMode = mode;
+				let some = '';
 				if (mode === 'all' && hits.length < MIN_SEARCH_RESULTS) {
 					const withEvery = hits.length;
+					if (withEvery === 0) topMode = 'any';
 					const seen = new Set(hits.map((h) => h.path));
-					let some = await index.search(query, { folder: searched, limit, mode: 'any' });
-					if (some.length === 0 && searched !== '') {
-						some = await index.search(query, { folder: '', limit, mode: 'any' });
-						if (some.length > 0) scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault.\n\n${scope}`;
+					let backfill = await index.search(query, { folder: searched, limit, mode: 'any' });
+					if (backfill.length === 0 && searched !== '') {
+						backfill = await index.search(query, { folder: '', limit, mode: 'any' });
+						if (backfill.length > 0) {
+							scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault.\n\n`;
+							searched = '';
+						}
 					}
-					hits = [...hits, ...some.filter((h) => !seen.has(h.path))].slice(0, limit);
+					hits = [...hits, ...backfill.filter((h) => !seen.has(h.path))].slice(0, limit);
 					if (hits.length > withEvery) {
 						const which = withEvery === 0 ? 'No note has every word; these results have' : withEvery === 1 ? 'Only the first result has every word; the rest have' : `Only the first ${withEvery} results have every word; the rest have`;
-						scope += `${which} some of them.\n\n`;
+						some = `${which} some of them.\n\n`;
 					}
 				}
 				if (hits.length === 0) return ok(`No notes matched "${query}".`);
+				if (searched !== '') {
+					const elsewhere = await betterElsewhere(index, query, searched, topMode, hits[0]!);
+					if (elsewhere.length > 0) {
+						scope = `Searched only ${searched}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
+					}
+				}
+				scope += some;
 				// A hit that cannot be read right now is still listed, without an excerpt or full text.
 				const contents = await Promise.all(hits.map((h) => vault.readNote(h.path).catch(() => null)));
 				const terms = searchTerms(query);
