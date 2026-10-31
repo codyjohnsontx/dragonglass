@@ -130,7 +130,9 @@ mobile WebViews cannot parse. Words in Chinese, Japanese, Korean, Thai and
 similar scripts match anywhere, since words there are often written without
 spaces or carry attached particles: "会议" must find "今天的会议记录". A
 character of those scripts also ends the word before it, so "python" finds
-"我在学习Python编程". Frontmatter key names such as
+"我在学习Python编程". A letter shared between scripts, such as the prolonged
+sound mark ー, belongs to them by its Unicode Script_Extensions, so "sql" finds
+"サーバーsql". Frontmatter key names such as
 `date:` or `tags:` are not searched, so "date" does not match every note with a
 date property; their values still are. Results rank by how many distinct words a note
 contains, then by a score that weighs a word in the note's name over one in a

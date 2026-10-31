@@ -27,8 +27,19 @@ export function searchTerms(query: string): string[] {
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
 /** Scripts written without spaces between words, where a word start cannot be found from the text alone. */
-const UNSPACED_CHARS = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}\\p{Script=Thai}\\p{Script=Lao}\\p{Script=Khmer}\\p{Script=Myanmar}';
-const UNSPACED_SCRIPT = new RegExp(`[${UNSPACED_CHARS}]`, 'u');
+const UNSPACED_SCRIPTS = ['Han', 'Hiragana', 'Katakana', 'Hangul', 'Thai', 'Lao', 'Khmer', 'Myanmar'];
+const UNSPACED_CHARS = UNSPACED_SCRIPTS.map((s) => `\\p{Script=${s}}`).join('');
+/**
+ * A character of an unspaced script. Letters and digits shared with other
+ * scripts count by their Script_Extensions, such as the prolonged sound mark
+ * ー in サーバー, which is Script=Common; ones also used in Latin text, such as
+ * ʼ, do not. Set operations (the v flag) would say this directly, but older
+ * mobile WebViews cannot parse them.
+ */
+const UNSPACED_SCRIPT = new RegExp(
+	`[${UNSPACED_CHARS}]|(?=[\\p{L}\\p{N}])(?!\\p{scx=Latin})[${UNSPACED_SCRIPTS.map((s) => `\\p{scx=${s}}`).join('')}]`,
+	'u',
+);
 
 /** Offsets (at most `max`) where a term starts a word in `text`. */
 export type WordStartFinder = (text: string, max: number) => number[];

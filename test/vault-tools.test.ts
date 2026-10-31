@@ -229,6 +229,18 @@ describe('vault tools', () => {
 			expect((await searchVault(vault, 'sql', '', 20)).map((h) => h.path)).toEqual(['データ.md']);
 		});
 
+		it('finds a word right after a kana prolonged sound mark', async () => {
+			const vault = new MemoryVaultPort({
+				'Katakana.md': 'サーバーsqlの設定',
+				'Hiragana.md': 'すーぱーsql',
+				'Halfwidth.md': 'ｻｰﾊﾞｰsql',
+				'Mid.md': 'nosql only',
+			});
+			const out = await vaultTools(vault).find((t) => t.name === 'search_notes')!.execute({ query: 'sql' }, ctx);
+			expect(out.content).toContain('Katakana (Katakana.md)\n  サーバーsqlの設定');
+			expect((await searchVault(vault, 'sql', '', 20)).map((h) => h.path).sort()).toEqual(['Halfwidth.md', 'Hiragana.md', 'Katakana.md']);
+		});
+
 		it('does not match frontmatter key names but does match their values', async () => {
 			const notes: Record<string, string> = {
 				'Notes/Sync.md': 'Weekly meeting notes.',
