@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
@@ -11,6 +11,7 @@ import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
 import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
+import { isSendKey, sendShortcutLabel } from './composer-keys';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -76,6 +77,15 @@ export class ChatView extends ItemView {
 		this.includeActive = core.getSettings().includeActiveNote;
 		this.includeSelection = core.getSettings().includeSelection;
 		this.navigation = false;
+		// Mod+Enter is Obsidian's "open link in new tab" hotkey, which the app
+		// scope claims before any element listener sees the key. A view scope is
+		// consulted first while this view is focused, so the composer gets it.
+		this.scope = new Scope(this.app.scope);
+		this.scope.register(['Mod'], 'Enter', (evt) => {
+			if (evt.target !== this.inputEl || !isSendKey(evt, Platform.isMacOS)) return false;
+			void this.submit();
+			return true;
+		});
 	}
 
 	getViewType(): string {
@@ -508,19 +518,22 @@ export class ChatView extends ItemView {
 
 	private buildComposer(): void {
 		const c = this.composerEl;
+		const shortcut = sendShortcutLabel(Platform.isMacOS);
 		this.inputEl = c.createEl('textarea', {
 			cls: 'dg-input',
-			attr: { placeholder: 'Message Dragonglass… (Enter to send, Shift+Enter for newline)', rows: '3' },
+			attr: { placeholder: `Message Dragonglass… (${shortcut} to send)`, rows: '3' },
 		});
-		this.inputEl.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-				e.preventDefault();
-				void this.submit();
-			}
-		});
+		// Enter and Shift+Enter insert a new line as in any textarea; the send
+		// shortcut is registered on the view scope in the constructor.
 		const row = c.createDiv({ cls: 'dg-composer-row' });
 		this.sendBtn = row.createEl('button', { cls: 'mod-cta dg-send', text: 'Send' });
+		this.setSendButtonTitle(`Send (${shortcut})`);
 		this.sendBtn.addEventListener('click', () => void (this.abort ? this.stop() : this.submit()));
+	}
+
+	private setSendButtonTitle(title: string): void {
+		this.sendBtn.setAttribute('title', title);
+		this.sendBtn.setAttribute('aria-label', title);
 	}
 
 	private stop(): void {
@@ -538,6 +551,7 @@ export class ChatView extends ItemView {
 		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
 		this.abort = new AbortController();
 		this.sendBtn.setText('Stop');
+		this.setSendButtonTitle('Stop generating');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
 		// The header light reflects the last check; a send is the moment it matters,
@@ -556,6 +570,7 @@ export class ChatView extends ItemView {
 			this.liveEl = null;
 			this.endLiveTurn();
 			this.sendBtn.setText('Send');
+			this.setSendButtonTitle(`Send (${sendShortcutLabel(Platform.isMacOS)})`);
 			this.sendBtn.addClass('mod-cta');
 			this.sendBtn.removeClass('mod-warning');
 			if (this.conv === conv) this.renderMessages();

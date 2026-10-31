@@ -54,6 +54,7 @@ src/
     store.ts              One JSON file per conversation, debounced writes.
   ui/
     chat-view.ts          The sidebar ItemView.
+    composer-keys.ts      Which composer keystroke sends (Mod+Enter) and its label.
     copy.ts               Clipboard write behind the per-reply Copy button,
                           and its screen-reader "Copied" announcement.
     proposal-card.ts      Diff review card with approve/reject/revert.

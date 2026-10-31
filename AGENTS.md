@@ -23,6 +23,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Settings use the declarative `getSettingDefinitions()` API (Obsidian 1.13+) with dotted keys; `minAppVersion` 1.13.2 comes from the `secret` control. Do not reintroduce `display()`.
 - The built-in model lists and default model ids (`src/providers/model-choices.ts`, `src/settings.ts`) are copied from each provider's model docs; re-check them there when a provider retires models.
 - The search index (`src/search/`) is in memory only and must keep PR 13's matching rules exactly; `test/search.test.ts` compares it with a word-start scan. Vault events are queued and applied before the next search, and the index starts after layout ready.
+- Obsidian's app scope claims hotkeys such as Mod+Enter (open link in new tab) at window capture, before any element keydown listener runs. A view that needs such a key registers it on `View.scope` (see the chat composer's send shortcut in `src/ui/chat-view.ts`).
 - Write tools never write. Anything that changes a note goes through `ProposalEngine.apply` after user approval, and apply re-checks the content hash inside `Vault.process`.
 
 ## Maintaining this file
