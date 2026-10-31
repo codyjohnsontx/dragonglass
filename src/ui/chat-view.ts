@@ -80,8 +80,11 @@ export class ChatView extends ItemView {
 		// Mod+Enter is Obsidian's "open link in new tab" hotkey, which the app
 		// scope claims before any element listener sees the key. A view scope is
 		// consulted first while this view is focused, so the composer gets it.
+		// The handler catches every key because Scope only passes a key it did
+		// not handle on to the app scope when the matching handler is a
+		// catch-all; a Mod+Enter handler returning nothing would swallow it.
 		this.scope = new Scope(this.app.scope);
-		this.scope.register(['Mod'], 'Enter', (evt) => {
+		this.scope.register(null, null, (evt) => {
 			if (evt.target !== this.inputEl || !isSendKey(evt, Platform.isMacOS)) return;
 			void this.submit();
 			return false;
