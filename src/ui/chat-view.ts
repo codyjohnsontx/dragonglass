@@ -82,9 +82,9 @@ export class ChatView extends ItemView {
 		// consulted first while this view is focused, so the composer gets it.
 		this.scope = new Scope(this.app.scope);
 		this.scope.register(['Mod'], 'Enter', (evt) => {
-			if (evt.target !== this.inputEl || !isSendKey(evt, Platform.isMacOS)) return false;
+			if (evt.target !== this.inputEl || !isSendKey(evt, Platform.isMacOS)) return;
 			void this.submit();
-			return true;
+			return false;
 		});
 	}
 
