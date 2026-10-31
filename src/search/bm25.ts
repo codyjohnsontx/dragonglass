@@ -54,6 +54,60 @@ export interface RankOptions {
  */
 export type CheckTerm = (path: string, term: number) => Promise<number>;
 
+/** Called between pieces of a long compaction; resolves once the caller has yielded to the UI if it wanted to. */
+export type Pause = () => Promise<void>;
+
+/** Items of work (notes, terms, postings, comparisons) between two calls to `Pause`. */
+const PAUSE_EVERY = 4096;
+
+class WorkCounter {
+	private done = 0;
+
+	constructor(readonly pause: Pause) {}
+
+	/** Count work done; true when it is time to call `pause`. */
+	add(items: number): boolean {
+		this.done += items;
+		if (this.done < PAUSE_EVERY) return false;
+		this.done = 0;
+		return true;
+	}
+}
+
+/** Term ids in the order of their strings: a bottom-up merge sort, so it can pause between merges. */
+async function sortTermIds(ids: number[], terms: string[], work: WorkCounter): Promise<number[]> {
+	let from = ids.slice();
+	let to = new Array<number>(from.length);
+	for (let width = 1; width < from.length; width *= 2) {
+		for (let lo = 0; lo < from.length; lo += 2 * width) {
+			const mid = Math.min(lo + width, from.length);
+			const hi = Math.min(lo + 2 * width, from.length);
+			let i = lo;
+			let j = mid;
+			for (let k = lo; k < hi; k++) {
+				const takeRight = i >= mid || (j < hi && terms[from[j]!]! < terms[from[i]!]!);
+				to[k] = takeRight ? from[j++]! : from[i++]!;
+				if (work.add(1)) await work.pause();
+			}
+		}
+		[from, to] = [to, from];
+	}
+	return from;
+}
+
+/** Two lists of term ids, each sorted by string, merged into one. */
+async function mergeSorted(a: number[], b: number[], terms: string[], work: WorkCounter): Promise<number[]> {
+	const out: number[] = [];
+	let i = 0;
+	let j = 0;
+	while (i < a.length || j < b.length) {
+		if (j >= b.length || (i < a.length && terms[a[i]!]! < terms[b[j]!]!)) out.push(a[i++]!);
+		else out.push(b[j++]!);
+		if (work.add(1)) await work.pause();
+	}
+	return out;
+}
+
 export interface IndexStats {
 	notes: number;
 	terms: number;
@@ -83,7 +137,7 @@ export class Bm25Index {
 	private delta = new Map<number, number[]>();
 	private deltaPostings = 0;
 	private deadPostings = 0;
-	private bulk = false;
+	private compacting = false;
 
 	get size(): number {
 		return this.liveNotes;
@@ -93,22 +147,13 @@ export class Bm25Index {
 		return this.rows.has(path);
 	}
 
-	/** Add many notes without compacting in between; `endBulk` compacts once. */
-	beginBulk(): void {
-		this.bulk = true;
-	}
-
-	endBulk(): void {
-		this.bulk = false;
-		this.compact();
-	}
-
 	/** Index a note, replacing what was indexed for its path. */
 	upsert(path: string, name: string, content: string): void {
 		this.upsertFields(path, searchFields(name, content));
 	}
 
 	upsertFields(path: string, fields: SearchFields): void {
+		this.assertNotCompacting();
 		this.removeRow(path);
 		const row = this.paths.length;
 		this.paths.push(path);
@@ -134,18 +179,17 @@ export class Bm25Index {
 		this.deltaPostings += distinct;
 		this.totalLength += length;
 		this.liveNotes++;
-		this.maybeCompact();
 	}
 
 	/** Drop a note, or every note under a folder path. */
 	remove(path: string): void {
+		this.assertNotCompacting();
 		if (this.rows.has(path)) {
 			this.removeRow(path);
 		} else {
 			const prefix = `${path}/`;
 			for (const p of [...this.rows.keys()]) if (p.startsWith(prefix)) this.removeRow(p);
 		}
-		this.maybeCompact();
 	}
 
 	private removeRow(path: string): void {
@@ -169,59 +213,106 @@ export class Bm25Index {
 		this.termsPerRow = termsPerRow;
 	}
 
-	private maybeCompact(): void {
-		if (this.bulk) return;
+	/** Whether enough has changed since the last compaction (or nothing was ever compacted) to run one. */
+	needsCompaction(): boolean {
+		if (this.deltaPostings === 0 && this.deadPostings === 0) return false;
+		if (this.blockRows.length === 0) return true;
 		const threshold = Math.max(COMPACT_MIN, this.blockRows.length * COMPACT_SHARE);
-		if (this.deltaPostings > threshold || this.deadPostings > threshold) this.compact();
+		return this.deltaPostings > threshold || this.deadPostings > threshold;
 	}
 
-	/** Rebuild the block from live postings: rows renumbered densely, terms sorted, nothing dead or pending. */
-	private compact(): void {
+	private assertNotCompacting(): void {
+		if (this.compacting) throw new Error('search index is compacting');
+	}
+
+	/**
+	 * Rebuild the block from live postings: rows renumbered densely, terms
+	 * sorted, nothing dead or pending. Every pass over notes, terms or
+	 * postings calls `pause` every few thousand items so the caller can yield
+	 * to the UI; the new arrays replace the old ones only at the end, and the
+	 * index must not be changed or searched until the returned promise settles.
+	 */
+	async compact(pause: Pause): Promise<void> {
+		this.assertNotCompacting();
+		this.compacting = true;
+		try {
+			await this.rebuild(pause);
+		} finally {
+			this.compacting = false;
+		}
+	}
+
+	private async rebuild(pause: Pause): Promise<void> {
+		const work = new WorkCounter(pause);
 		const newRow = new Int32Array(this.paths.length).fill(-1);
 		const paths: string[] = [];
-		this.paths.forEach((p, row) => {
-			if (p === null) return;
-			newRow[row] = paths.length;
-			paths.push(p);
-		});
+		for (let row = 0; row < this.paths.length; row++) {
+			const p = this.paths[row];
+			if (p !== null && p !== undefined) {
+				newRow[row] = paths.length;
+				paths.push(p);
+			}
+			if (work.add(1)) await work.pause();
+		}
 		const counts = new Uint32Array(this.terms.length);
 		let total = 0;
 		for (let id = 0; id < this.terms.length; id++) {
-			this.forEachPosting(id, () => {
-				counts[id]!++;
-				total++;
-			});
+			let n = 0;
+			this.forEachPosting(id, () => n++);
+			counts[id] = n;
+			total += n;
+			if (work.add(n + 1)) await work.pause();
 		}
-		const kept = [...this.terms.keys()].filter((id) => counts[id]! > 0);
-		kept.sort((a, b) => compareStrings(this.terms[a]!, this.terms[b]!));
+		// Block terms are already in order; only terms added since need sorting, then the two lists merge.
+		const old: number[] = [];
+		const fresh: number[] = [];
+		for (let id = 0; id < this.terms.length; id++) {
+			if (counts[id]! > 0) (id < this.blockTerms ? old : fresh).push(id);
+			if (work.add(1)) await work.pause();
+		}
+		const kept = await mergeSorted(old, await sortTermIds(fresh, this.terms, work), this.terms, work);
 		const start = new Uint32Array(kept.length + 1);
 		const rows = new Uint32Array(total);
 		const tfs = new Uint16Array(total);
 		let at = 0;
-		kept.forEach((id, newId) => {
+		for (let newId = 0; newId < kept.length; newId++) {
 			start[newId] = at;
-			this.forEachPosting(id, (row, tf) => {
+			this.forEachPosting(kept[newId]!, (row, tf) => {
 				rows[at] = newRow[row]!;
 				tfs[at] = tf;
 				at++;
 			});
-		});
+			if (work.add(counts[kept[newId]!]! + 1)) await work.pause();
+		}
 		start[kept.length] = at;
 
 		const lengths = new Float32Array(Math.max(64, paths.length));
 		const termsPerRow = new Uint32Array(lengths.length);
-		this.paths.forEach((p, row) => {
-			if (p === null) return;
-			lengths[newRow[row]!] = this.lengths[row]!;
-			termsPerRow[newRow[row]!] = this.termsPerRow[row]!;
-		});
+		const rowIds = new Map<string, number>();
+		for (let row = 0; row < this.paths.length; row++) {
+			const to = newRow[row]!;
+			if (to >= 0) {
+				lengths[to] = this.lengths[row]!;
+				termsPerRow[to] = this.termsPerRow[row]!;
+				rowIds.set(paths[to]!, to);
+			}
+			if (work.add(1)) await work.pause();
+		}
+		const terms: string[] = [];
+		const termIds = new Map<string, number>();
+		for (const id of kept) {
+			termIds.set(this.terms[id]!, terms.length);
+			terms.push(this.terms[id]!);
+			if (work.add(1)) await work.pause();
+		}
+
 		this.paths = paths;
 		this.lengths = lengths;
 		this.termsPerRow = termsPerRow;
-		this.rows = new Map(paths.map((p, row) => [p, row]));
-		this.terms = kept.map((id) => this.terms[id]!);
-		this.termIds = new Map(this.terms.map((t, id) => [t, id]));
-		this.blockTerms = this.terms.length;
+		this.rows = rowIds;
+		this.terms = terms;
+		this.termIds = termIds;
+		this.blockTerms = terms.length;
 		this.blockStart = start;
 		this.blockRows = rows;
 		this.blockTfs = tfs;
@@ -276,6 +367,7 @@ export class Bm25Index {
 	 * answer exactly are checked on each candidate with `check`.
 	 */
 	async rank(query: QueryTerm[], options: RankOptions, check: CheckTerm): Promise<RankedNote[]> {
+		this.assertNotCompacting();
 		const terms = query.slice(0, MAX_QUERY_TERMS);
 		const slots = this.paths.length;
 		const scores = new Float64Array(slots);

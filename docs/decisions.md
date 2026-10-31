@@ -158,6 +158,24 @@ re-index per note (0.06 ms each). Postings are typed arrays in one block with
 the dictionary sorted, plus a small delta compacted from time to time: about
 10 MB at 20,000 notes. Searches take 2 to 7 ms there.
 
+Compaction is sliced like the build: every pass over notes, terms and postings
+pauses every few thousand items and yields when the 10 ms slice is used up,
+new terms are merge-sorted with pauses and merged into the already sorted
+dictionary instead of one `Array.sort`, and the rebuilt arrays replace the old
+ones only at the end. Catching up on a renamed folder yields between notes.
+Measured at 20,000 notes (`bench-search.ts` for Node; a disposable Obsidian
+1.14.5 profile for in-app, with DevTools CPU throttling at 4x to approximate a
+phone), longest synchronous stall:
+
+| | build, including the final compaction | catch-up after renaming two folders (10,457 notes) |
+|---|---|---|
+| one-shot compaction, Node | 30.6 ms | 262 ms |
+| sliced, Node | 10.2 ms | 12.7 ms |
+| sliced, Obsidian | 10.1 ms | 13.6 ms |
+| sliced, Obsidian at 4x throttling | 22 ms | 19.7 ms |
+
+No task of 50 ms or more was observed in Obsidian in either sliced case.
+
 The matching rules of 14 are kept exactly, so a note matches the same queries
 as before: an index token is a run of letters and digits starting at a word
 start, a query word matches every token it is a prefix of (one sorted range),

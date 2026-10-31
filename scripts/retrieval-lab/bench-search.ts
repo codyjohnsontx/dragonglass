@@ -8,6 +8,9 @@
  *   node scripts/retrieval-lab/build.mjs
  *   node --expose-gc scripts/retrieval-lab/dist/bench-search.mjs <outdir> [--scan]
  *
+ * The longest stretch of synchronous work between two yields to the UI is
+ * reported for the build and for catching up on a large folder rename (the
+ * rename happens in memory, last, after the search measurements).
  * `--scan` also times what every search cost before the index: lowercasing
  * every note and running each query word's word-start finder over it.
  * `modelQuery` fields (scripts/retrieval-lab/gen-queries.mjs) are scored
@@ -49,14 +52,28 @@ const bytes = [...vault.text.values()].reduce((a, t) => a + t.length, 0);
 console.log(`${vault.text.size} notes, ${mb(bytes)} of text, ${questions.length} questions`);
 
 // Build as the plugin does: slices of work with a macrotask yield between them.
+// A stall is the synchronous work between resuming from one yield and the next
+// (or the end): how long the UI thread would be blocked.
+const stalls = { longest: 0, since: performance.now() };
+const resetStalls = (): void => {
+	stalls.longest = 0;
+	stalls.since = performance.now();
+};
+const endStall = (): number => Math.max(stalls.longest, performance.now() - stalls.since);
 const before = memory();
-const index = new VaultSearchIndex(vault, () => new Promise((resolve) => setTimeout(resolve, 0)));
+const index = new VaultSearchIndex(vault, async () => {
+	stalls.longest = Math.max(stalls.longest, performance.now() - stalls.since);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	stalls.since = performance.now();
+});
+resetStalls();
 let t = performance.now();
 await index.start();
 const buildMs = performance.now() - t;
+const buildStall = endStall();
 const stats = await index.stats();
 console.log(
-	`index: build ${ms(buildMs)}, ${stats.terms} terms, ${stats.postings} postings, typed arrays ${mb(stats.bytes)}, heap and buffers +${mb(memory() - before)}`,
+	`index: build ${ms(buildMs)} (longest stall ${ms(buildStall)}), ${stats.terms} terms, ${stats.postings} postings, typed arrays ${mb(stats.bytes)}, heap and buffers +${mb(memory() - before)}`,
 );
 
 const some = [...vault.text.keys()].slice(0, 200);
@@ -115,3 +132,19 @@ for (const field of fields) {
 		console.log(`  full scan of every note per search (the cost before the index): p50 ${ms(percentile(scanTimes, 0.5))}, p95 ${ms(percentile(scanTimes, 0.95))}`);
 	}
 }
+
+// Catch-up after renaming the two largest top-level folders, enough to compact on the way.
+const sizes = new Map<string, number>();
+for (const path of vault.text.keys()) {
+	const top = path.split('/')[0]!;
+	if (path.includes('/')) sizes.set(top, (sizes.get(top) ?? 0) + 1);
+}
+const largest = [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([folder]) => folder);
+let moved = 0;
+for (const folder of largest) moved += vault.renameInMemory(folder, `${folder} renamed`);
+resetStalls();
+t = performance.now();
+const afterRename = await index.stats();
+console.log(
+	`\nfolder rename of ${largest.join(' and ')} (${moved} notes): catch-up ${ms(performance.now() - t)}, longest stall ${ms(endStall())}, ${afterRename.notes} notes indexed`,
+);

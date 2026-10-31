@@ -105,15 +105,19 @@ describe('Bm25Index', () => {
 		const text = () => Array.from({ length: 40 }, () => vocab[Math.floor(rnd() ** 2 * vocab.length)]).join(' ');
 		const live = new Map<string, string>();
 		const incremental = new Bm25Index();
-		incremental.beginBulk();
 		for (let i = 0; i < 500; i++) {
 			const content = text();
 			live.set(`N/${i}.md`, content);
 			incremental.upsert(`N/${i}.md`, `${i}`, content);
 		}
-		incremental.endBulk();
+		await incremental.compact(noYield);
 		// Enough edits and deletes to compact several times on the way.
+		let compactions = 0;
 		for (let step = 0; step < 6000; step++) {
+			if (incremental.needsCompaction()) {
+				await incremental.compact(noYield);
+				compactions++;
+			}
 			const path = `N/${Math.floor(rnd() * 600)}.md`;
 			if (rnd() < 0.2) {
 				live.delete(path);
@@ -124,6 +128,7 @@ describe('Bm25Index', () => {
 				incremental.upsert(path, baseName(path), content);
 			}
 		}
+		expect(compactions).toBeGreaterThan(1);
 		const fresh = new Bm25Index();
 		for (const [path, content] of live) fresh.upsert(path, baseName(path), content);
 		expect(incremental.size).toBe(live.size);
@@ -134,6 +139,30 @@ describe('Bm25Index', () => {
 			expect(a.map((h) => h.path), query).toEqual(b.map((h) => h.path));
 			a.forEach((h, i) => expect(h.score).toBeCloseTo(b[i]!.score, 9));
 		}
+	});
+});
+
+describe('compaction', () => {
+	it('pauses throughout, swaps in only at the end, and ranks as before', async () => {
+		const index = new Bm25Index();
+		for (let i = 0; i < 2000; i++) index.upsert(`N/${i}.md`, `${i}`, `alpha beta${i % 97} gamma${i} delta ${'filler '.repeat(i % 7)}`);
+		const before = await rankPaths(index, 'beta5 gamma12 delta');
+		let pauses = 0;
+		let checkedMidway = false;
+		await index.compact(async () => {
+			pauses++;
+			if (!checkedMidway) {
+				checkedMidway = true;
+				expect(() => index.upsert('X.md', 'X', 'alpha')).toThrow(/compacting/);
+				await expect(rankPaths(index, 'alpha')).rejects.toThrow(/compacting/);
+			}
+		});
+		expect(pauses).toBeGreaterThan(5);
+		expect(checkedMidway).toBe(true);
+		expect(index.needsCompaction()).toBe(false);
+		const after = await rankPaths(index, 'beta5 gamma12 delta');
+		expect(after.map((h) => h.path)).toEqual(before.map((h) => h.path));
+		after.forEach((h, i) => expect(h.score).toBeCloseTo(before[i]!.score, 9));
 	});
 });
 
@@ -177,6 +206,23 @@ describe('VaultSearchIndex', () => {
 		expect(yields).toBeGreaterThan(0);
 		expect(hits.map((h) => h.path)).toEqual(['Late.md']);
 		expect((await index.stats()).notes).toBe(3001);
+	});
+
+	it('yields while catching up on a large folder rename', async () => {
+		const notes: Record<string, string> = {};
+		for (let i = 0; i < 3000; i++) notes[`Big/${i}.md`] = `note ${i} ${'filler words '.repeat(50)}`;
+		const vault = new MemoryVaultPort(notes);
+		let yields = 0;
+		const index = new VaultSearchIndex(vault, () => {
+			yields++;
+			return Promise.resolve();
+		});
+		await index.start();
+		yields = 0;
+		vault.rename('Big', 'Moved');
+		expect((await index.search('note', { folder: 'Moved', limit: 5000, mode: 'any' })).length).toBe(3000);
+		expect(yields).toBeGreaterThan(0);
+		expect(await index.search('note', { folder: 'Big', limit: 5, mode: 'any' })).toEqual([]);
 	});
 
 	it('stops following the vault once disposed', async () => {

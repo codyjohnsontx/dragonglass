@@ -104,14 +104,13 @@ export class VaultSearchIndex {
 	}
 
 	private async build(): Promise<void> {
-		this.index.beginBulk();
 		const slice = new Slicer(this.yieldToUi);
 		for (const file of this.vault.listMarkdownFiles()) {
 			if (this.disposed) break;
 			await this.indexNote(file.path);
 			await slice.maybeYield();
 		}
-		this.index.endBulk();
+		await this.index.compact(() => slice.maybeYield());
 	}
 
 	/** Apply queued changes. A path may be a note, a folder (renamed into place) or something now gone. */
@@ -123,15 +122,25 @@ export class VaultSearchIndex {
 			for (const path of paths) {
 				if (this.vault.isFolder(path)) {
 					const prefix = `${path}/`;
-					for (const file of this.vault.listMarkdownFiles()) if (file.path.startsWith(prefix)) await this.indexNote(file.path);
+					for (const file of this.vault.listMarkdownFiles()) {
+						if (!file.path.startsWith(prefix)) continue;
+						await this.indexNote(file.path);
+						await this.compactIfDue(slice);
+						await slice.maybeYield();
+					}
 				} else if (path.endsWith('.md') && this.vault.exists(path)) {
 					await this.indexNote(path);
 				} else {
 					this.index.remove(path);
 				}
+				await this.compactIfDue(slice);
 				await slice.maybeYield();
 			}
 		}
+	}
+
+	private async compactIfDue(slice: Slicer): Promise<void> {
+		if (this.index.needsCompaction()) await this.index.compact(() => slice.maybeYield());
 	}
 
 	private async indexNote(path: string): Promise<void> {

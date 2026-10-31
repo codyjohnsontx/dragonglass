@@ -174,8 +174,10 @@ starts when the workspace layout is ready (before that, Obsidian reports every
 file as created), reads notes through `VaultPort.readNote` (Obsidian's cached
 text), and subscribes to `VaultPort.onChange`. Changes are only queued; the
 next search applies them first. Builds, catch-ups and searches run one at a
-time on a promise chain, so a search never sees the index mid-compaction. The
-index lives only in memory and is rebuilt on every start.
+time on a promise chain, so a search never sees the index mid-compaction.
+Building, catching up and compacting all yield to the UI in slices of about
+10 ms (`Bm25Index.compact` takes a pause callback for this). The index lives
+only in memory and is rebuilt on every start.
 
 ## Persistence
 

@@ -8,7 +8,9 @@ import { baseName } from '../../src/vault/paths';
  * ObsidianVaultPort: note text held in memory as Obsidian's cache does,
  * `listMarkdownFiles` building fresh objects per call, and backlinks found
  * by scanning every note's resolved links. Writes are refused; nothing is
- * ever written into the folder.
+ * ever written into the folder. `renameInMemory` moves notes in the
+ * in-memory copy only, reporting it like Obsidian, for benchmarks of how the
+ * index follows changes.
  */
 export class DirVaultPort implements VaultPort {
 	readonly configDir = '.obsidian';
@@ -16,6 +18,7 @@ export class DirVaultPort implements VaultPort {
 	private readonly folders = new Set<string>();
 	private resolvedLinks: Record<string, Record<string, number>> = {};
 	private unresolvedLinks: Record<string, Record<string, number>> = {};
+	private readonly listeners = new Set<(change: VaultChange) => void>();
 
 	constructor(readonly root: string) {
 		this.scan('');
@@ -128,7 +131,27 @@ export class DirVaultPort implements VaultPort {
 	getActiveContext(): ActiveContext {
 		return { path: null, selection: null };
 	}
-	onChange(_listener: (change: VaultChange) => void): () => void {
-		return () => undefined;
+	onChange(listener: (change: VaultChange) => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	/** Rename a folder in memory (never on disk); reports one rename, for the folder. Returns how many notes moved. */
+	renameInMemory(oldPath: string, newPath: string): number {
+		const prefix = `${oldPath}/`;
+		let moved = 0;
+		for (const [p, content] of [...this.text]) {
+			if (!p.startsWith(prefix)) continue;
+			this.text.delete(p);
+			this.text.set(newPath + p.slice(oldPath.length), content);
+			moved++;
+		}
+		for (const f of [...this.folders]) {
+			if (f !== oldPath && !f.startsWith(prefix)) continue;
+			this.folders.delete(f);
+			this.folders.add(newPath + f.slice(oldPath.length));
+		}
+		this.listeners.forEach((l) => l({ type: 'rename', path: newPath, oldPath }));
+		return moved;
 	}
 }
