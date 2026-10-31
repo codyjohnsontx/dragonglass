@@ -1,3 +1,4 @@
+import { isUnderAny } from '../vault/paths';
 import { SearchFields, searchFields, termLookup, TermLookup, tokenCounts } from './tokenize';
 
 /**
@@ -183,13 +184,25 @@ export class Bm25Index {
 
 	/** Drop a note, or every note under a folder path. */
 	remove(path: string): void {
+		this.removeAll([path]);
+	}
+
+	/**
+	 * Drop notes, and every note under any of the paths that is not itself an
+	 * indexed note (a folder), in at most one pass over the index however many
+	 * paths there are: a folder rename reports thousands of old paths at once.
+	 */
+	removeAll(paths: Iterable<string>): void {
 		this.assertNotCompacting();
-		if (this.rows.has(path)) {
-			this.removeRow(path);
-		} else {
-			const prefix = `${path}/`;
-			for (const p of [...this.rows.keys()]) if (p.startsWith(prefix)) this.removeRow(p);
+		const folders = new Set<string>();
+		for (const p of paths) {
+			if (this.rows.has(p)) this.removeRow(p);
+			else folders.add(p);
 		}
+		if (folders.size === 0) return;
+		const under: string[] = [];
+		for (const p of this.rows.keys()) if (isUnderAny(p, folders)) under.push(p);
+		for (const p of under) this.removeRow(p);
 	}
 
 	private removeRow(path: string): void {

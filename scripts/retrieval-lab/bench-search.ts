@@ -133,7 +133,8 @@ for (const field of fields) {
 	}
 }
 
-// Catch-up after renaming the two largest top-level folders, enough to compact on the way.
+// Catch-up after renaming the two largest top-level folders, enough to compact on the way,
+// reported the way Obsidian reports it: the folder, then one event per file.
 const sizes = new Map<string, number>();
 for (const path of vault.text.keys()) {
 	const top = path.split('/')[0]!;

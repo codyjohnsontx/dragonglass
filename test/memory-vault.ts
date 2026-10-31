@@ -116,13 +116,18 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		if (wasFolder) this.emit({ type: 'delete', path });
 	}
 
-	/** Rename a note or a folder; a folder reports one rename, for itself. */
+	/**
+	 * Rename a note or a folder. Like Obsidian (1.14), a folder reports a
+	 * rename for itself first and then one for every file under it.
+	 */
 	rename(oldPath: string, newPath: string): void {
 		const prefix = `${oldPath}/`;
+		const moved: Array<[string, string]> = [];
 		for (const [p, content] of [...this.files]) {
 			if (p !== oldPath && !p.startsWith(prefix)) continue;
 			this.files.delete(p);
 			this.files.set(newPath + p.slice(oldPath.length), content);
+			moved.push([newPath + p.slice(oldPath.length), p]);
 		}
 		for (const f of [...this.folders]) {
 			if (f !== oldPath && !f.startsWith(prefix)) continue;
@@ -135,6 +140,7 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 			folder = parentFolder(folder);
 		}
 		this.emit({ type: 'rename', path: newPath, oldPath });
+		for (const [path, old] of moved) if (old !== oldPath) this.emit({ type: 'rename', path, oldPath: old });
 	}
 
 	onChange(listener: (change: VaultChange) => void): () => void {

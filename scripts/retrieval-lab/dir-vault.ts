@@ -136,15 +136,18 @@ export class DirVaultPort implements VaultPort {
 		return () => this.listeners.delete(listener);
 	}
 
-	/** Rename a folder in memory (never on disk); reports one rename, for the folder. Returns how many notes moved. */
+	/**
+	 * Rename a folder in memory (never on disk), reporting it as Obsidian 1.14
+	 * does: the folder first, then every file under it. Returns how many notes moved.
+	 */
 	renameInMemory(oldPath: string, newPath: string): number {
 		const prefix = `${oldPath}/`;
-		let moved = 0;
+		const moved: Array<[string, string]> = [];
 		for (const [p, content] of [...this.text]) {
 			if (!p.startsWith(prefix)) continue;
 			this.text.delete(p);
 			this.text.set(newPath + p.slice(oldPath.length), content);
-			moved++;
+			moved.push([newPath + p.slice(oldPath.length), p]);
 		}
 		for (const f of [...this.folders]) {
 			if (f !== oldPath && !f.startsWith(prefix)) continue;
@@ -152,6 +155,7 @@ export class DirVaultPort implements VaultPort {
 			this.folders.add(newPath + f.slice(oldPath.length));
 		}
 		this.listeners.forEach((l) => l({ type: 'rename', path: newPath, oldPath }));
-		return moved;
+		for (const [path, old] of moved) this.listeners.forEach((l) => l({ type: 'rename', path, oldPath: old }));
+		return moved.length;
 	}
 }

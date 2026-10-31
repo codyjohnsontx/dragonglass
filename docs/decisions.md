@@ -176,6 +176,20 @@ phone), longest synchronous stall:
 
 No task of 50 ms or more was observed in Obsidian in either sliced case.
 
+Obsidian reports a folder rename as one event for the folder followed by one
+per file inside it. Catch-up first handled each path on its own: the folder
+re-indexed every note under it, each file event re-indexed it again, and each
+old file path, already gone with the folder, scanned the whole index looking
+for notes under it. Catch-up now sorts a batch into notes, folders and gone
+paths, finds the notes under new folders in one pass over the vault, drops
+gone paths in one pass over the index, and re-indexes each note once. For a
+5,730-note folder renamed in a 20,000-note vault in Obsidian with 4x CPU
+throttling, catch-up fell from 17.0 s (10.2 s of CPU in the plugin, mostly
+that scan) to 0.56 s (0.2 s), with no long task either way. The rename itself
+blocks Obsidian's UI thread for 426 to 470 s at 4x with the plugin loaded or
+not; the CPU profile puts it in Obsidian's own
+rename handling, not in this plugin, which only queues the events then.
+
 The matching rules of 14 are kept exactly, so a note matches the same queries
 as before: an index token is a run of letters and digits starting at a word
 start, a query word matches every token it is a prefix of (one sorted range),

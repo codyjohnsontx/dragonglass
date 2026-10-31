@@ -1,4 +1,4 @@
-import { baseName } from '../vault/paths';
+import { baseName, isUnderAny } from '../vault/paths';
 import { VaultChange, VaultPort } from '../vault/port';
 import { Bm25Index, IndexStats, queryTerm } from './bm25';
 import { searchFields, SearchFields, searchTerms, weightedMatches, wordStartFinder } from './tokenize';
@@ -113,26 +113,34 @@ export class VaultSearchIndex {
 		await this.index.compact(() => slice.maybeYield());
 	}
 
-	/** Apply queued changes. A path may be a note, a folder (renamed into place) or something now gone. */
+	/**
+	 * Apply queued changes. A path may be a note, a folder (renamed into place)
+	 * or something now gone. Each batch costs work proportional to what
+	 * changed: a folder rename that reports the folder and then every file in
+	 * it re-indexes each note once and drops the old paths in one pass.
+	 */
 	private async catchUp(): Promise<void> {
 		const slice = new Slicer(this.yieldToUi);
 		while (this.pending.size > 0 && !this.disposed) {
 			const paths = [...this.pending];
 			this.pending.clear();
+			const notes = new Set<string>();
+			const folders = new Set<string>();
+			const gone: string[] = [];
 			for (const path of paths) {
-				if (this.vault.isFolder(path)) {
-					const prefix = `${path}/`;
-					for (const file of this.vault.listMarkdownFiles()) {
-						if (!file.path.startsWith(prefix)) continue;
-						await this.indexNote(file.path);
-						await this.compactIfDue(slice);
-						await slice.maybeYield();
-					}
-				} else if (path.endsWith('.md') && this.vault.exists(path)) {
-					await this.indexNote(path);
-				} else {
-					this.index.remove(path);
-				}
+				if (this.vault.isFolder(path)) folders.add(path);
+				else if (path.endsWith('.md') && this.vault.exists(path)) notes.add(path);
+				else gone.push(path);
+			}
+			if (folders.size > 0) {
+				for (const file of this.vault.listMarkdownFiles()) if (isUnderAny(file.path, folders)) notes.add(file.path);
+			}
+			this.index.removeAll(gone);
+			await this.compactIfDue(slice);
+			await slice.maybeYield();
+			for (const path of notes) {
+				if (this.disposed) return;
+				await this.indexNote(path);
 				await this.compactIfDue(slice);
 				await slice.maybeYield();
 			}
@@ -150,7 +158,9 @@ export class VaultSearchIndex {
 		} catch {
 			content = null;
 		}
-		if (content === null) this.index.remove(path);
+		if (content === null) {
+			if (this.index.has(path)) this.index.remove(path);
+		}
 		else this.index.upsert(path, baseName(path), content);
 	}
 }

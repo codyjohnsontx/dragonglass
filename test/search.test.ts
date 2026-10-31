@@ -225,6 +225,28 @@ describe('VaultSearchIndex', () => {
 		expect(await index.search('note', { folder: 'Big', limit: 5, mode: 'any' })).toEqual([]);
 	});
 
+	it('re-indexes each note of a renamed folder once, however Obsidian reports the rename', async () => {
+		const notes: Record<string, string> = { 'Other/Keep.md': 'kept note' };
+		for (let i = 0; i < 2000; i++) notes[`Inbox/Sub${i % 10}/${i}.md`] = `inbox note ${i}`;
+		const vault = new MemoryVaultPort(notes);
+		const index = new VaultSearchIndex(vault, () => Promise.resolve());
+		await index.start();
+		const reads: string[] = [];
+		const readNote = vault.readNote.bind(vault);
+		vault.readNote = (path) => {
+			reads.push(path);
+			return readNote(path);
+		};
+		// A folder rename reports the folder and then each file; the old paths are gone by the time each file's event is handled.
+		vault.rename('Inbox', 'Archive/Inbox');
+		const moved = await index.search('inbox', { folder: '', limit: 5000, mode: 'any' });
+		expect(moved).toHaveLength(2000);
+		expect(moved.every((h) => h.path.startsWith('Archive/Inbox/Sub'))).toBe(true);
+		expect(reads.filter((p) => p.startsWith('Archive/Inbox/')).sort()).toEqual(moved.map((h) => h.path).sort());
+		expect((await index.search('kept', { folder: '', limit: 5, mode: 'any' })).map((h) => h.path)).toEqual(['Other/Keep.md']);
+		expect((await index.stats()).notes).toBe(2001);
+	});
+
 	it('stops following the vault once disposed', async () => {
 		const vault = new MemoryVaultPort({ 'A.md': 'alpha' });
 		const index = new VaultSearchIndex(vault, noYield);
