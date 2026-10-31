@@ -241,6 +241,8 @@ interface ShownNote {
 	path: string;
 	/** Null when the note cannot be read right now. */
 	content: string | null;
+	/** Linked from a named result rather than found by the search. */
+	linked?: boolean;
 }
 
 interface LinkedNotes {
@@ -251,8 +253,10 @@ interface LinkedNotes {
 }
 
 /**
- * The notes linked from the best result whose name the query spells out
- * (initials aside) but whose text lacks the query's other words. Asked for
+ * The notes linked from the best result whose name, two or more words with
+ * initials aside, the query spells out but whose text lacks the query's other
+ * words. A one-word name is a topic (Python, Budget), not a person or a
+ * titled note, and its links would crowd out the ranked results. Asked for
  * "Marcus Nakamura climbing project", search finds the person note, which
  * lists six projects by name only; the climbing one never says "climbing", so
  * the model answered from whatever else the search showed instead of
@@ -261,7 +265,7 @@ interface LinkedNotes {
 async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<LinkedNotes | null> {
 	const hub = hits.find((h) => {
 		const named = searchTerms(h.name).filter((t) => !/^\p{L}$/u.test(t));
-		return named.length > 0 && named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
+		return named.length >= 2 && named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
 	});
 	if (!hub) return null;
 	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path && p.toLowerCase().endsWith('.md')).slice(0, MAX_LINKED);
@@ -287,9 +291,10 @@ function linkedSection({ hub, missing, notes }: LinkedNotes): string {
 
 /**
  * The order search results get their full text in: by rank, except that the
- * notes linked from a named result come right after it. Even with the right
- * project named in the excerpts, the model answered without reading it ("no
- * launch date is given"), so its text has to be in the result.
+ * notes linked from a named result come right after it, marked as linked.
+ * Even with the right project named in the excerpts, the model answered
+ * without reading it ("no launch date is given"), so its text has to be in
+ * the result.
  */
 function autoReadOrder(hits: SearchHit[], contents: Array<string | null | undefined>, linked: LinkedNotes | null): ShownNote[] {
 	const ranked = hits.map((h, i) => ({ name: h.name, path: h.path, content: contents[i] ?? null }));
@@ -297,7 +302,7 @@ function autoReadOrder(hits: SearchHit[], contents: Array<string | null | undefi
 	const at = hits.indexOf(linked.hub) + 1;
 	const before = ranked.slice(0, at);
 	const seen = new Set(before.map((n) => n.path));
-	const follow = linked.notes.filter((n) => !seen.has(n.path));
+	const follow = linked.notes.filter((n) => !seen.has(n.path)).map((n) => ({ ...n, linked: true }));
 	for (const n of follow) seen.add(n.path);
 	return [...before, ...follow, ...ranked.slice(at).filter((n) => !seen.has(n.path))];
 }
@@ -336,11 +341,14 @@ const MAX_NOT_SHOWN = 10;
  * so the model has the notes in front of it instead of excerpts. A result
  * that does not fit is cut to what is left if at least half of it fits, and
  * skipped otherwise so a shorter one further down can still be included.
+ * Linked notes share at most half the budget, so the ranked results after
+ * them keep the rest.
  */
 function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): string {
 	const shown: string[] = [];
 	const notShown: string[] = [];
 	let left = budget;
+	let linkedLeft = Math.floor(budget / 2);
 	notes.forEach((note) => {
 		const content = note.content;
 		const label = `${note.name} (${note.path})`;
@@ -350,18 +358,22 @@ function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): 
 			return;
 		}
 		const tokens = estimateTokens(content.slice(0, maxChars));
-		const room = left - NOTE_FRAME_TOKENS;
+		const cap = note.linked ? Math.min(left, linkedLeft) : left;
+		const room = cap - NOTE_FRAME_TOKENS;
+		let spent = 0;
 		if (tokens <= room) {
 			shown.push(formatNote(note.path, content, maxChars));
-			left -= tokens + NOTE_FRAME_TOKENS;
+			spent = tokens + NOTE_FRAME_TOKENS;
 			if (content.length > maxChars) notShown.push(cut);
 		} else if (room > 0 && room >= tokens / 2) {
 			shown.push(formatNote(note.path, content, maxChars, room));
-			left = 0;
+			spent = cap;
 			notShown.push(cut);
 		} else {
 			notShown.push(label);
 		}
+		left -= spent;
+		if (note.linked) linkedLeft -= spent;
 	});
 	if (shown.length === 0) return '';
 	const count = shown.length === 1 ? 'the best match' : `the ${shown.length} best matches`;

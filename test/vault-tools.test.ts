@@ -268,6 +268,38 @@ describe('vault tools', () => {
 			expect((await search.execute({ query: 'climbing route' }, ctx)).content).not.toContain('The notes it links to');
 		});
 
+		it('never follows the links of a one-word topic note, and gives linked notes at most half the auto-read budget', async () => {
+			const filler = (n: number) => 'Plain filler words here. '.repeat(n);
+			const vault = new MemoryVaultPort({
+				'Python.md': '# Python\n\n- [[Asyncio]]\n- [[Typing]]\n',
+				'Asyncio.md': '# Asyncio\n\nEvent loops.\n',
+				'Typing.md': '# Typing\n\nProtocols.\n',
+				'Notes/Backoff.md': '# Backoff\n\nA retry decorator with jitter.\n',
+				'People/Ada Lovelace.md': '# Ada Lovelace\n\n- [[Analytical Notes]]\n- [[Bernoulli Table]]\n- [[Loom Cards]]\n',
+				'Projects/Analytical Notes.md': `# Analytical Notes\n\n${filler(80)}`,
+				'Projects/Bernoulli Table.md': `# Bernoulli Table\n\n${filler(80)}`,
+				'Projects/Loom Cards.md': `# Loom Cards\n\n${filler(80)}`,
+				'Notes/Engines overview.md': `# Engines overview\n\nThe engines. ${filler(45)}`,
+			});
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 1200 })) registry.register(t);
+			const search = registry.get('search_notes')!;
+
+			// A one-word name is a topic, not a person or a titled note: its links are not listed or read.
+			const topic = (await search.execute({ query: 'python retry decorator' }, ctx)).content;
+			expect(topic).not.toContain('The notes it links to');
+			expect(topic).not.toContain('<<<note path="Asyncio.md">>>');
+
+			// The linked notes take at most half the budget, so the ranked result after them is still read in full.
+			const r = (await search.execute({ query: 'Ada Lovelace engines' }, ctx)).content;
+			expect(r).toContain('Ada Lovelace (People/Ada Lovelace.md) does not mention engines. The notes it links to:');
+			const order = [...r.matchAll(/<<<note path="([^"]+)">>>/g)].map((m) => m[1]);
+			expect(order).toEqual(['People/Ada Lovelace.md', 'Projects/Analytical Notes.md', 'Notes/Engines overview.md']);
+			const overview = r.slice(r.indexOf('<<<note path="Notes/Engines overview.md">>>'));
+			expect(overview.slice(0, overview.indexOf('<<<end note>>>'))).not.toContain('[truncated');
+			expect(r).toContain('Not shown in full: Bernoulli Table (Projects/Bernoulli Table.md); Loom Cards (Projects/Loom Cards.md).');
+		});
+
 		it('boosts name and heading matches over body mentions', async () => {
 			const { vault } = searchSetup();
 			const hits = await searchVault(vault, 'risks', '', 20);
