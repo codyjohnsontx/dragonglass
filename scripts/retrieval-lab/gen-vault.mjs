@@ -4,8 +4,8 @@
  *
  *   node scripts/retrieval-lab/gen-vault.mjs <outdir> <noteCount> [seed] [--force]
  *
- * Refuses to touch an existing <outdir>/vault unless --force is given, since
- * regenerating deletes it first.
+ * Refuses to replace an existing <outdir>/vault, questions.json or stats.json
+ * unless --force is given, since regenerating deletes the vault first.
  *
  * Writes <outdir>/vault/** (Markdown notes with frontmatter, wikilinks that
  * form a hub-and-cluster graph, daily notes, meetings, people, projects,
@@ -28,8 +28,9 @@ if (!outdir || !Number.isFinite(N)) {
 	console.error('usage: gen-vault.mjs <outdir> <noteCount> [seed] [--force]');
 	process.exit(1);
 }
-if (existsSync(join(outdir, 'vault')) && !force) {
-	console.error(`${join(outdir, 'vault')} exists; pass --force to delete and regenerate it`);
+const existing = ['vault', 'questions.json', 'stats.json'].map((f) => join(outdir, f)).filter((p) => existsSync(p));
+if (existing.length > 0 && !force) {
+	console.error(`${existing.join(', ')} already exist; pass --force to replace them`);
 	process.exit(1);
 }
 
