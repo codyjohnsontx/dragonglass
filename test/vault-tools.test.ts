@@ -299,6 +299,22 @@ describe('vault tools', () => {
 			expect(rest).toMatch(/\n\nNot shown in full: Nimbus sync \(Meetings\/Nimbus sync\.md\)\. read_note one of them if the text above does not answer the question\.$/);
 		});
 
+		it('lists a result it cannot read right now without an excerpt or its text', async () => {
+			const vault = new MemoryVaultPort({ 'A.md': 'nimbus alpha', 'B.md': 'nimbus beta' });
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 4000 })) registry.register(t);
+			const search = registry.get('search_notes')!;
+			expect((await search.execute({ query: 'nimbus' }, ctx)).content).toContain('<<<note path="A.md">>>');
+			const readNote = vault.readNote.bind(vault);
+			vault.readNote = (path) => (path === 'A.md' ? Promise.reject(new Error('busy')) : readNote(path));
+			const r = await search.execute({ query: 'nimbus' }, ctx);
+			expect(r.isError).toBeFalsy();
+			expect(r.content).toContain('A (A.md)\n  (could not be read just now)');
+			expect(r.content).toContain('<<<note path="B.md">>>');
+			expect(r.content).not.toContain('<<<note path="A.md">>>');
+			expect(r.content).toContain('Not shown in full: A (A.md).');
+		});
+
 		it('cuts a note that does not fit when at least half of it does', async () => {
 			const r = await autoReadSetup(400).execute({ query: 'timeline' }, ctx);
 			expect(r.content).toContain('Full text of the best match that fit:');

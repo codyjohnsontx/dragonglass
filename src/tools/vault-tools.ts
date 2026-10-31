@@ -173,9 +173,16 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
 				const hits = await index.search(query, { folder, limit, mode });
 				if (hits.length === 0) return ok(`No notes matched "${query}".`);
-				const contents = await Promise.all(hits.map(async (h) => (await vault.readNote(h.path)) ?? ''));
+				// A hit that cannot be read right now is still listed, without an excerpt or full text.
+				const contents = await Promise.all(hits.map((h) => vault.readNote(h.path).catch(() => null)));
 				const termCount = searchTerms(query).length;
-				const list = hits.map((h, i) => formatHit(h, termCount, bestExcerpt(contents[i] ?? '', h.matched.map(wordStartFinder)))).join('\n');
+				const list = hits
+					.map((h, i) => {
+						const content = contents[i];
+						const excerpt = content === null || content === undefined ? '(could not be read just now)' : bestExcerpt(content, h.matched.map(wordStartFinder));
+						return formatHit(h, termCount, excerpt);
+					})
+					.join('\n');
 				const budget = opts.autoReadTokens ?? 0;
 				const fullText = budget > 0 ? autoReadSection(hits, contents, budget, opts.maxReadChars) : '';
 				return ok(fullText ? `${list}\n\n${fullText}` : list);
@@ -202,14 +209,18 @@ const MAX_NOT_SHOWN = 10;
  * that does not fit is cut to what is left if at least half of it fits, and
  * skipped otherwise so a shorter one further down can still be included.
  */
-function autoReadSection(hits: SearchHit[], contents: string[], budget: number, maxChars: number): string {
+function autoReadSection(hits: SearchHit[], contents: Array<string | null>, budget: number, maxChars: number): string {
 	const shown: string[] = [];
 	const notShown: string[] = [];
 	let left = budget;
 	hits.forEach((hit, i) => {
-		const content = contents[i] ?? '';
+		const content = contents[i];
 		const label = `${hit.name} (${hit.path})`;
 		const cut = `${hit.name} (${hit.path}, cut)`;
+		if (content === null || content === undefined) {
+			notShown.push(label);
+			return;
+		}
 		const tokens = estimateTokens(content.slice(0, maxChars));
 		const room = left - NOTE_FRAME_TOKENS;
 		if (tokens <= room) {

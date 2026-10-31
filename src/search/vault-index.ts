@@ -76,7 +76,8 @@ export class VaultSearchIndex {
 			const ranked = await this.index.rank(words.map(queryTerm), options, async (path, term) => {
 				let f = fields.get(path);
 				if (!f) {
-					f = searchFields(baseName(path), (await this.vault.readNote(path)) ?? '');
+					// A note that cannot be read right now cannot be checked; it simply does not match.
+					f = searchFields(baseName(path), (await this.vault.readNote(path).catch(() => null)) ?? '');
 					fields.set(path, f);
 				}
 				return weightedMatches(f, finders[term]!);

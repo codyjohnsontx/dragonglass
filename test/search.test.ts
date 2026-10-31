@@ -264,6 +264,18 @@ describe('VaultSearchIndex', () => {
 		expect(failures).toBe(-1);
 	});
 
+	it('still answers when a note it keeps indexed cannot be read', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'release 2024-10 notes', 'B.md': 'release 2024-10 plan' });
+		const index = new VaultSearchIndex(vault, noYield);
+		await index.start();
+		const readNote = vault.readNote.bind(vault);
+		vault.readNote = (path) => (path === 'A.md' ? Promise.reject(new Error('busy')) : readNote(path));
+		await vault.processNote('A.md', (c) => `${c} edited`);
+		// "2024-10" is checked against note text; the unreadable note just does not match.
+		expect((await index.search('2024-10', { folder: '', limit: 5, mode: 'any' })).map((h) => h.path)).toEqual(['B.md']);
+		expect(await paths(index, 'release')).toEqual(['A.md', 'B.md']);
+	});
+
 	it('stops following the vault once disposed', async () => {
 		const vault = new MemoryVaultPort({ 'A.md': 'alpha' });
 		const index = new VaultSearchIndex(vault, noYield);
