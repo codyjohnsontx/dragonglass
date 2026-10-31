@@ -290,21 +290,19 @@ function linkedSection({ hub, missing, notes }: LinkedNotes): string {
 }
 
 /**
- * The order search results get their full text in: by rank, except that the
- * notes linked from a named result come right after it, marked as linked.
- * Even with the right project named in the excerpts, the model answered
- * without reading it ("no launch date is given"), so its text has to be in
- * the result.
+ * The order search results get their full text in: by rank, with the notes
+ * linked from a named result that the search did not find right after it,
+ * marked as linked. A linked note the search found keeps its rank. Even with
+ * the right project named in the excerpts, the model answered without reading
+ * it ("no launch date is given"), so its text has to be in the result.
  */
 function autoReadOrder(hits: SearchHit[], contents: Array<string | null | undefined>, linked: LinkedNotes | null): ShownNote[] {
 	const ranked = hits.map((h, i) => ({ name: h.name, path: h.path, content: contents[i] ?? null }));
 	if (!linked) return ranked;
 	const at = hits.indexOf(linked.hub) + 1;
-	const before = ranked.slice(0, at);
-	const seen = new Set(before.map((n) => n.path));
-	const follow = linked.notes.filter((n) => !seen.has(n.path)).map((n) => ({ ...n, linked: true }));
-	for (const n of follow) seen.add(n.path);
-	return [...before, ...follow, ...ranked.slice(at).filter((n) => !seen.has(n.path))];
+	const found = new Set(hits.map((h) => h.path));
+	const follow = linked.notes.filter((n) => !found.has(n.path)).map((n) => ({ ...n, linked: true }));
+	return [...ranked.slice(0, at), ...follow, ...ranked.slice(at)];
 }
 
 /** Notes named when a folder-restricted search has better matches outside the folder. */
