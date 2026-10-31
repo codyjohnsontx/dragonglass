@@ -2,7 +2,10 @@
 /**
  * Synthetic but realistic Obsidian vault generator for retrieval benchmarks.
  *
- *   node scripts/retrieval-lab/gen-vault.mjs <outdir> <noteCount> [seed]
+ *   node scripts/retrieval-lab/gen-vault.mjs <outdir> <noteCount> [seed] [--force]
+ *
+ * Refuses to touch an existing <outdir>/vault unless --force is given, since
+ * regenerating deletes it first.
  *
  * Writes <outdir>/vault/** (Markdown notes with frontmatter, wikilinks that
  * form a hub-and-cluster graph, daily notes, meetings, people, projects,
@@ -13,14 +16,20 @@
  *   unnamed     like paraphrase, but the host note is described, not named
  *   multihop    the host note is reached through a person or hub note
  */
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-const outdir = process.argv[2];
-const N = Number(process.argv[3] ?? 500);
-const seed = Number(process.argv[4] ?? 7);
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const force = process.argv.includes('--force');
+const outdir = positional[0];
+const N = Number(positional[1] ?? 500);
+const seed = Number(positional[2] ?? 7);
 if (!outdir || !Number.isFinite(N)) {
-	console.error('usage: gen-vault.mjs <outdir> <noteCount> [seed]');
+	console.error('usage: gen-vault.mjs <outdir> <noteCount> [seed] [--force]');
+	process.exit(1);
+}
+if (existsSync(join(outdir, 'vault')) && !force) {
+	console.error(`${join(outdir, 'vault')} exists; pass --force to delete and regenerate it`);
 	process.exit(1);
 }
 

@@ -106,13 +106,14 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	/** Delete a note, or a folder and everything in it, reporting each path like Obsidian does. */
 	delete(path: string): void {
 		const prefix = `${path}/`;
+		const wasFolder = this.folders.has(path);
 		for (const p of [...this.files.keys()]) {
 			if (p !== path && !p.startsWith(prefix)) continue;
 			this.files.delete(p);
 			this.emit({ type: 'delete', path: p });
 		}
 		for (const f of [...this.folders]) if (f === path || f.startsWith(prefix)) this.folders.delete(f);
-		if (this.folders.has(path)) this.emit({ type: 'delete', path });
+		if (wasFolder) this.emit({ type: 'delete', path });
 	}
 
 	/** Rename a note or a folder; a folder reports one rename, for itself. */

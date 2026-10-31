@@ -40,8 +40,11 @@ for (const q of questions) {
 			],
 		}),
 	});
+	if (!res.ok) throw new Error(`Ollama returned ${res.status} for ${q.id}: ${(await res.text()).slice(0, 200)}`);
 	const data = await res.json();
-	q.modelQuery = String(data.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim().split('\n')[0].replace(/^query:\s*/i, '').trim();
+	const modelQuery = String(data.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim().split('\n')[0].replace(/^query:\s*/i, '').trim();
+	if (!modelQuery) throw new Error(`empty model query for ${q.id}`);
+	q.modelQuery = modelQuery;
 	done++;
 	if (done % 20 === 0) {
 		writeFileSync(file, JSON.stringify(questions, null, 1));
