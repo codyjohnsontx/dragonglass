@@ -258,6 +258,10 @@ describe('vault tools', () => {
 			// A one-letter suffix on the name is an initial the query need not repeat.
 			const priya = (await search.execute({ query: 'Priya Shah climbing project' }, ctx)).content;
 			expect(priya).toContain('Priya Shah B. (People/Priya Shah B..md) does not mention climbing. The notes it links to:\nGranite Loop (Projects/Granite Loop.md)\n  Hangboard twice a week before the redpoint.');
+			// A one-digit number in the name is not an initial: the query has to say it.
+			vault.seed('Sprints/Sprint 2.md', '# Sprint 2\n\n- [[Granite Loop]]\n');
+			expect((await search.execute({ query: 'sprint retro' }, ctx)).content).not.toContain('The notes it links to');
+			expect((await search.execute({ query: 'sprint 2 retro' }, ctx)).content).toContain('Sprint 2 (Sprints/Sprint 2.md) does not mention retro. The notes it links to:');
 
 			// The named note has every word, or the query names no result: no list, and full text in rank order.
 			expect((await search.execute({ query: 'Marcus Nakamura projects' }, ctx)).content).not.toContain('The notes it links to');

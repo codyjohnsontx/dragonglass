@@ -260,7 +260,7 @@ interface LinkedNotes {
  */
 async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<LinkedNotes | null> {
 	const hub = hits.find((h) => {
-		const named = searchTerms(h.name).filter((t) => [...t].length > 1);
+		const named = searchTerms(h.name).filter((t) => !/^\p{L}$/u.test(t));
 		return named.length > 0 && named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
 	});
 	if (!hub) return null;
