@@ -185,10 +185,57 @@ describe('vault tools', () => {
 		it('requires every term in "all" mode', async () => {
 			const { vault, registry } = searchSetup();
 			expect((await searchVault(vault, 'project meeting', '', 20, 'all')).map((h) => h.path)).toEqual(['Meetings/Planning.md']);
-			const r = await registry.get('search_notes')!.execute({ query: 'project waffles', mode: 'all' }, ctx);
-			expect(r.content).toMatch(/No notes matched/);
 			const search = registry.get('search_notes')!;
+			expect(search.parameters.properties!['mode']!.description).toContain('then, if there are fewer than 10, notes with some of them');
+			// Fewer than the minimum have every word: notes with some of them follow, and the result says where they start.
+			const some = (await search.execute({ query: 'project meeting', mode: 'all' }, ctx)).content.split('\n');
+			expect(some.slice(0, 3)).toEqual(['Only the first result has every word; the rest have some of them.', '', 'Planning (Meetings/Planning.md) - matches project, meeting']);
+			expect(some.filter((l) => / \(.+\.md\)/.test(l)).length).toBe(4);
+			const none = (await search.execute({ query: 'project waffles', mode: 'all' }, ctx)).content.split('\n');
+			expect(none.slice(0, 2)).toEqual(['No note has every word; these results have some of them.', '']);
+			expect(none.some((l) => l.startsWith('Recipes (Recipes.md)'))).toBe(true);
+			expect((await search.execute({ query: 'zzzz qqqq', mode: 'all' }, ctx)).content).toBe('No notes matched "zzzz qqqq".');
 			expect(() => parseToolArguments(search, '{"query":"x","mode":"some"}')).toThrow(/one of any, all/);
+		});
+
+		it('returns at least 10 results whatever limit the model asks for', async () => {
+			const notes: Record<string, string> = {};
+			for (let i = 1; i <= 12; i++) notes[`Notes/Nimbus ${i}.md`] = `Nimbus note number ${i}.`;
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(new MemoryVaultPort(notes))) registry.register(t);
+			const search = registry.get('search_notes')!;
+			const count = async (limit: number) => (await search.execute({ query: 'nimbus', limit }, ctx)).content.split('\n').filter((l) => / \(Notes\/.+\.md\)$/.test(l)).length;
+			expect(await count(1)).toBe(10);
+			expect(await count(5)).toBe(10);
+			expect(await count(11)).toBe(11);
+			expect(search.parameters.properties!['limit']!.description).toBe('Max results (default 20). Fewer than 10 counts as 10.');
+		});
+
+		it('lists the notes linked from a result the query names when that note lacks the other words', async () => {
+			const vault = new MemoryVaultPort({
+				'People/Marcus Nakamura A..md': '# Marcus Nakamura A.\n\n## Projects\n\n- [[Violet Canvas]]\n- [[Lantern Vector]]\n- [[Echo Current]]\n',
+				'Projects/Violet Canvas.md': '---\nowner: "[[Marcus Nakamura A.]]"\n---\n# Violet Canvas\n\nChalk up before the crux on the project route.\n\nLaunch date: May 3, 2026.\n',
+				'Projects/Lantern Vector.md': '# Lantern Vector\n\nQuantization to four bits halves latency.\n',
+				'Projects/Echo Current.md': `# Echo Current\n\n${'Compost turned every two weeks. '.repeat(8)}The cucumbers start climbing the trellis.\n`,
+			});
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault)) registry.register(t);
+			const search = registry.get('search_notes')!;
+			const r = await search.execute({ query: 'Marcus Nakamura climbing project' }, ctx);
+			const linked = r.content.slice(r.content.indexOf('\n\nMarcus Nakamura A. (People/Marcus Nakamura A..md) does not mention')).split('\n');
+			expect(linked.slice(2, 6)).toEqual([
+				'Marcus Nakamura A. (People/Marcus Nakamura A..md) does not mention climbing. The notes it links to:',
+				'Violet Canvas (Projects/Violet Canvas.md)',
+				'  # Violet Canvas Chalk up before the crux on the project route. Launch date: May 3, 2026.',
+				'Lantern Vector (Projects/Lantern Vector.md)',
+			]);
+			// A linked note that has the missing word shows the passage around it.
+			expect(linked[8]).toContain('cucumbers start climbing');
+			expect(linked[8]).not.toContain('# Echo Current');
+
+			// The named note has every word, or the query names no result: no list.
+			expect((await search.execute({ query: 'Marcus Nakamura projects' }, ctx)).content).not.toContain('The notes it links to');
+			expect((await search.execute({ query: 'climbing route' }, ctx)).content).not.toContain('The notes it links to');
 		});
 
 		it('boosts name and heading matches over body mentions', async () => {

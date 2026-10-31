@@ -154,11 +154,11 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 			properties: {
 				query: { type: 'string', description: 'Words to look for. Use several related words rather than narrowing to one.' },
 				folder: { type: 'string', description: 'Restrict to this folder (optional); if nothing there matches, the whole vault is searched.' },
-				limit: { type: 'integer', description: 'Max results (default 20).', minimum: 1, maximum: 100 },
+				limit: { type: 'integer', description: `Max results (default 20). Fewer than ${MIN_SEARCH_RESULTS} counts as ${MIN_SEARCH_RESULTS}.`, minimum: 1, maximum: 100 },
 				mode: {
 					type: 'string',
 					enum: ['any', 'all'],
-					description: '"any" (default) matches notes with any word; "all" only notes with every word.',
+					description: `"any" (default) matches notes with any word; "all" lists notes with every word first, then, if there are fewer than ${MIN_SEARCH_RESULTS}, notes with some of them.`,
 				},
 			},
 			required: ['query'],
@@ -169,12 +169,15 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				if (!query) return fail('Error: query must not be empty.');
 				const folder = validateVaultPath(args['folder'] ?? '', { markdown: false, allowRoot: true, configDir: vault.configDir });
 				const opts = options();
-				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults, 100);
+				const asked = typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults;
+				const limit = Math.min(Math.max(asked, MIN_SEARCH_RESULTS), 100);
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
 				let hits = await index.search(query, { folder, limit, mode });
 				let scope = '';
+				let searched = folder;
 				if (folder !== '' && hits.length === 0) {
 					hits = await index.search(query, { folder: '', limit, mode });
+					searched = '';
 					if (hits.length > 0) scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
 				} else if (folder !== '') {
 					const elsewhere = await betterElsewhere(index, query, folder, mode, hits[0]!);
@@ -182,25 +185,78 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 						scope = `Searched only ${folder}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
 					}
 				}
+				if (mode === 'all' && hits.length < MIN_SEARCH_RESULTS) {
+					const withEvery = hits.length;
+					const seen = new Set(hits.map((h) => h.path));
+					const some = await index.search(query, { folder: searched, limit, mode: 'any' });
+					hits = [...hits, ...some.filter((h) => !seen.has(h.path))].slice(0, limit);
+					if (hits.length > withEvery) {
+						const which = withEvery === 0 ? 'No note has every word; these results have' : withEvery === 1 ? 'Only the first result has every word; the rest have' : `Only the first ${withEvery} results have every word; the rest have`;
+						scope += `${which} some of them.\n\n`;
+					}
+				}
 				if (hits.length === 0) return ok(`No notes matched "${query}".`);
 				// A hit that cannot be read right now is still listed, without an excerpt or full text.
 				const contents = await Promise.all(hits.map((h) => vault.readNote(h.path).catch(() => null)));
-				const termCount = searchTerms(query).length;
+				const terms = searchTerms(query);
 				const list = hits
 					.map((h, i) => {
 						const content = contents[i];
 						const excerpt = content === null || content === undefined ? '(could not be read just now)' : bestExcerpt(content, h.matched.map(wordStartFinder));
-						return formatHit(h, termCount, excerpt);
+						return formatHit(h, terms.length, excerpt);
 					})
 					.join('\n');
+				const links = await linkedNotesSection(vault, hits, terms);
 				const budget = opts.autoReadTokens ?? 0;
 				const fullText = budget > 0 ? autoReadSection(hits, contents, budget, opts.maxReadChars) : '';
-				return ok(`${scope}${list}${fullText ? `\n\n${fullText}` : ''}`);
+				return ok(`${scope}${list}${links ? `\n\n${links}` : ''}${fullText ? `\n\n${fullText}` : ''}`);
 			} catch (e) {
 				return wrapError(e);
 			}
 		},
 	};
+}
+
+/**
+ * The fewest results a search returns, whatever limit the model asks for and
+ * in either mode, while that many notes have any of the words. A local model
+ * asks for 1 to 5 results, or every word, to save room, and the note that
+ * answers a question the query words only describe (a climbing project whose
+ * note says crux and hangboard) is then cut off; auto-read already caps the
+ * full text.
+ */
+const MIN_SEARCH_RESULTS = 10;
+
+/** Notes listed, with an excerpt each, from a result the query names. */
+const MAX_LINKED = 10;
+
+/**
+ * The notes linked from the best result whose name the query spells out but
+ * whose text lacks the query's other words, each with an excerpt. Asked for
+ * "Marcus Nakamura climbing project", search finds the person note, which
+ * lists six projects by name only; the climbing one never says "climbing", so
+ * the model answered from whatever the search showed instead of following the
+ * links. The excerpt is around the missing words when a linked note has them,
+ * otherwise its opening, so the model can tell which link to follow.
+ */
+async function linkedNotesSection(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<string> {
+	const hub = hits.find((h) => {
+		const named = searchTerms(h.name);
+		return named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
+	});
+	if (!hub) return '';
+	const missing = terms.filter((t) => !hub.matched.includes(t));
+	const linked = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path).slice(0, MAX_LINKED);
+	if (linked.length === 0) return '';
+	const finders = missing.map(wordStartFinder);
+	const lines = await Promise.all(
+		linked.map(async (path) => {
+			const content = await vault.readNote(path).catch(() => null);
+			const excerpt = content === null ? '(could not be read just now)' : bestExcerpt(content, finders);
+			return `${baseName(path)} (${path})\n  ${excerpt}`;
+		}),
+	);
+	return [`${hub.name} (${hub.path}) does not mention ${missing.join(', ')}. The notes it links to:`, ...lines].join('\n');
 }
 
 /** Notes named when a folder-restricted search has better matches outside the folder. */
