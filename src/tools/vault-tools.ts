@@ -190,7 +190,11 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				if (mode === 'all' && hits.length < MIN_SEARCH_RESULTS) {
 					const withEvery = hits.length;
 					const seen = new Set(hits.map((h) => h.path));
-					const some = await index.search(query, { folder: searched, limit, mode: 'any' });
+					let some = await index.search(query, { folder: searched, limit, mode: 'any' });
+					if (some.length === 0 && searched !== '') {
+						some = await index.search(query, { folder: '', limit, mode: 'any' });
+						if (some.length > 0) scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault.\n\n${scope}`;
+					}
 					hits = [...hits, ...some.filter((h) => !seen.has(h.path))].slice(0, limit);
 					if (hits.length > withEvery) {
 						const which = withEvery === 0 ? 'No note has every word; these results have' : withEvery === 1 ? 'Only the first result has every word; the rest have' : `Only the first ${withEvery} results have every word; the rest have`;

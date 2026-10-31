@@ -201,6 +201,15 @@ describe('vault tools', () => {
 			const listed = inFolder.filter((l) => / \(.+\.md\)/.test(l));
 			expect(listed.length).toBeGreaterThan(0);
 			expect(listed.every((l) => l.includes('(Projects/'))).toBe(true);
+			// A folder with no note having any of the words still falls back to the whole vault, as in "any" mode.
+			const elsewhere = (await search.execute({ query: 'budget waffles', folder: 'Meetings', mode: 'all' }, ctx)).content.split('\n');
+			expect(elsewhere.slice(0, 4)).toEqual([
+				'No notes in Meetings/ matched "budget waffles"; these results are from the whole vault.',
+				'',
+				'No note has every word; these results have some of them.',
+				'',
+			]);
+			expect(elsewhere.filter((l) => / \(.+\.md\)/.test(l)).map((l) => l.split(' ')[0]).sort()).toEqual(['Budget', 'Recipes']);
 			expect(() => parseToolArguments(search, '{"query":"x","mode":"some"}')).toThrow(/one of any, all/);
 		});
 
