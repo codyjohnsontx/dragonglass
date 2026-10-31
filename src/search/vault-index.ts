@@ -160,8 +160,9 @@ export class VaultSearchIndex {
 		}
 		if (content === null) {
 			if (this.index.has(path)) this.index.remove(path);
+		} else {
+			this.index.upsert(path, baseName(path), content);
 		}
-		else this.index.upsert(path, baseName(path), content);
 	}
 }
 
