@@ -110,7 +110,10 @@ short excerpts. **Note text in search results** (under Context) sets that
 budget, 4,000 tokens by default and never more than a quarter of the context
 window when the provider reports one; zero turns it off. A match too long for
 what is left is cut if at least half of it fits and skipped otherwise, and each
-note is also held to **Max characters per note**.
+note is also held to **Max characters per note**. When the query names a note
+but asks about something it does not mention (a person's climbing project), the
+search also lists the notes it links to and reads them in full within half of
+that budget.
 
 ### OpenAI
 
@@ -337,12 +340,12 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 - The whole vault is never uploaded. What goes to the provider you picked is
   your message, the context you attach (the active note, a selection, attached
   notes), the content of every note the model reads through its tools, the
-  results of its searches (an excerpt per matching note plus the full text of
-  the best matches that fit **Note text in search results**, 4,000 tokens by
-  default), and a short overview of the vault: the note count and the names of
-  the top-level folders. Search itself reads every note locally to build its
-  index; only those results are sent. With a cloud provider, all of that leaves
-  your machine.
+  results of its searches (an excerpt per matching note and per note linked
+  from a note the query names, plus the full text of the best of them that fit
+  **Note text in search results**, 4,000 tokens by default), and a short
+  overview of the vault: the note count and the names of the top-level folders.
+  Search itself reads every note locally to build its index; only those results
+  are sent. With a cloud provider, all of that leaves your machine.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content is treated as data: the model is told not to follow

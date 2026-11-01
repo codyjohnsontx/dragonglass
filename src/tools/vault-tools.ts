@@ -154,11 +154,11 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 			properties: {
 				query: { type: 'string', description: 'Words to look for. Use several related words rather than narrowing to one.' },
 				folder: { type: 'string', description: 'Restrict to this folder (optional); if nothing there matches, the whole vault is searched.' },
-				limit: { type: 'integer', description: 'Max results (default 20).', minimum: 1, maximum: 100 },
+				limit: { type: 'integer', description: `Max results (default 20). Fewer than ${MIN_SEARCH_RESULTS} counts as ${MIN_SEARCH_RESULTS}.`, minimum: 1, maximum: 100 },
 				mode: {
 					type: 'string',
 					enum: ['any', 'all'],
-					description: '"any" (default) matches notes with any word; "all" only notes with every word.',
+					description: `"any" (default) matches notes with any word; "all" lists notes with every word first, then, if there are fewer than ${MIN_SEARCH_RESULTS}, notes with some of them.`,
 				},
 			},
 			required: ['query'],
@@ -169,38 +169,155 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				if (!query) return fail('Error: query must not be empty.');
 				const folder = validateVaultPath(args['folder'] ?? '', { markdown: false, allowRoot: true, configDir: vault.configDir });
 				const opts = options();
-				const limit = Math.min(typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults, 100);
+				const asked = typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults;
+				const limit = Math.min(Math.max(asked, MIN_SEARCH_RESULTS), 100);
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
 				let hits = await index.search(query, { folder, limit, mode });
 				let scope = '';
+				let searched = folder;
 				if (folder !== '' && hits.length === 0) {
 					hits = await index.search(query, { folder: '', limit, mode });
-					if (hits.length > 0) scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
-				} else if (folder !== '') {
-					const elsewhere = await betterElsewhere(index, query, folder, mode, hits[0]!);
-					if (elsewhere.length > 0) {
-						scope = `Searched only ${folder}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
+					if (hits.length > 0) {
+						searched = '';
+						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
+					}
+				}
+				let topMode: SearchMode = mode;
+				let some = '';
+				if (mode === 'all' && hits.length < MIN_SEARCH_RESULTS) {
+					const withEvery = hits.length;
+					if (withEvery === 0) topMode = 'any';
+					const seen = new Set(hits.map((h) => h.path));
+					let backfill = await index.search(query, { folder: searched, limit, mode: 'any' });
+					if (backfill.length === 0 && searched !== '') {
+						backfill = await index.search(query, { folder: '', limit, mode: 'any' });
+						if (backfill.length > 0) {
+							scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault.\n\n`;
+							searched = '';
+						}
+					}
+					hits = [...hits, ...backfill.filter((h) => !seen.has(h.path))].slice(0, limit);
+					if (hits.length > withEvery) {
+						const which = withEvery === 0 ? 'No note has every word; these results have' : withEvery === 1 ? 'Only the first result has every word; the rest have' : `Only the first ${withEvery} results have every word; the rest have`;
+						some = `${which} some of them.\n\n`;
 					}
 				}
 				if (hits.length === 0) return ok(`No notes matched "${query}".`);
+				if (searched !== '') {
+					const elsewhere = await betterElsewhere(index, query, searched, topMode, hits[0]!);
+					if (elsewhere.length > 0) {
+						scope = `Searched only ${searched}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
+					}
+				}
+				scope += some;
 				// A hit that cannot be read right now is still listed, without an excerpt or full text.
 				const contents = await Promise.all(hits.map((h) => vault.readNote(h.path).catch(() => null)));
-				const termCount = searchTerms(query).length;
+				const terms = searchTerms(query);
 				const list = hits
 					.map((h, i) => {
 						const content = contents[i];
 						const excerpt = content === null || content === undefined ? '(could not be read just now)' : bestExcerpt(content, h.matched.map(wordStartFinder));
-						return formatHit(h, termCount, excerpt);
+						return formatHit(h, terms.length, excerpt);
 					})
 					.join('\n');
+				const linked = await linkedFromNamedResult(vault, hits, terms);
+				const links = linked ? linkedSection(linked) : '';
 				const budget = opts.autoReadTokens ?? 0;
-				const fullText = budget > 0 ? autoReadSection(hits, contents, budget, opts.maxReadChars) : '';
-				return ok(`${scope}${list}${fullText ? `\n\n${fullText}` : ''}`);
+				const fullText = budget > 0 ? autoReadSection(autoReadOrder(hits, contents, linked), budget, opts.maxReadChars) : '';
+				return ok(`${scope}${list}${links ? `\n\n${links}` : ''}${fullText ? `\n\n${fullText}` : ''}`);
 			} catch (e) {
 				return wrapError(e);
 			}
 		},
 	};
+}
+
+/**
+ * The fewest results a search returns, whatever limit the model asks for and
+ * in either mode, while that many notes have any of the words. A local model
+ * asks for 1 to 5 results, or every word, to save room, and the note that
+ * answers a question the query words only describe (a climbing project whose
+ * note says crux and hangboard) is then cut off; auto-read already caps the
+ * full text.
+ */
+const MIN_SEARCH_RESULTS = 10;
+
+/** Notes listed, with an excerpt each, from a result the query names. */
+const MAX_LINKED = 10;
+/** Characters each side of a linked note's excerpt center: two or three sentences, enough to tell what the note is about. */
+const LINKED_RADIUS = 150;
+const HEADING_LINE = /^#{1,6}\s.*$/gm;
+
+interface ShownNote {
+	name: string;
+	path: string;
+	/** Null when the note cannot be read right now. */
+	content: string | null;
+	/** Linked from a named result rather than found by the search. */
+	linked?: boolean;
+}
+
+interface LinkedNotes {
+	hub: SearchHit;
+	/** Query terms the hub does not contain. */
+	missing: string[];
+	notes: ShownNote[];
+}
+
+/**
+ * The notes linked from the best result whose name, two or more words with
+ * initials aside, the query spells out but whose text lacks the query's other
+ * words. A one-word name is a topic (Python, Budget), not a person or a
+ * titled note, and its links would crowd out the ranked results. Asked for
+ * "Marcus Nakamura climbing project", search finds the person note, which
+ * lists six projects by name only; the climbing one never says "climbing", so
+ * the model answered from whatever else the search showed instead of
+ * following the links.
+ */
+async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<LinkedNotes | null> {
+	const hub = hits.find((h) => {
+		const named = searchTerms(h.name).filter((t) => !/^\p{L}$/u.test(t));
+		return named.length >= 2 && named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
+	});
+	if (!hub) return null;
+	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path && p.toLowerCase().endsWith('.md')).slice(0, MAX_LINKED);
+	if (paths.length === 0) return null;
+	const notes = await Promise.all(paths.map(async (path) => ({ name: baseName(path), path, content: await vault.readNote(path).catch(() => null) })));
+	return { hub, missing: terms.filter((t) => !hub.matched.includes(t)), notes };
+}
+
+/**
+ * The linked notes with an excerpt each, headings left out: around the missing
+ * words when a note has them, otherwise its opening. A one-line excerpt ("clean
+ * up the chalk before the project route") was not enough for the model to see
+ * a climbing project, so it is two or three sentences.
+ */
+function linkedSection({ hub, missing, notes }: LinkedNotes): string {
+	const finders = missing.map(wordStartFinder);
+	const lines = notes.map(({ name, path, content }) => {
+		const excerpt = content === null ? '(could not be read just now)' : bestExcerpt(content.replace(HEADING_LINE, ''), finders, LINKED_RADIUS);
+		return `${name} (${path})\n  ${excerpt}`;
+	});
+	return [`${hub.name} (${hub.path}) does not mention ${missing.join(', ')}. The notes it links to:`, ...lines].join('\n');
+}
+
+/**
+ * The order search results get their full text in: by rank, except that the
+ * notes linked from a named result come right after it, marked as linked,
+ * including results ranked further down, which leave their rank. Even with
+ * the right project named in the excerpts, the model answered without reading
+ * it ("no launch date is given"), so its text has to be in the result; the
+ * linked notes' half of the budget keeps room for the ranked results.
+ */
+function autoReadOrder(hits: SearchHit[], contents: Array<string | null | undefined>, linked: LinkedNotes | null): ShownNote[] {
+	const ranked = hits.map((h, i) => ({ name: h.name, path: h.path, content: contents[i] ?? null }));
+	if (!linked) return ranked;
+	const at = hits.indexOf(linked.hub) + 1;
+	const before = ranked.slice(0, at);
+	const seen = new Set(before.map((n) => n.path));
+	const follow = linked.notes.filter((n) => !seen.has(n.path)).map((n) => ({ ...n, linked: true }));
+	for (const n of follow) seen.add(n.path);
+	return [...before, ...follow, ...ranked.slice(at).filter((n) => !seen.has(n.path))];
 }
 
 /** Notes named when a folder-restricted search has better matches outside the folder. */
@@ -233,36 +350,43 @@ const NOTE_FRAME_TOKENS = 20;
 const MAX_NOT_SHOWN = 10;
 
 /**
- * The full text of the best results, in rank order, within `budget` tokens,
+ * The full text of the best results, in the order given, within `budget` tokens,
  * so the model has the notes in front of it instead of excerpts. A result
  * that does not fit is cut to what is left if at least half of it fits, and
  * skipped otherwise so a shorter one further down can still be included.
+ * Linked notes share at most half the budget, so the ranked results after
+ * them keep the rest.
  */
-function autoReadSection(hits: SearchHit[], contents: Array<string | null>, budget: number, maxChars: number): string {
+function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): string {
 	const shown: string[] = [];
 	const notShown: string[] = [];
 	let left = budget;
-	hits.forEach((hit, i) => {
-		const content = contents[i];
-		const label = `${hit.name} (${hit.path})`;
-		const cut = `${hit.name} (${hit.path}, cut)`;
-		if (content === null || content === undefined) {
+	let linkedLeft = Math.floor(budget / 2);
+	notes.forEach((note) => {
+		const content = note.content;
+		const label = `${note.name} (${note.path})`;
+		const cut = `${note.name} (${note.path}, cut)`;
+		if (content === null) {
 			notShown.push(label);
 			return;
 		}
 		const tokens = estimateTokens(content.slice(0, maxChars));
-		const room = left - NOTE_FRAME_TOKENS;
+		const cap = note.linked ? Math.min(left, linkedLeft) : left;
+		const room = cap - NOTE_FRAME_TOKENS;
+		let spent = 0;
 		if (tokens <= room) {
-			shown.push(formatNote(hit.path, content, maxChars));
-			left -= tokens + NOTE_FRAME_TOKENS;
+			shown.push(formatNote(note.path, content, maxChars));
+			spent = tokens + NOTE_FRAME_TOKENS;
 			if (content.length > maxChars) notShown.push(cut);
 		} else if (room > 0 && room >= tokens / 2) {
-			shown.push(formatNote(hit.path, content, maxChars, room));
-			left = 0;
+			shown.push(formatNote(note.path, content, maxChars, room));
+			spent = cap;
 			notShown.push(cut);
 		} else {
 			notShown.push(label);
 		}
+		left -= spent;
+		if (note.linked) linkedLeft -= spent;
 	});
 	if (shown.length === 0) return '';
 	const count = shown.length === 1 ? 'the best match' : `the ${shown.length} best matches`;

@@ -185,10 +185,139 @@ describe('vault tools', () => {
 		it('requires every term in "all" mode', async () => {
 			const { vault, registry } = searchSetup();
 			expect((await searchVault(vault, 'project meeting', '', 20, 'all')).map((h) => h.path)).toEqual(['Meetings/Planning.md']);
-			const r = await registry.get('search_notes')!.execute({ query: 'project waffles', mode: 'all' }, ctx);
-			expect(r.content).toMatch(/No notes matched/);
 			const search = registry.get('search_notes')!;
+			expect(search.parameters.properties!['mode']!.description).toContain('then, if there are fewer than 10, notes with some of them');
+			// Fewer than the minimum have every word: notes with some of them follow, and the result says where they start.
+			const some = (await search.execute({ query: 'project meeting', mode: 'all' }, ctx)).content.split('\n');
+			expect(some.slice(0, 3)).toEqual(['Only the first result has every word; the rest have some of them.', '', 'Planning (Meetings/Planning.md) - matches project, meeting']);
+			expect(some.filter((l) => / \(.+\.md\)/.test(l)).length).toBe(4);
+			const none = (await search.execute({ query: 'project waffles', mode: 'all' }, ctx)).content.split('\n');
+			expect(none.slice(0, 2)).toEqual(['No note has every word; these results have some of them.', '']);
+			expect(none.some((l) => l.startsWith('Recipes (Recipes.md)'))).toBe(true);
+			expect((await search.execute({ query: 'zzzz qqqq', mode: 'all' }, ctx)).content).toBe('No notes matched "zzzz qqqq".');
+			// With a folder and no note anywhere having every word, the notes with some of them still come from that folder,
+			// and better matches elsewhere are still named.
+			const inFolder = (await search.execute({ query: 'project waffles', folder: 'Projects', mode: 'all' }, ctx)).content.split('\n');
+			expect(inFolder.slice(0, 4)).toEqual([
+				'Searched only Projects/. Notes elsewhere match better: Recipes (Recipes.md). Search again without folder if the results below do not answer the question.',
+				'',
+				'No note has every word; these results have some of them.',
+				'',
+			]);
+			const listed = inFolder.slice(4).filter((l) => / \(.+\.md\)/.test(l));
+			expect(listed.length).toBeGreaterThan(0);
+			expect(listed.every((l) => l.includes('(Projects/'))).toBe(true);
+			// A folder with no note having any of the words still falls back to the whole vault, as in "any" mode.
+			const elsewhere = (await search.execute({ query: 'budget waffles', folder: 'Meetings', mode: 'all' }, ctx)).content.split('\n');
+			expect(elsewhere.slice(0, 4)).toEqual([
+				'No notes in Meetings/ matched "budget waffles"; these results are from the whole vault.',
+				'',
+				'No note has every word; these results have some of them.',
+				'',
+			]);
+			expect(elsewhere.filter((l) => / \(.+\.md\)/.test(l)).map((l) => l.split(' ')[0]).sort()).toEqual(['Budget', 'Recipes']);
 			expect(() => parseToolArguments(search, '{"query":"x","mode":"some"}')).toThrow(/one of any, all/);
+		});
+
+		it('returns at least 10 results whatever limit the model asks for', async () => {
+			const notes: Record<string, string> = {};
+			for (let i = 1; i <= 12; i++) notes[`Notes/Nimbus ${i}.md`] = `Nimbus note number ${i}.`;
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(new MemoryVaultPort(notes))) registry.register(t);
+			const search = registry.get('search_notes')!;
+			const count = async (limit: number) => (await search.execute({ query: 'nimbus', limit }, ctx)).content.split('\n').filter((l) => / \(Notes\/.+\.md\)$/.test(l)).length;
+			expect(await count(1)).toBe(10);
+			expect(await count(5)).toBe(10);
+			expect(await count(11)).toBe(11);
+			expect(search.parameters.properties!['limit']!.description).toBe('Max results (default 20). Fewer than 10 counts as 10.');
+		});
+
+		it('lists the notes linked from a result the query names when that note lacks the other words, and reads them in full right after it', async () => {
+			const vault = new MemoryVaultPort({
+				'People/Marcus Nakamura A..md': '# Marcus Nakamura A.\n\n![[marcus.jpg]]\n\n## Projects\n\n- [[Violet Canvas]]\n- [[Lantern Vector]]\n- [[Echo Current]]\n',
+				'People/marcus.jpg': '\u00ff\u00d8\u00ff\u00e0 JFIF binary',
+				'People/Priya Shah B..md': '# Priya Shah B.\n\n## Projects\n\n- [[Granite Loop]]\n',
+				'Projects/Granite Loop.md': '# Granite Loop\n\nHangboard twice a week before the redpoint.\n',
+				'Projects/Violet Canvas.md': '---\nowner: "[[Marcus Nakamura A.]]"\n---\n# Violet Canvas\n\n## Overview\n\nChalk up before the crux on the project route.\n\nLaunch date: May 3, 2026.\n',
+				'Projects/Lantern Vector.md': '# Lantern Vector\n\nQuantization to four bits halves latency.\n',
+				'Projects/Echo Current.md': `# Echo Current\n\n${'Compost turned every two weeks. '.repeat(20)}The cucumbers start climbing the trellis.\n`,
+				'Areas/Climbing.md': '# Climbing\n\nA climbing project list for Marcus and Nakamura fans.\n',
+			});
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 4000 })) registry.register(t);
+			const search = registry.get('search_notes')!;
+			const r = await search.execute({ query: 'Marcus Nakamura climbing project' }, ctx);
+			const [list, fullText] = r.content.split('\n\nFull text of ');
+			const linked = list!.slice(list!.indexOf('Marcus Nakamura A. (People/Marcus Nakamura A..md) does not mention')).split('\n');
+			expect(linked.slice(0, 5)).toEqual([
+				'Marcus Nakamura A. (People/Marcus Nakamura A..md) does not mention climbing. The notes it links to:',
+				'Violet Canvas (Projects/Violet Canvas.md)',
+				'  Chalk up before the crux on the project route. Launch date: May 3, 2026.',
+				'Lantern Vector (Projects/Lantern Vector.md)',
+				'  Quantization to four bits halves latency.',
+			]);
+			// A linked note that has the missing word shows the passage around it.
+			expect(linked[6]).toContain('cucumbers start climbing');
+			expect(linked[6]).toMatch(/^  …/);
+
+			// Full text: the named note, then the notes it links to, then the other results by rank.
+			const order = [...fullText!.matchAll(/<<<note path="([^"]+)">>>/g)].map((m) => m[1]);
+			const hubAt = order.indexOf('People/Marcus Nakamura A..md');
+			expect(order.slice(hubAt, hubAt + 4)).toEqual(['People/Marcus Nakamura A..md', 'Projects/Violet Canvas.md', 'Projects/Lantern Vector.md', 'Projects/Echo Current.md']);
+			expect(order).toContain('Areas/Climbing.md');
+			expect(new Set(order).size).toBe(order.length);
+			// An embedded attachment is not a note: it is neither listed nor read.
+			expect(r.content).not.toContain('People/marcus.jpg');
+			expect(r.content).not.toContain('JFIF');
+
+			// A one-letter suffix on the name is an initial the query need not repeat.
+			const priya = (await search.execute({ query: 'Priya Shah climbing project' }, ctx)).content;
+			expect(priya).toContain('Priya Shah B. (People/Priya Shah B..md) does not mention climbing. The notes it links to:\nGranite Loop (Projects/Granite Loop.md)\n  Hangboard twice a week before the redpoint.');
+			// A one-digit number in the name is not an initial: the query has to say it.
+			vault.seed('Sprints/Sprint 2.md', '# Sprint 2\n\n- [[Granite Loop]]\n');
+			expect((await search.execute({ query: 'sprint retro' }, ctx)).content).not.toContain('The notes it links to');
+			expect((await search.execute({ query: 'sprint 2 retro' }, ctx)).content).toContain('Sprint 2 (Sprints/Sprint 2.md) does not mention retro. The notes it links to:');
+
+			// The named note has every word, or the query names no result: no list, and full text in rank order.
+			expect((await search.execute({ query: 'Marcus Nakamura projects' }, ctx)).content).not.toContain('The notes it links to');
+			expect((await search.execute({ query: 'climbing route' }, ctx)).content).not.toContain('The notes it links to');
+		});
+
+		it('never follows the links of a one-word topic note, and gives linked notes at most half the auto-read budget', async () => {
+			const filler = (n: number) => 'Plain filler words here. '.repeat(n);
+			const vault = new MemoryVaultPort({
+				'Python.md': '# Python\n\n- [[Asyncio]]\n- [[Typing]]\n',
+				'Asyncio.md': '# Asyncio\n\nEvent loops.\n',
+				'Typing.md': '# Typing\n\nProtocols.\n',
+				'Notes/Backoff.md': '# Backoff\n\nA retry decorator with jitter.\n',
+				'People/Ada Lovelace.md': '# Ada Lovelace\n\n- [[Difference Engine]]\n- [[Analytical Notes]]\n- [[Bernoulli Table]]\n- [[Loom Cards]]\n',
+				'Projects/Difference Engine.md': `# Difference Engine\n\nDifference engines. ${filler(23)}`,
+				'Projects/Analytical Notes.md': `# Analytical Notes\n\n${filler(80)}`,
+				'Projects/Bernoulli Table.md': `# Bernoulli Table\n\n${filler(80)}`,
+				'Projects/Loom Cards.md': `# Loom Cards\n\n${filler(80)}`,
+				'Notes/Engines overview.md': `# Engines overview\n\nThe engines. ${filler(45)}`,
+			});
+			const registry = new ToolRegistry();
+			for (const t of vaultTools(vault, { maxReadChars: 20_000, maxSearchResults: 20, autoReadTokens: 1200 })) registry.register(t);
+			const search = registry.get('search_notes')!;
+
+			// A one-word name is a topic, not a person or a titled note: its links are not listed or read.
+			const topic = (await search.execute({ query: 'python retry decorator' }, ctx)).content;
+			expect(topic).not.toContain('The notes it links to');
+			expect(topic).not.toContain('<<<note path="Asyncio.md">>>');
+
+			// The linked notes come right after the named note, a lower-ranked result among them, and take at most
+			// half the budget, so the ranked result after them is still read in full.
+			const r = (await search.execute({ query: 'Ada Lovelace engines' }, ctx)).content;
+			expect(r).toContain('Ada Lovelace (People/Ada Lovelace.md) does not mention engines. The notes it links to:');
+			expect(r.indexOf('Engines overview (Notes/Engines overview.md)')).toBeLessThan(r.indexOf('Difference Engine (Projects/Difference Engine.md)'));
+			const order = [...r.matchAll(/<<<note path="([^"]+)">>>/g)].map((m) => m[1]);
+			expect(order).toEqual(['People/Ada Lovelace.md', 'Projects/Difference Engine.md', 'Projects/Analytical Notes.md', 'Notes/Engines overview.md']);
+			const overview = r.slice(r.indexOf('<<<note path="Notes/Engines overview.md">>>'));
+			expect(overview.slice(0, overview.indexOf('<<<end note>>>'))).not.toContain('[truncated');
+			expect(r).toContain(
+				'Not shown in full: Analytical Notes (Projects/Analytical Notes.md, cut); Bernoulli Table (Projects/Bernoulli Table.md); Loom Cards (Projects/Loom Cards.md).',
+			);
 		});
 
 		it('boosts name and heading matches over body mentions', async () => {
