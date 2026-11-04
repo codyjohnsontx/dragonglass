@@ -177,14 +177,6 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		return Promise.resolve(this.links(path));
 	}
 
-	propertyValue(key: string): unknown {
-		for (const content of this.files.values()) {
-			const value = parseFrontmatter(content)?.[key];
-			if (value !== undefined && value !== null) return value;
-		}
-		return undefined;
-	}
-
 	private links(path: string): LinkRef[] {
 		const refs: LinkRef[] = [];
 		for (const [source, text] of this.files) {

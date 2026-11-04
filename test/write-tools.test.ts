@@ -6,6 +6,8 @@ import { createVaultTools, DEFAULT_TOOL_OPTIONS } from '../src/tools/vault-tools
 import { parentFolder } from '../src/vault/paths';
 import { ChangeProposal, ProposalEngine, summarizeBatch } from '../src/vault/proposals';
 import { replaceSection } from '../src/vault/sections';
+import { parseToolArguments } from '../src/agent/tools';
+import { toGeminiSchema } from '../src/providers/gemini';
 import { MemoryVaultPort } from './memory-vault';
 
 const ctx = { conversationId: 'c1', signal: new AbortController().signal };
@@ -18,7 +20,7 @@ function setup(files: Record<string, string>) {
 	const registry = new ToolRegistry();
 	for (const tool of createVaultTools(vault, engine, DEFAULT_TOOL_OPTIONS, new VaultSearchIndex(vault, () => Promise.resolve()))) registry.register(tool);
 	const call = async (name: string, args: Record<string, unknown>) => registry.get(name)!.execute(args, ctx);
-	return { vault, engine, call };
+	return { vault, engine, call, registry };
 }
 
 const SCRIPT = [
@@ -78,7 +80,7 @@ describe('replace_section', () => {
 
 	it('keeps later sections after a fence opened on a list line or indented inside a list item', () => {
 		const rest = '\n\n# Act Two\n\nkeep me\n';
-		for (const body of ['- ```\n  code\n  ```', '- ```\n code\n ```', '1. ```js\n   code\n   ```', '- ~~~\n  code\n  ~~~', '- a\n  - ```\n    code\n    ```', '- ```\n  unclosed', '- item\n\n  ```\n  unclosed', '- ```\n  a\n  ```\n\nold\n\n- ```\n  b\n  ```']) {
+		for (const body of ['- ```\n  code\n  ```', '1. ```js\n   code\n   ```', '- ~~~\n  code\n  ~~~', '- a\n  - ```\n    code\n    ```', '- ```\n  unclosed', '- ```\n  a\n  ```\n\nold\n\n- ```\n  b\n  ```']) {
 			expect(replaceSection(`# Act One\n\n${body}${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
 		}
 		expect(replaceSection(`# Act One\n\n- \`\`\`\n  # not a heading\n\n  more\n  \`\`\`${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
@@ -92,6 +94,14 @@ describe('replace_section', () => {
 		expect(replaceSection('## B\n\n___\nThe gate\n---\n\nold\n', 'The gate', 'new')).toBe('## B\n\n___\nThe gate\n---\n\nnew\n');
 		expect(replaceSection('## B\n\nold\n\n2. item\n---\n\nmore\n', 'B', 'new')).toBe('## B\n\nnew\n');
 		expect(replaceSection('## B\n\nThe gate\n1. item\n---\n\nmore\n', 'B', 'new')).toBe('## B\n\nnew\n');
+	});
+
+	it('keeps a plain indented fence open through less indented lines', () => {
+		for (const indent of [' ', '  ', '   ']) {
+			const note = `# A\n\n${indent}\`\`\`\nrm x\n# remove cache\nrm y\n${indent}\`\`\`\n\nold\n\n# B\n\nkeep\n`;
+			expect(replaceSection(note, 'A', 'new')).toBe('# A\n\nnew\n\n# B\n\nkeep\n');
+			expect(() => replaceSection(note, 'remove cache', 'x')).toThrow(/No heading/);
+		}
 	});
 
 	it('ends a section at indented, empty and underlined headings', () => {
@@ -244,26 +254,42 @@ describe('propose_update_frontmatter', () => {
 		expect(vault.files.get('B.md')).toBe('---\nstatus: idea\n---\n# B\n');
 	});
 
-	it('gives a property new to the note the number or checkbox type other notes give it', async () => {
-		const { vault, engine, call } = setup({ 'Act One.md': NOTE, 'Act Two.md': '# Act Two\n' });
+	it('writes numbers and booleans as given, and takes a new property given as text as text whatever other notes hold', async () => {
+		const { vault, engine, call } = setup({ 'Act One.md': NOTE, 'Act Two.md': '# Act Two\n', 'Act Three.md': '# Act Three\n' });
 		const p = (
 			await call('propose_update_frontmatter', {
 				path: 'Act Two.md',
 				summary: 's',
 				set: [
-					{ key: 'act', value: '2' },
-					{ key: 'published', value: 'true' },
-					{ key: 'status', value: 'true' },
+					{ key: 'act', value: 2 },
+					{ key: 'published', value: false },
+					{ key: 'rating', value: '4' },
 				],
 			})
 		).proposal!;
 		expect(p.properties).toEqual([
 			{ key: 'act', after: 2 },
-			{ key: 'published', after: true },
-			{ key: 'status', after: 'true' },
+			{ key: 'published', after: false },
+			{ key: 'rating', after: '4' },
 		]);
 		await engine.apply(p);
-		expect(vault.getMetadata('Act Two.md')?.frontmatter).toEqual({ act: 2, published: true, status: 'true' });
+		expect(vault.getMetadata('Act Two.md')?.frontmatter).toEqual({ act: 2, published: false, rating: '4' });
+
+		const held = (await call('propose_update_frontmatter', { path: 'Act Three.md', summary: 's', set: [{ key: 'act', value: '3' }, { key: 'published', value: 'true' }] })).proposal!;
+		expect(held.properties).toEqual([
+			{ key: 'act', after: '3' },
+			{ key: 'published', after: 'true' },
+		]);
+	});
+
+	it('accepts a string, number or boolean value in the tool arguments, and nothing else', () => {
+		const { registry } = setup({});
+		const tool = registry.get('propose_update_frontmatter')!;
+		const args = (value: unknown) => JSON.stringify({ path: 'A.md', summary: 's', set: [{ key: 'k', value }] });
+		for (const value of ['final', 3, 2.5, 0, true, false]) expect(parseToolArguments(tool, args(value))).toMatchObject({ set: [{ key: 'k', value }] });
+		for (const value of [null, { a: 1 }, ['x']]) expect(() => parseToolArguments(tool, args(value))).toThrow(/"set\[0\]\.value" must be one of string, number, boolean/);
+		const set = toGeminiSchema(tool.parameters)['properties'] as { set: { items: { properties: { value: unknown } } } };
+		expect(set.set.items.properties.value).toEqual({ anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] });
 	});
 
 	it('refuses a property change to a note whose text change is waiting, telling the model to ask the user to review it', async () => {
@@ -417,21 +443,20 @@ describe('propose_move_note', () => {
 		await expect(engine.apply(q)).rejects.toThrow(/no longer exists/);
 	});
 
-	it('removes a folder the move created when it is undone, unless something else is in it now', async () => {
+	it('leaves a folder the move created when it is undone, as any created folder is left', async () => {
 		const { vault, engine, call } = setup(FILES);
 		const p = (await call('propose_move_note', { path: 'Notes.md', new_path: 'Archive/Old/Notes.md', summary: 's' })).proposal!;
 		await engine.apply(p);
-		expect(p.createdFolder).toBe('Archive');
 		await engine.revert(p);
-		expect(vault.exists('Archive')).toBe(false);
-		expect(vault.trashedFolders).toEqual(['Archive']);
+		expect(vault.files.get('Notes.md')).toBe('Nothing linked.\n');
+		expect(vault.isFolder('Archive/Old')).toBe(true);
 
-		engine.reject(p);
-		const q = (await call('propose_move_note', { path: 'Script/Act One.md', new_path: 'Archive/Act One.md', summary: 's' })).proposal!;
-		await engine.apply(q);
-		vault.seed('Archive/Kept.md', 'mine');
-		await engine.revert(q);
-		expect(vault.exists('Archive/Kept.md')).toBe(true);
+		const q = (await call('propose_move_note', { path: 'Script/Act One.md', new_path: 'Filed/Act One.md', summary: 's' })).proposal!;
+		await engine.applyAll([q]);
+		await engine.revertAll([q]);
+		expect(vault.exists('Script/Act One.md')).toBe(true);
+		expect(vault.isFolder('Filed')).toBe(true);
+		expect(vault.trashedFolders).toEqual([]);
 	});
 
 	it('will not move back over a file now at the old path', async () => {
@@ -530,6 +555,31 @@ describe('batches with the new kinds', () => {
 		expect(vault.trashedFolders).toEqual(['Archive']);
 	});
 
+	it('removes the folder an applied move made when a later write fails the batch', async () => {
+		const { vault, engine, call } = setup({ 'A.md': 'a', 'B.md': 'b' });
+		const move = (await call('propose_move_note', { path: 'A.md', new_path: 'New/Deep/A.md', summary: 's' })).proposal!;
+		const second = (await call('propose_move_note', { path: 'B.md', new_path: 'C.md', summary: 's' })).proposal!;
+		const moveNote = vault.moveNote.bind(vault);
+		vault.moveNote = (from, to) => (from === 'B.md' ? Promise.reject(new Error('disk full')) : moveNote(from, to));
+		await expect(engine.applyAll([move, second])).rejects.toThrow(/The change to A\.md was rolled back\./);
+		expect(vault.files.get('A.md')).toBe('a');
+		expect(vault.isFolder('New')).toBe(false);
+		expect(vault.trashedFolders).toEqual(['New']);
+		expect(move.status).toBe('pending');
+	});
+
+	it('reports a move as rolled back even if the folder it made cannot be removed', async () => {
+		const { vault, engine, call } = setup({ 'A.md': 'a', 'B.md': 'b' });
+		const move = (await call('propose_move_note', { path: 'A.md', new_path: 'New/A.md', summary: 's' })).proposal!;
+		const second = (await call('propose_move_note', { path: 'B.md', new_path: 'C.md', summary: 's' })).proposal!;
+		const moveNote = vault.moveNote.bind(vault);
+		vault.moveNote = (from, to) => (from === 'B.md' ? Promise.reject(new Error('disk full')) : moveNote(from, to));
+		vault.trashFolder = () => Promise.reject(new Error('trash unavailable'));
+		await expect(engine.applyAll([move, second])).rejects.toThrow(/The change to A\.md was rolled back\./);
+		expect(vault.files.get('A.md')).toBe('a');
+		expect(move.status).toBe('pending');
+	});
+
 	it('removes the folder a refused move made in a batch, along with what the batch already wrote', async () => {
 		const files = { 'A.md': '---\nstatus: draft\n---\nBody.\n', 'B.md': 'b' };
 		const { vault, engine, call } = setup(files);
@@ -587,6 +637,66 @@ describe('batches with the new kinds', () => {
 		vault.seed('A.md', '---\nstatus: abandoned\n---\nBody, edited.\n');
 		await expect(engine.revert(q)).rejects.toThrow(/changed after this edit was applied/);
 		expect(vault.files.get('A.md')).toContain('status: abandoned');
+	});
+
+	it('undoes edits on both sides of a move', async () => {
+		const { vault, engine, call } = setup({ 'A.md': 'one' });
+		const first = (await call('propose_edit_note', { path: 'A.md', summary: 's', edits: [{ type: 'replace_all', content: 'two' }] })).proposal!;
+		await engine.apply(first);
+		const move = (await call('propose_move_note', { path: 'A.md', new_path: 'B.md', summary: 's' })).proposal!;
+		await engine.apply(move);
+		const last = (await call('propose_edit_note', { path: 'B.md', summary: 's', edits: [{ type: 'replace_all', content: 'three' }] })).proposal!;
+		await engine.apply(last);
+		await engine.revertAll([first, move, last]);
+		expect(Object.fromEntries(vault.files)).toEqual({ 'A.md': 'one' });
+	});
+
+	it('undoes a property change followed by a move and an edit', async () => {
+		const note = '---\nstatus: draft\n---\nBody.\n';
+		const { vault, engine, call } = setup({ 'A.md': note });
+		const props = (await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'final' }] })).proposal!;
+		await engine.apply(props);
+		const move = (await call('propose_move_note', { path: 'A.md', new_path: 'B.md', summary: 's' })).proposal!;
+		await engine.apply(move);
+		const edit = (await call('propose_edit_note', { path: 'B.md', summary: 's', edits: [{ type: 'append', content: 'More.' }] })).proposal!;
+		await engine.apply(edit);
+		await engine.revertAll([props, move, edit]);
+		expect(Object.fromEntries(vault.files)).toEqual({ 'A.md': note });
+	});
+
+	it('undoes a move whose old path the batch filled with a new note', async () => {
+		const { vault, engine, call } = setup({ 'A.md': 'old' });
+		const move = (await call('propose_move_note', { path: 'A.md', new_path: 'B.md', summary: 's' })).proposal!;
+		await engine.apply(move);
+		const created = (await call('propose_create_note', { path: 'A.md', content: 'fresh', summary: 's' })).proposal!;
+		await engine.apply(created);
+		await engine.revertAll([move, created]);
+		expect(Object.fromEntries(vault.files)).toEqual({ 'A.md': 'old' });
+	});
+
+	it('undoes a moved note whose properties still hold though its body changed since', async () => {
+		const { vault, engine, call } = setup({ 'A.md': '---\nstatus: draft\n---\nBody.\n' });
+		const props = (await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'final' }] })).proposal!;
+		await engine.apply(props);
+		const move = (await call('propose_move_note', { path: 'A.md', new_path: 'B.md', summary: 's' })).proposal!;
+		await engine.apply(move);
+		vault.seed('B.md', '---\nstatus: final\n---\nBody, reworked.\n');
+		await engine.revertAll([props, move]);
+		expect(Object.fromEntries(vault.files)).toEqual({ 'A.md': '---\nstatus: draft\n---\nBody, reworked.\n' });
+	});
+
+	it('undoes an edit to a note that moved before another move rewrote its links', async () => {
+		const files = { 'Gate.md': '# Gate\n', 'Act.md': 'At the [[Gate]].\n' };
+		const { vault, engine, call } = setup(files);
+		const edit = (await call('propose_edit_note', { path: 'Act.md', summary: 's', edits: [{ type: 'append', content: 'Night.' }] })).proposal!;
+		await engine.apply(edit);
+		const moveAct = (await call('propose_move_note', { path: 'Act.md', new_path: 'Script/Act.md', summary: 's' })).proposal!;
+		await engine.apply(moveAct);
+		const moveGate = (await call('propose_move_note', { path: 'Gate.md', new_path: 'Ashen Gate.md', summary: 's' })).proposal!;
+		await engine.apply(moveGate);
+		expect(vault.files.get('Script/Act.md')).toBe('At the [[Ashen Gate]].\nNight.');
+		await engine.revertAll([edit, moveAct, moveGate]);
+		expect(Object.fromEntries(vault.files)).toEqual(files);
 	});
 
 	it('refuses Undo all when a moved note can no longer move back', async () => {

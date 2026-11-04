@@ -96,8 +96,6 @@ export interface VaultPort {
 	 * `path`, once every note written through this port has been indexed.
 	 */
 	linksTo(path: string): Promise<LinkRef[]>;
-	/** A value some note in the vault gives the property `key`, or undefined when none has it. */
-	propertyValue(key: string): unknown;
 	/** Move a folder to the trash like `trashNote`. Throws if there is no such folder. */
 	trashFolder(path: string): Promise<void>;
 	/** Move a note to the trash, following the user's "Deleted files" setting; never `Vault.delete` directly. Throws if there is no such note. */

@@ -179,14 +179,6 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		});
 	}
 
-	propertyValue(key: string): unknown {
-		for (const file of this.app.vault.getMarkdownFiles()) {
-			const value: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter?.[key];
-			if (value !== undefined && value !== null) return value;
-		}
-		return undefined;
-	}
-
 	async linksTo(path: string): Promise<LinkRef[]> {
 		await this.whenIndexed();
 		const refs: LinkRef[] = [];

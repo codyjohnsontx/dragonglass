@@ -736,12 +736,13 @@ function proposeUpdateFrontmatterTool(proposals: ProposalEngine, turn: TurnPropo
 				summary: { type: 'string', description: 'One sentence describing the change for the user.' },
 				set: {
 					type: 'array',
-					description: 'Properties to add or change.',
+					description:
+						'Properties to add or change. "value" is a JSON string, number or boolean: for a number or checkbox property send 3 or true, not "3" or "true". Use "values" for a list.',
 					items: {
 						type: 'object',
 						properties: {
 							key: { type: 'string', description: 'Property name.' },
-							value: { type: 'string', description: 'New value of a text, number, date or checkbox ("true"/"false") property.' },
+							value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
 							values: { type: 'array', items: { type: 'string' }, description: 'New value of a list property such as tags or aliases: the whole list.' },
 						},
 						required: ['key'],
@@ -779,7 +780,7 @@ export function toPropertyEdits(set: unknown, remove: unknown): PropertyEdit[] {
 			if (typeof key !== 'string') throw new ProposalError(`set[${i}] needs a string "key".`);
 			const hasValue = entry['value'] !== undefined;
 			if (hasValue === (entry['values'] !== undefined)) {
-				throw new ProposalError(`set[${i}] (${key}) needs exactly one of "value" (text) or "values" (a list).`);
+				throw new ProposalError(`set[${i}] (${key}) needs exactly one of "value" (text, number or true/false) or "values" (a list).`);
 			}
 			edits.push({ key, value: hasValue ? entry['value'] : entry['values'] });
 		});

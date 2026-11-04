@@ -291,7 +291,7 @@ Open the sidebar with the gem icon in the ribbon or the command
   applied. It is refused if the note changed after the edit was applied, so
   later edits are never overwritten. Reverting a property change puts the
   properties back, and reverting a move moves the note back; a created note
-  or folder is not removed. Snapshots are kept under the plugin
+  or folder, including a folder a move created, is not removed. Snapshots are kept under the plugin
   folder (last 50).
 - **Stop** cancels generation. Partial text is kept.
 - Conversations persist in the vault's plugin folder and survive switching
@@ -337,7 +337,7 @@ vault:
   all then Undo all across a new folder, a move that updates links (including
   Obsidian's update-links prompt when automatic updates are off, a link added
   in the same batch, and two moves in a row through one note), a move into a
-  new folder reverted with the folder removed, a property change applied and
+  new folder reverted, a property change applied and
   reverted exactly, a stale property change refused, and `replace_section`
   refusing a missing or ambiguous heading.
 - Conversation history persists across plugin reload.

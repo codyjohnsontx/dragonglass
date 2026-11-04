@@ -435,17 +435,19 @@ in its own dialog and the apply waits for the answer. The review lists the
 notes whose link text changes: every note linking to it when the name
 changes or the new name is shared, otherwise those that link by path.
 Undoing a move moves the note back (Obsidian rewrites the links again, in
-the user's link format) and removes a folder the move created while it is
-empty. Forcing link updates regardless of the setting was rejected: the
+the user's link format) and leaves a folder the move created, as any created
+folder is left. Only a refused move and an Approve all rollback remove such
+a folder, while it is empty, because those leave the vault as it was. Forcing link updates regardless of the setting was rejected: the
 setting is the user's statement of how renames should behave.
 
 Property changes go through `FileManager.processFrontMatter`, so Obsidian
 writes the YAML. Because its output is not known before the write, the
 review shows each property's old and new value instead of a text diff, and
 the guard inside the write is per property: each changed property must
-still hold the value reviewed. A text value given for a number or checkbox
-property, in the note or, for a property new to the note, in another note of
-the vault, keeps that type when it spells one. Undo restores the snapshot
+still hold the value reviewed. The tool's `value` takes a string, number or
+boolean as given, and a text value for a property the note already holds as
+a number or checkbox keeps that type when it spells one. A new property's
+type is never inferred from other notes: the review could not show it. Undo restores the snapshot
 when the note is exactly as written, and otherwise puts each property back
 through `processFrontMatter` while it still holds the written value, so an
 edit elsewhere in the note, including a link Obsidian rewrote, survives.
@@ -457,11 +459,9 @@ of the same or a higher level. Boundaries follow Markdown, since a heading
 the parser missed would put the sections after it inside the rewrite:
 indented and underlined (setext) headings count, an empty heading ends a
 section but cannot be named, and headings in frontmatter and fenced code do
-not count. A fence belongs to the column of its marker, including one opened
-after a list marker, and a less indented line ends it as it ends a list item.
-That also ends an indented fence whose body is not indented, where a stray
-boundary only stops the rewrite early. The heading is named by its text exactly as the note has it
-(trimmed, case-sensitive, without `#`s), and `content` is the section body
+not count. A fence opened after a list marker ends at a less indented line,
+as its list item does. The heading is named by its text exactly as the note
+has it (trimmed, case-sensitive, without `#`s), and `content` is the section body
 only: the heading line stays and is never taken from `content`, so content
 that starts with the same heading keeps it. Looser matching (any case,
 `## Act Two`) was dropped: it made headings differing only in case ambiguous

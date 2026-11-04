@@ -49,8 +49,6 @@ export interface ChangeProposal {
 	newPath?: string;
 	/** Move: notes whose links to the note Obsidian rewrites, as computed when proposed and again when applied. */
 	linkUpdates?: string[];
-	/** Move: the outermost folder the move created, removed again when the move is undone and it is still empty. */
-	createdFolder?: string;
 	/** Frontmatter: the properties changed. */
 	properties?: PropertyChange[];
 	summary: string;
@@ -215,9 +213,8 @@ export class ProposalEngine {
 	/**
 	 * Set or remove properties. The change is written by Obsidian's
 	 * `processFrontMatter` when approved; what is reviewed is each property's
-	 * value before and after. A value given as text for a property that is a
-	 * number or a checkbox, in this note or else in the vault, keeps that type
-	 * when the text says one.
+	 * value before and after. A value given as text for a property the note
+	 * holds as a number or a checkbox keeps that type when the text says one.
 	 */
 	async proposeFrontmatter(conversationId: string, rawPath: string, edits: PropertyEdit[], summary: string): Promise<ChangeProposal> {
 		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
@@ -233,7 +230,7 @@ export class ProposalEngine {
 			const had = Object.prototype.hasOwnProperty.call(current, key);
 			const change: PropertyChange = { key };
 			if (had) change.before = current[key];
-			if (!edit.remove) change.after = keepType(current[key] ?? this.vault.propertyValue(key), edit.value);
+			if (!edit.remove) change.after = keepType(current[key], edit.value);
 			if (had === (change.after !== undefined) && sameValue(change.before, change.after)) continue;
 			changes.push(change);
 		}
@@ -367,9 +364,6 @@ export class ProposalEngine {
 			} else if (p.kind === 'move') {
 				const newPath = p.newPath ?? '';
 				p.linkUpdates = await this.linkUpdates(p.path, newPath);
-				const created = this.missingFolder(newPath);
-				if (created) p.createdFolder = created;
-				else delete p.createdFolder;
 				await this.moveNote(p.path, newPath);
 			} else if (p.kind === 'frontmatter') {
 				p.snapshotPath = await this.writeSnapshot(p);
@@ -409,7 +403,8 @@ export class ProposalEngine {
 	 * are put back from their snapshots and a note the batch created is moved
 	 * to the trash, each only while it still holds exactly what the batch
 	 * wrote; a note the user has since changed is left as it is and stays
-	 * applied. Returns the proposals applied; resolved ones are skipped.
+	 * applied. A note moved back takes with it the folder its move made, while
+	 * that is empty. Returns the proposals applied; resolved ones are skipped.
 	 */
 	async applyAll(batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
 		const pending = applyOrder(batch.filter((p) => p.status === 'pending' || p.status === 'stale'));
@@ -433,11 +428,13 @@ export class ProposalEngine {
 				if (freshness !== 'fresh') throw new ProposalError(`Nothing was applied: ${freshnessProblem(p, freshness)}`);
 			}
 			const written: ChangeProposal[] = [];
+			const moveFolders = new Map<ChangeProposal, string | null>();
 			for (const p of pending) {
 				try {
+					if (p.kind === 'move') moveFolders.set(p, this.missingFolder(p.newPath ?? ''));
 					await this.write(p);
 				} catch (e) {
-					const outcome = await this.rollBack(written);
+					const outcome = await this.rollBack(written, moveFolders);
 					throw new ProposalError(
 						`Applied ${written.length} of ${pending.length} changes, then ${p.path} failed: ${trimDot(errorMessage(e))}.` +
 							describeRollback(pending, outcome, 'rolled back', 'written'),
@@ -477,7 +474,7 @@ export class ProposalEngine {
 			// Where a note's text is read from during the check: a move undone earlier in the walk puts the note back at its old path.
 			const readFrom = new Map<string, string>();
 			const vacated = new Set<string>();
-			const existsThen = (path: string) => readFrom.has(path) || (this.vault.exists(path) && !vacated.has(path));
+			const existsThen = (path: string) => (expected.has(path) ? expected.get(path) !== null : readFrom.has(path) || (this.vault.exists(path) && !vacated.has(path)));
 			// Notes whose links a move rewrote: moving it back first rewrites them back, so their text is checked only when they are undone.
 			const relinked = new Set<string>();
 			for (const p of newestFirst) {
@@ -488,12 +485,17 @@ export class ProposalEngine {
 					readFrom.set(p.path, readFrom.get(newPath) ?? newPath);
 					readFrom.delete(newPath);
 					vacated.add(newPath);
+					const text = expected.get(newPath);
+					if (text === undefined) expected.delete(p.path);
+					else expected.set(p.path, text);
+					expected.delete(newPath);
 					for (const path of p.linkUpdates ?? []) relinked.add(path);
+					if (relinked.delete(newPath)) relinked.add(p.path);
 					continue;
 				}
 				const current = expected.has(p.path) ? (expected.get(p.path) ?? null) : await this.vault.readNote(readFrom.get(p.path) ?? p.path);
 				if (current === null) throw new ProposalError(`Nothing was undone: ${p.path} no longer exists.`);
-				const unchanged = current === p.after || relinked.has(p.path) || (p.kind === 'frontmatter' && !expected.has(p.path) && this.propertiesHold(p, 'after'));
+				const unchanged = current === p.after || relinked.has(p.path) || (p.kind === 'frontmatter' && !expected.has(p.path) && this.propertiesHold(p, readFrom.get(p.path) ?? p.path));
 				if (!unchanged) {
 					throw new ProposalError(`Nothing was undone: ${p.path} changed after this batch was applied. Undoing would overwrite those changes.`);
 				}
@@ -531,7 +533,7 @@ export class ProposalEngine {
 	}
 
 	/** Put the notes a failed batch already wrote back to what they held before, newest first. */
-	private async rollBack(written: readonly ChangeProposal[]): Promise<RollbackOutcome> {
+	private async rollBack(written: readonly ChangeProposal[], moveFolders: ReadonlyMap<ChangeProposal, string | null>): Promise<RollbackOutcome> {
 		const outcome: RollbackOutcome = { done: [], left: [], failed: [] };
 		for (const p of [...written].reverse()) {
 			try {
@@ -542,6 +544,7 @@ export class ProposalEngine {
 					await this.vault.trashFolder(p.path);
 				} else if (p.kind === 'move') {
 					await this.moveBack(p, 'written');
+					await this.trashEmptyFolder(moveFolders.get(p) ?? null);
 				} else if (p.kind === 'frontmatter') {
 					await this.undoFrontmatter(p, `${p.path} changed after it was written`);
 				} else {
@@ -645,7 +648,6 @@ export class ProposalEngine {
 			throw new ProposalError(step === 'written' ? `${p.path} changed after it was written` : `A file now exists at ${p.path}, so ${newPath} cannot be moved back.`);
 		}
 		await this.moveNote(newPath, p.path);
-		await this.trashEmptyFolder(p.createdFolder);
 	}
 
 	/** Move a note. If the move fails, the folder made for it goes too, so a refused move leaves the vault as it was. */
@@ -654,14 +656,14 @@ export class ProposalEngine {
 		try {
 			await this.vault.moveNote(from, to);
 		} catch (e) {
-			// Why the move failed is what the user needs to read; an empty folder left behind costs nothing.
-			await this.trashEmptyFolder(created).catch(() => undefined);
+			await this.trashEmptyFolder(created);
 			throw e;
 		}
 	}
 
-	private async trashEmptyFolder(folder: string | null | undefined): Promise<void> {
-		if (folder && this.vault.isFolder(folder) && this.emptyTree(folder)) await this.vault.trashFolder(folder);
+	/** Remove a folder made for a move that did not stay, if it is empty. An empty folder left behind costs nothing, so a failure here is not reported. */
+	private async trashEmptyFolder(folder: string | null): Promise<void> {
+		if (folder && this.vault.isFolder(folder) && this.emptyTree(folder)) await this.vault.trashFolder(folder).catch(() => undefined);
 	}
 
 	/** The outermost folder above `path` that does not exist yet, or null. */
@@ -716,9 +718,9 @@ export class ProposalEngine {
 	}
 
 	/** Whether the note's properties, as the metadata cache has them, hold every changed property's `which` value. */
-	private propertiesHold(p: ChangeProposal, which: 'before' | 'after'): boolean {
-		const fm = this.vault.getMetadata(p.path)?.frontmatter ?? {};
-		return (p.properties ?? []).every((c) => holds(fm, c.key, c[which]));
+	private propertiesHold(p: ChangeProposal, path: string): boolean {
+		const fm = this.vault.getMetadata(path)?.frontmatter ?? {};
+		return (p.properties ?? []).every((c) => holds(fm, c.key, c.after));
 	}
 
 	private async writeSnapshot(p: ChangeProposal): Promise<string> {

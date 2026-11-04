@@ -44,7 +44,7 @@ export function listHeadings(lines: readonly string[]): Heading[] {
 		out.push(heading);
 		if (text !== '') stack.push(heading);
 	};
-	/** The open fence, and the column of its marker: a less indented line ends the list item a fence sits in, and the fence with it. */
+	/** The open fence. Opened after a list marker, `column` is that item's content: a less indented line ends the item and the fence with it. */
 	let fence: { marker: string; column: number } | null = null;
 	/** First line of the paragraph being read, which an underline turns into a heading. */
 	let paragraph: number | null = null;
@@ -64,7 +64,8 @@ export function listHeadings(lines: readonly string[]): Heading[] {
 		const atx = ATX_HEADING.exec(line);
 		const underline = SETEXT_UNDERLINE.exec(line)?.[1];
 		if (open) {
-			fence = { marker: open[2] ?? '', column: (open[1] ?? '').length };
+			const prefix = open[1] ?? '';
+			fence = { marker: open[2] ?? '', column: prefix.trim() === '' ? 0 : prefix.length };
 			paragraph = null;
 		} else if (atx) {
 			add((atx[1] ?? '').length, (atx[2] ?? '').trim(), i, i + 1);
