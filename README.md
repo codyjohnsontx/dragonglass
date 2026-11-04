@@ -224,7 +224,9 @@ Open the sidebar with the gem icon in the ribbon or the command
   suggestion. Under the answer, **From your vault** lists the cited notes;
   one whose text was not in the model's context for that answer is marked
   unverified, one it saw only as a search excerpt says so, and a link to a
-  note that does not exist says "no such note".
+  note that does not exist says "no such note". Replies saved by an earlier
+  version get no list, and in a conversation that has them, later answers
+  leave such notes unflagged rather than guess.
 - Send a message with **Cmd+Enter** (**Ctrl+Enter** on Windows and Linux).
   Enter on its own adds a new line, so longer messages can be written out.
 - Copy a reply: select text in the sidebar and copy it as usual, or select

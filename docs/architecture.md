@@ -133,10 +133,10 @@ before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always
 writes the record. Cited `[web N]` numbers map to that turn's web sources; a
-number no result gave is unverified. `ui/sources-list.ts` renders the list under the turn's last
-reply, "From your vault" then "From the web", and `[web N]` markers become
-links to their pages. Links to missing notes do nothing on click, so a reply
-cannot create an empty note.
+number no result gave is unverified. `ui/sources-list.ts` renders the list
+under the turn's last reply, "From your vault" then "From the web", and
+`[web N]` markers become links to their pages. Links to missing notes do
+nothing on click, so a reply cannot create an empty note.
 
 ## Trust boundaries
 
