@@ -6,8 +6,9 @@ import { baseName } from '../vault/paths';
  * page as [web N]; under the answer Dragonglass lists the cited sources,
  * grouped "From your vault" and "From the web". The list is grounded in what
  * the conversation's tool results and attached context actually showed the
- * model, not only in what it typed: a cited note it never read is shown as
- * unverified, a cited note that does not exist as missing.
+ * model, not only in what it typed: a cited note whose text was not in the
+ * model's context for the answer is shown as unverified, a cited note that
+ * does not exist as missing.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
@@ -37,7 +38,7 @@ export type VaultCitationStatus =
 	| 'read'
 	/** Only a search excerpt of it was shown. */
 	| 'excerpt'
-	/** The note exists but the model was never shown it: unverified. */
+	/** The note exists but its text was not in the model's context for this answer: unverified. */
 	| 'unread'
 	/** The link does not resolve to a note. */
 	| 'missing';

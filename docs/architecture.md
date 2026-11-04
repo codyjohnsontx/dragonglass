@@ -125,7 +125,7 @@ and is not replayed later.
 `answerSources` (`agent/sources.ts`) walks the stored conversation per user
 turn and checks the answer's citations against that record, not against the
 model's word: a cited note is *read*, *excerpt* (only a search excerpt was
-shown), *unread* (never shown: unverified) or *missing* (the link resolves to
+shown), *unread* (not in the model's context for this answer: unverified) or *missing* (the link resolves to
 no note), counting tool results from earlier turns, which are replayed, and
 this turn's attached context. Notes read in
 full this turn but not cited are listed after the cited ones. Cited `[web N]`

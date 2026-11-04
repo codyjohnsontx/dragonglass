@@ -222,9 +222,9 @@ Open the sidebar with the gem icon in the ribbon or the command
 - Answers cite the notes they draw on as links, `[[Launch]]`, right after
   each claim, and anything without a source is worded as the model's
   suggestion. Under the answer, **From your vault** lists the cited notes;
-  one the model was never shown is marked unverified, one it saw only as a
-  search excerpt says so, and a link to a note that does not exist says
-  "no such note". Notes it read without citing are listed after them.
+  one whose text was not in the model's context for that answer is marked
+  unverified, one it saw only as a search excerpt says so, and a link to a
+  note that does not exist says "no such note". Notes it read without citing are listed after them.
 - Send a message with **Cmd+Enter** (**Ctrl+Enter** on Windows and Linux).
   Enter on its own adds a new line, so longer messages can be written out.
 - Copy a reply: select text in the sidebar and copy it as usual, or select

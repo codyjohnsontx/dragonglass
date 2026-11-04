@@ -266,7 +266,7 @@ alone would present a note the model never opened as a source. Parsing result
 text ties the list to output formats that change for the model's sake (search
 results gained auto-read and linked notes within a few releases). Structured
 sources cost one optional field on stored tool messages and let a cited note
-the conversation never showed be marked unverified, and one only seen as a
+whose text was not in the model's context be marked unverified, and one only seen as a
 search excerpt be marked as such. Conversations saved before this have no
 sources on their tool messages, so their citations show as unverified.
 

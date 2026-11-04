@@ -46,7 +46,7 @@ export function renderSourcesList(parent: HTMLElement, sources: AnswerSources): 
 const FLAGS: Record<VaultCitationStatus, string | null> = {
 	read: null,
 	excerpt: 'only a search excerpt was read',
-	unread: 'not read in this conversation: unverified',
+	unread: 'not in the model\'s context for this answer: unverified',
 	missing: 'no such note',
 };
 
