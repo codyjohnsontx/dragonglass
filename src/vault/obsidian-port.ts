@@ -1,5 +1,6 @@
+import type { CachedMetadata } from 'obsidian';
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { ActiveContext, LinkRef, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
+import { ActiveContext, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
@@ -74,11 +75,7 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) return null;
 		const cache = this.app.metadataCache.getFileCache(file);
-		const tags = new Set<string>();
-		for (const t of cache?.tags ?? []) tags.add(t.tag);
-		const fmTags = cache?.frontmatter?.['tags'] as unknown;
-		if (Array.isArray(fmTags)) fmTags.forEach((t) => typeof t === 'string' && tags.add(t.startsWith('#') ? t : `#${t}`));
-		else if (typeof fmTags === 'string') tags.add(fmTags.startsWith('#') ? fmTags : `#${fmTags}`);
+		const tags = noteTags(cache);
 		const resolved = this.app.metadataCache.resolvedLinks[path] ?? {};
 		const unresolved = this.app.metadataCache.unresolvedLinks[path] ?? {};
 		const backlinks: string[] = [];
@@ -90,12 +87,21 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		return {
 			path,
 			frontmatter,
-			tags: [...tags],
+			tags,
 			headings: (cache?.headings ?? []).map((h) => ({ level: h.level, text: h.heading })),
 			outgoingLinks: Object.keys(resolved),
 			unresolvedLinks: Object.keys(unresolved),
 			backlinks: backlinks.sort(),
 		};
+	}
+
+	linkGraph(): NoteLinks[] {
+		const { metadataCache } = this.app;
+		return this.app.vault.getMarkdownFiles().map((f) => ({
+			path: f.path,
+			outgoingLinks: Object.keys(metadataCache.resolvedLinks[f.path] ?? {}),
+			tags: noteTags(metadataCache.getFileCache(f)),
+		}));
 	}
 
 	async createNote(path: string, content: string): Promise<void> {
@@ -279,4 +285,14 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	list(relativeDir: string): Promise<string[]> {
 		return this.listPluginFiles(relativeDir);
 	}
+}
+
+/** Body tags and the `tags` property, each once, with `#`. */
+function noteTags(cache: CachedMetadata | null): string[] {
+	const tags = new Set<string>();
+	for (const t of cache?.tags ?? []) tags.add(t.tag);
+	const fmTags = cache?.frontmatter?.['tags'] as unknown;
+	if (Array.isArray(fmTags)) fmTags.forEach((t) => typeof t === 'string' && tags.add(t.startsWith('#') ? t : `#${t}`));
+	else if (typeof fmTags === 'string') tags.add(fmTags.startsWith('#') ? fmTags : `#${fmTags}`);
+	return [...tags];
 }

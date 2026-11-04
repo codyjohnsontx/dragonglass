@@ -38,9 +38,12 @@ src/
                           against what tool results and context showed.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
-                          active note, and the propose tools: create note,
-                          edit note, update frontmatter, move note, create
-                          folder).
+                          related notes, active note, and the propose
+                          tools: create note, edit note, update
+                          frontmatter, move note, create folder).
+    related-notes.ts      Ranks the notes related to one note by links,
+                          co-citation, shared links and shared tags, with
+                          short reasons.
     web-tools.ts          web_search (waits for the user's approval) and
                           read_web_page (up to 3 results per approved search).
   web/
@@ -58,8 +61,9 @@ src/
   vault/
     port.ts               Narrow VaultPort interface over Obsidian's vault,
                           including trashing a note (never `Vault.delete`),
-                          moving one through `FileManager.renameFile` and
-                          changing properties through `processFrontMatter`.
+                          moving one through `FileManager.renameFile`,
+                          changing properties through `processFrontMatter`
+                          and the whole vault's links and tags in one pass.
     obsidian-port.ts      VaultPort + StoreBackend implemented on App.
     paths.ts              Path validation at the trust boundary.
     proposals.ts          ChangeProposal model and ProposalEngine
@@ -112,7 +116,7 @@ src/
    of that turn is still awaiting review is refused with a tool error. It
    tells the model to put both changes in one call when the earlier proposal
    is the same kind (two text edits, or two property changes), and otherwise
-   to ask the user to review the first card (decision 19).
+   to ask the user to review the first card (decision 20).
 5. Tool results are appended as `tool` messages and the loop continues until
    the model answers without tools. A call repeated with the same arguments in
    one turn is answered with an error instead of being run again. After a
@@ -130,6 +134,12 @@ src/
    that lacks its other words (a person note, asked about their climbing
    project), it lists the notes that result links to, each with an excerpt,
    and auto-reads them right after it within half the auto-read budget.
+   `related_notes` ranks the notes connected to one note from the metadata
+   cache's links and tags (decision 19) and names each one's reasons, such as
+   "both link to [[Fort Ashen]]" or "shares #faction/ember"; it shows no note
+   text, so the system prompt tells the model to call it for a character,
+   place, faction or other subject with its own note, or what else connects to
+   it, and to read the notes that matter.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown. A tool message
    also stores the `sources` its result showed the model (see below).
@@ -170,7 +180,7 @@ A `ChangeProposal` has a kind:
 Revert undoes an edit or property change, or moves a note back; it does not
 remove a created note or folder. Approve all writes folders, then note
 contents, then moves; Undo all goes newest first, skips folders, and checks a
-note whose links a move rewrote only after that move is undone (decision 19).
+note whose links a move rewrote only after that move is undone (decision 20).
 
 ## Web search
 
@@ -219,8 +229,9 @@ write its own sources list.
 
 Read tools report what they showed as `Source`s on their result: `read_note`
 and `get_active_note` the note they read, `search_notes` each listed note as an
-excerpt or, when its text was auto-read, in full. A web tool reports each page
-as `{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
+excerpt or, when its text was auto-read, in full; `related_notes` shows no
+note text and reports none. A web tool reports each page as
+`{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
 message records the notes sent as context the same way: attachments and the
 active note in full, a selection as an excerpt of its note. They count for
 their own turn only, since the context block is sent with the latest user

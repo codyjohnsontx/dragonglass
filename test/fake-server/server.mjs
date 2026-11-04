@@ -19,6 +19,8 @@
  *                                             (e2e vault notes), the unread [[Welcome]] and a missing [[Ghost note]]
  *   web <query>                            -> web_search, read_web_page on its first result, then an answer citing
  *                                             both of the first two results as [web N]
+ *   related <note>                         -> related_notes, read_note on the top result, then an answer
+ *                                             citing the note and its three most related notes
  *   bad tool                               -> calls a tool that does not exist
  *   bad args                               -> read_note with missing arguments
  *   loop                                   -> keeps calling list_files forever (iteration cap test)
@@ -360,6 +362,18 @@ function plan(messages, toolsAvailable) {
 				'The launch is on November 1 [[Launch]], after the beta on October 20 [[Milestones]]. ' +
 				'The vault is a test vault [[Welcome]], and an old plan said otherwise [[Ghost note]].\n\n' +
 				"I'd suggest announcing the date right after the beta.",
+		};
+	}
+	if ((m = /^related\s+(.+)/i.exec(text))) {
+		const note = m[1].trim();
+		if (noTools) return { text: `I cannot look up related notes without tools.` };
+		if (stage === 0) return { tool: { name: 'related_notes', args: { path: note } } };
+		const listed = [...String(toolResults[0].content ?? '').matchAll(/^\d+\. (.+) \((.+)\)$/gm)].map((r) => ({ name: r[1], path: r[2] }));
+		if (listed.length === 0) return { text: `Nothing is connected to [[${note}]]: ${lastResultText}` };
+		if (stage === 1) return { tool: { name: 'read_note', args: { path: listed[0].path } } };
+		const others = listed.slice(1, 3).map((n) => `[[${n.name}]]`).join(' and ');
+		return {
+			text: `The note most connected to [[${note}]] is ${listed[0].name} [[${listed[0].name}]]${others ? `, followed by ${others}` : ''}.`,
 		};
 	}
 	if (lower.startsWith('bad tool')) {

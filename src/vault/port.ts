@@ -30,6 +30,15 @@ export interface NoteMetadata {
 	backlinks: string[];
 }
 
+/** One note's place in the link graph, as the metadata cache knows it. */
+export interface NoteLinks {
+	path: string;
+	/** Resolved outgoing links (vault paths), each once. */
+	outgoingLinks: string[];
+	/** Tags in the body and the `tags` property, with `#`. */
+	tags: string[];
+}
+
 /** A file or folder that was created, changed, deleted or renamed, as the vault reports it. */
 export type VaultChange =
 	| { type: 'create' | 'modify' | 'delete'; path: string }
@@ -55,6 +64,8 @@ export interface VaultPort {
 	isFolder(path: string): boolean;
 	readNote(path: string): Promise<string | null>;
 	getMetadata(path: string): NoteMetadata | null;
+	/** Every Markdown note's resolved links and tags, read from the metadata cache in one pass. */
+	linkGraph(): NoteLinks[];
 	/** Create a note; throws if the file already exists. Creates parent folders. */
 	createNote(path: string, content: string): Promise<void>;
 	/**
