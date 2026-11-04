@@ -443,12 +443,15 @@ line patterns. The owner asked for the note's own conventions, read from the
 note, and the choice only decides which short instruction and sample the
 model gets, so a parser is more than the decision needs. `inferFormat`
 counts scene headings, forced headings, transitions and character cues with
-dialogue under them against bold cues and headings, with Fountain as the
-default when the note is too short to tell, and the note's opening goes to
+dialogue under them against bold cues (two at least) and headings, with
+Fountain as the default when the note is too short to tell, and the note's opening goes to
 the model as a sample so it can match what the counts cannot describe. The
-sample is sent whether or not the note is attached: the open note is the
-script by the owner's choice, and 1,200 characters of it is less than the
-vault map and the tool results already leaving the machine.
+sample and the format go only when the open note is inside the script
+folder or attached to the message: the open note is the script by the
+owner's choice, but a public plugin should not send an unrelated private
+note (a journal, say) with every message. Otherwise neither is sent, drafts
+default to Fountain, and the model can still read the note with the read
+tools.
 
 How Insert writes: a direct editor replace, or a proposal. Writes still never
 write (decision 5). The insert reads the editor at the click (selection or

@@ -1,7 +1,7 @@
 import type { StoredMessage } from '../persistence/conversation';
 import { baseName, normalizeVaultPath } from '../vault/paths';
 import { ChangeProposal, ProposalEngine, ProposalError } from '../vault/proposals';
-import type { InsertTarget } from '../vault/port';
+import type { InsertTarget, VaultPort } from '../vault/port';
 
 /**
  * Scene drafting. The user is writing a screenplay and the vault holds the
@@ -236,6 +236,19 @@ export function draftingFor(scriptNote: string | null, content: string | null): 
 	const format = inferFormat(content);
 	const sample = formatSample(content);
 	return { format, scriptNote, sample: sample === '' ? null : sample };
+}
+
+/**
+ * The drafting options for a send. The open note is the script, but its
+ * sample and format go to the model only when it is inside the script
+ * folder or attached to this message (`attachedNote`); otherwise the rules
+ * fall back to Fountain and name no note, and the model can still read the
+ * note with the read tools.
+ */
+export async function draftingForSend(vault: VaultPort, attachedNote: string | null, scriptFolder: string): Promise<DraftingOptions> {
+	const open = vault.getActiveContext().path;
+	if (!open || (open !== attachedNote && !isScriptNote(open, scriptFolder))) return draftingFor(null, null);
+	return draftingFor(open, await vault.readNote(open));
 }
 
 /** The drafting rules of the system prompt. */

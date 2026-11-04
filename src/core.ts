@@ -15,7 +15,7 @@ import { createVaultTools } from './tools/vault-tools';
 import { createWebTools, DEFAULT_MAX_PAGE_CHARS, nextWebNumber, WebSearchApprover } from './tools/web-tools';
 import { researchNoteFor } from './web/research-note';
 import { parsePreferredSites, TavilySearch } from './web/search';
-import { draftingFor, parseDraft, proposeDraftInsert, threadForDraft } from './agent/drafting';
+import { draftingForSend, parseDraft, proposeDraftInsert, threadForDraft } from './agent/drafting';
 import { ObsidianVaultPort } from './vault/obsidian-port';
 import { normalizeVaultPath } from './vault/paths';
 import { ChangeProposal, ProposalEngine, ProposalError } from './vault/proposals';
@@ -181,9 +181,7 @@ export class DragonglassCore {
 		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
-		// The open note is the script a draft matches and goes into, attached or not; only a short sample of it is sent.
-		const scriptNote = this.vault.getActiveContext().path;
-		const drafting = draftingFor(scriptNote, scriptNote ? await this.vault.readNote(scriptNote) : null);
+		const drafting = await draftingForSend(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
 		const webReady = this.webSearchKey() !== null && opts.approveWebSearch !== undefined;
 		const webSearch = webReady ? 'available' : 'needs-key';
 		const pastSources = conv.messages.map((m) => m.sources);

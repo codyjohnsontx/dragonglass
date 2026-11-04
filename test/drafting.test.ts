@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildSystemPrompt, vaultMap } from '../src/agent/context';
 import {
 	draftingFor,
+	draftingForSend,
 	draftingRules,
 	draftVersions,
 	formatSample,
@@ -189,6 +190,32 @@ describe('drafting rules in the system prompt', () => {
 		expect(md.join('\n')).toContain('- Format: match the open script note [[Act 1]], a Markdown screenplay');
 		const prose = draftingRules(draftingFor('Notes/Outline.md', 'Kael walked the wall for an hour.\n\nMira followed at a distance.\n\nNeither spoke.\n'), true);
 		expect(prose.join('\n')).toContain('- Format: match the open note [[Outline]], which is prose');
+	});
+
+	it('sends the open note sample only for a script-folder note or an attached note', async () => {
+		const scene = 'INT. BARRACKS - DAWN\n\nKAEL\nAgain.\n\nThey groan.\n';
+		const journal = 'Dear diary, today I could not sleep.\n\nThe rain kept on.\n\nTomorrow is the interview.\n';
+		const vault = new MemoryVaultPort({ 'Script/Scene 12.md': scene, 'Journal/Today.md': journal });
+		const prompt = async (open: string | null, attached: string | null) => {
+			vault.active = { path: open, selection: null };
+			return buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, drafting: await draftingForSend(vault, attached, 'Script') });
+		};
+
+		const script = await prompt('Script/Scene 12.md', null);
+		expect(script).toContain('<<<sample path="Script/Scene 12.md">>>');
+		expect(script).toContain('Format: Fountain, matching the open script note [[Scene 12]]');
+
+		const attached = await prompt('Journal/Today.md', 'Journal/Today.md');
+		expect(attached).toContain('<<<sample path="Journal/Today.md">>>');
+		expect(attached).toContain('Format: match the open note [[Today]], which is prose');
+
+		for (const s of [await prompt('Journal/Today.md', null), await prompt('Journal/Today.md', 'Script/Scene 12.md'), await prompt(null, null)]) {
+			expect(s).toContain('Format: Fountain, as nothing in the open note sets a format');
+			expect(s).not.toContain('<<<sample');
+			expect(s).not.toContain('Today');
+			expect(s).not.toContain('Dear diary');
+		}
+		expect(await draftingForSend(vault, null, '')).toEqual(draftingFor(null, null));
 	});
 
 	it('maps the script folder in the vault outline', () => {

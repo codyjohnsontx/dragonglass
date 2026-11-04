@@ -201,11 +201,13 @@ is a code fence, so the citation rules and `extractCitations` already leave
 its inside alone; the citations around it make the sources list under the
 draft.
 
-The format to match comes from the open note. `core.send` reads it (the open
-note is the script whether or not it is attached; only a short sample goes
-out), `inferFormat` counts a few line patterns (scene headings, forced
+The format to match comes from the open note. `draftingForSend` reads it
+only when it is inside the script folder or attached to the message (only a
+short sample goes out; otherwise nothing of it does and drafts default to
+Fountain), `inferFormat` counts a few line patterns (scene headings, forced
 headings, transitions, character cues with dialogue under them for Fountain;
-bold cues and headings for a Markdown screenplay; otherwise prose; a note too
+two or more bold cues, helped by headings, for a Markdown screenplay;
+otherwise prose; a note too
 short to tell gets Fountain) and the rules name the format and show
 `formatSample`, the note's first 1,200 characters, as data. The optional
 script folder setting goes into the vault map and into the search tools as
