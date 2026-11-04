@@ -16,8 +16,8 @@ written.
   names), and only to the provider you configured. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
   inspect properties, links and backlinks, find the notes most related to one
-  and say why, and propose creating or editing notes. Edits are shown as a diff; you approve, reject, or revert. Nothing is
-  written otherwise.
+  and say why, and propose creating or editing notes. Edits are shown as a
+  diff; you approve, reject, or revert. Nothing is written otherwise.
 
 ## Status
 
