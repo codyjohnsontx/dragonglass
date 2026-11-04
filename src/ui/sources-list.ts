@@ -4,8 +4,9 @@ import { AnswerSources, VaultCitationStatus, VaultEntry } from '../agent/sources
 /**
  * The sources list under an answer: "From your vault" with each cited note
  * as a working link and a tag when its text was not in the model's context
- * for this answer; "From the web" with each cited [web N] page, once web
- * search results exist.
+ * for this answer, unless an earlier turn of the conversation predates
+ * source records, when it is left unflagged; "From the web" with each cited
+ * [web N] page, once web search results exist.
  */
 export function renderSourcesList(parent: HTMLElement, sources: AnswerSources): HTMLElement {
 	const box = parent.createDiv({ cls: 'dg-sources' });

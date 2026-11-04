@@ -8,7 +8,9 @@ import type { StoredMessage } from '../persistence/conversation';
  * model, not only in what it typed: a cited note whose text was not in the
  * model's context for the answer is shown as unverified, a cited note that
  * does not exist as missing. A turn saved before sources were recorded has
- * no list: its links stay plain links, unchecked.
+ * no list: its links stay plain links, unchecked. After such a turn, a cited
+ * note the record does not show as read is left unflagged, since the
+ * unrecorded turn may have shown it.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
