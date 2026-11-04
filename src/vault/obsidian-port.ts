@@ -96,6 +96,13 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		await this.app.vault.process(file, fn);
 	}
 
+	/** Obsidian's own trash, honouring the user's "Deleted files" preference; never `Vault.delete`. */
+	async trashNote(path: string): Promise<void> {
+		const file = this.app.vault.getFileByPath(path);
+		if (!file) throw new Error(`No note at ${path}`);
+		await this.app.fileManager.trashFile(file);
+	}
+
 	getActiveContext(): ActiveContext {
 		const leaf = this.lastMarkdownLeaf;
 		const tracked =

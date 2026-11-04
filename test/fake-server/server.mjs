@@ -12,6 +12,7 @@
  *   read <path>                            -> read_note, then a summary
  *   edit <path> replace <old> with <new>   -> read_note, propose_edit_note, then text
  *   create <path>                          -> propose_create_note, then text
+ *   (edit and create take comma-separated paths to propose several notes in one turn)
  *   search <query>                         -> search_notes, then text
  *   bad tool                               -> calls a tool that does not exist
  *   bad args                               -> read_note with missing arguments
@@ -209,13 +210,22 @@ function plan(messages, toolsAvailable) {
 	let m;
 	if (lower.startsWith('hello')) return { text: 'Hello from the fake model. I can read and edit your notes.' };
 	if ((m = /^edit\s+(\S+)\s+replace\s+"([^"]+)"\s+with\s+"([^"]+)"/i.exec(text))) {
-		const [, path, oldText, newText] = m;
-		if (noTools) return { text: `I cannot edit ${path} without tools.` };
-		if (stage === 0) return { tool: { name: 'read_note', args: { path } } };
-		if (stage === 1) {
-			return { tool: { name: 'propose_edit_note', args: { path, summary: `Replace "${oldText}" with "${newText}"`, edits: [{ type: 'find_replace', find: oldText, replace: newText }] } } };
+		const [, pathList, oldText, newText] = m;
+		const paths = pathList.split(',');
+		if (noTools) return { text: `I cannot edit ${pathList} without tools.` };
+		// Per note: read it, then propose; the text comes once every note is done.
+		// With several notes each proposal names its step, so repeating a path makes
+		// a distinct call (the runtime refuses an identical repeat before the tool runs).
+		const i = Math.floor(stage / 2);
+		const path = paths[i];
+		if (path && stage % 2 === 0) return { tool: { name: 'read_note', args: { path } } };
+		if (path) {
+			const step = paths.length > 1 ? ` (${i + 1} of ${paths.length})` : '';
+			return { tool: { name: 'propose_edit_note', args: { path, summary: `Replace "${oldText}" with "${newText}"${step}`, edits: [{ type: 'find_replace', find: oldText, replace: newText }] } } };
 		}
-		return { text: lastResultText.startsWith('Error') ? `The edit failed: ${lastResultText}` : `I proposed replacing "${oldText}" with "${newText}" in ${path}. Review it in the panel.` };
+		const errors = toolResults.map((r) => String(r.content ?? '')).filter((c) => c.startsWith('Error'));
+		if (errors.length > 0) return { text: `The edit failed: ${errors.join(' ')}` };
+		return { text: `I proposed replacing "${oldText}" with "${newText}" in ${listPaths(paths)}. Review ${paths.length > 1 ? 'them' : 'it'} in the panel.` };
 	}
 	if ((m = /^read\s+(\S+)/i.exec(text))) {
 		const path = m[1];
@@ -225,10 +235,11 @@ function plan(messages, toolsAvailable) {
 		return { text: lastResultText.startsWith('Error') ? lastResultText : `The note ${path} begins with: ${firstLine}` };
 	}
 	if ((m = /^create\s+(\S+)/i.exec(text))) {
-		const path = m[1];
-		if (noTools) return { text: `I cannot create ${path} without tools.` };
-		if (stage === 0) return { tool: { name: 'propose_create_note', args: { path, content: `# New note\n\nCreated by the fake model.\n`, summary: 'A new note' } } };
-		return { text: `I proposed creating ${path}. Review it in the panel.` };
+		const paths = m[1].split(',');
+		if (noTools) return { text: `I cannot create ${m[1]} without tools.` };
+		const path = paths[stage];
+		if (path) return { tool: { name: 'propose_create_note', args: { path, content: `# New note\n\nCreated by the fake model.\n`, summary: 'A new note' } } };
+		return { text: `I proposed creating ${listPaths(paths)}. Review ${paths.length > 1 ? 'them' : 'it'} in the panel.` };
 	}
 	if ((m = /^search\s+(.+)/i.exec(text))) {
 		const query = m[1];
@@ -246,6 +257,10 @@ function plan(messages, toolsAvailable) {
 	}
 	if (lower.startsWith('loop')) return { tool: { name: 'list_files', args: {} } };
 	return { text: `You said: ${text}` };
+}
+
+function listPaths(paths) {
+	return paths.length <= 1 ? paths.join('') : `${paths.slice(0, -1).join(', ')} and ${paths[paths.length - 1]}`;
 }
 
 function findLastIndex(arr, pred) {

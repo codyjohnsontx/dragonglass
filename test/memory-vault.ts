@@ -8,6 +8,8 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	files = new Map<string, string>();
 	folders = new Set<string>();
 	pluginFiles = new Map<string, string>();
+	/** Notes moved to the trash, by their former path, with the content they held. */
+	trashed = new Map<string, string>();
 	active: ActiveContext = { path: null, selection: null };
 	private listeners = new Set<(change: VaultChange) => void>();
 	private clock = 1_700_000_000_000;
@@ -100,6 +102,15 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		if (current === undefined) return Promise.reject(new Error(`No note at ${path}`));
 		this.files.set(path, fn(current));
 		this.emit({ type: 'modify', path });
+		return Promise.resolve();
+	}
+
+	trashNote(path: string): Promise<void> {
+		const content = this.files.get(path);
+		if (content === undefined) return Promise.reject(new Error(`No note at ${path}`));
+		this.trashed.set(path, content);
+		this.files.delete(path);
+		this.emit({ type: 'delete', path });
 		return Promise.resolve();
 	}
 

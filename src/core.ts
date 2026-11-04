@@ -286,6 +286,29 @@ export class DragonglassCore {
 			this.store.touch(conv);
 		}
 	}
+
+	/** Approve all: apply a turn's pending proposals together, all or nothing (`ProposalEngine.applyAll`). */
+	async approveAll(conv: Conversation, batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
+		try {
+			return await this.proposals.applyAll(batch);
+		} finally {
+			this.store.touch(conv);
+		}
+	}
+
+	rejectAll(conv: Conversation, batch: readonly ChangeProposal[]): void {
+		for (const p of batch) this.proposals.reject(p);
+		this.store.touch(conv);
+	}
+
+	/** Undo all: revert a turn's applied proposals together, all or nothing (`ProposalEngine.revertAll`). */
+	async revertAll(conv: Conversation, batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
+		try {
+			return await this.proposals.revertAll(batch);
+		} finally {
+			this.store.touch(conv);
+		}
+	}
 }
 
 function newId(): string {

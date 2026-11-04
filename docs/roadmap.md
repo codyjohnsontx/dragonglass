@@ -36,11 +36,16 @@ without redesigning the provider or tool architecture.
 - **OpenAI Responses API** for models that take tool calls only there
   (GPT-6.1 Sol and Terra), statelessly with `store: false`; other OpenAI
   models and the custom endpoint stay on Chat Completions.
+- **Batch review**: the proposals of one turn are reviewed as one grouped
+  card with Approve all, Reject all and Undo all, each all or nothing with
+  rollback; one proposal per note per turn; each note keeps its own controls.
 
 ## Next
 
-1. **Batch review**: group proposals from one turn into a single review with
-   approve-all, so multi-file changes are reviewed together.
+1. **Review outcome to the model**: tell the model on the next turn which of
+   its proposals were approved, rejected or undone, so it does not assume a
+   change it proposed was made. Today it learns only that the user must
+   approve.
 2. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
 3. **Relationship tools**: "related notes" via shared links, tags and

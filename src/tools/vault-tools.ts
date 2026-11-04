@@ -4,7 +4,7 @@ import { bodyStart, searchTerms, WordStartFinder, wordStartFinder } from '../sea
 import { SearchHit, SearchMode, VaultSearchIndex } from '../search/vault-index';
 import { VaultPort } from '../vault/port';
 import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
-import { EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
+import { ChangeProposal, EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
 
 /**
  * Tools exposed to the model. Read tools return note content wrapped in
@@ -37,15 +37,44 @@ export function createVaultTools(
 	index: VaultSearchIndex,
 ): AgentTool[] {
 	const opts = typeof options === 'function' ? options : () => options;
+	const turn = new TurnProposals(vault.configDir);
 	return [
 		listFilesTool(vault),
 		readNoteTool(vault, opts),
 		searchNotesTool(vault, index, opts),
 		getNoteMetadataTool(vault),
 		getActiveNoteTool(vault, opts),
-		proposeCreateNoteTool(proposals),
-		proposeEditNoteTool(proposals),
+		proposeCreateNoteTool(proposals, turn),
+		proposeEditNoteTool(proposals, turn),
 	];
+}
+
+/**
+ * The notes proposed through one tool registry. A registry lives for one
+ * send, so this is one user turn: a second proposal for a note whose first
+ * is still awaiting review is refused, and the user reviews one card per
+ * note, built against the note as they see it. Once they approve or reject
+ * the first, the note may be proposed again.
+ */
+class TurnProposals {
+	private readonly byPath = new Map<string, ChangeProposal>();
+
+	constructor(private readonly configDir: string) {}
+
+	/** Throws ProposalError when `rawPath` already has a pending proposal this turn. */
+	check(rawPath: unknown): void {
+		const path = validateVaultPath(rawPath, { configDir: this.configDir });
+		const earlier = this.byPath.get(path);
+		if (earlier && (earlier.status === 'pending' || earlier.status === 'stale')) {
+			throw new ProposalError(
+				`${path} already has a pending proposal in this turn. Put every change to one note in a single propose_edit_note call (several edits in one call); the user reviews one card per note. Nothing was proposed.`,
+			);
+		}
+	}
+
+	record(proposal: ChangeProposal): void {
+		this.byPath.set(proposal.path, proposal);
+	}
 }
 
 function ok(content: string): ToolResult {
@@ -537,7 +566,7 @@ function getActiveNoteTool(vault: VaultPort, options: () => VaultToolOptions): A
 	};
 }
 
-function proposeCreateNoteTool(proposals: ProposalEngine): AgentTool {
+function proposeCreateNoteTool(proposals: ProposalEngine, turn: TurnProposals): AgentTool {
 	return {
 		name: 'propose_create_note',
 		description:
@@ -554,12 +583,14 @@ function proposeCreateNoteTool(proposals: ProposalEngine): AgentTool {
 		},
 		async execute(args, ctx) {
 			try {
+				turn.check(args['path']);
 				const proposal = await proposals.proposeCreate(
 					ctx.conversationId,
 					String(args['path']),
 					String(args['content']),
 					String(args['summary']),
 				);
+				turn.record(proposal);
 				return {
 					content: `Proposed creating ${proposal.path} (proposal ${proposal.id}). The user must approve it before it is written. Do not assume it exists yet.`,
 					proposal,
@@ -571,7 +602,7 @@ function proposeCreateNoteTool(proposals: ProposalEngine): AgentTool {
 	};
 }
 
-function proposeEditNoteTool(proposals: ProposalEngine): AgentTool {
+function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): AgentTool {
 	return {
 		name: 'propose_edit_note',
 		description:
@@ -602,8 +633,10 @@ function proposeEditNoteTool(proposals: ProposalEngine): AgentTool {
 		},
 		async execute(args, ctx) {
 			try {
+				turn.check(args['path']);
 				const ops = toEditOperations(args['edits']);
 				const proposal = await proposals.proposeEdit(ctx.conversationId, String(args['path']), ops, String(args['summary']));
+				turn.record(proposal);
 				const stats = proposals.stats(proposal);
 				return {
 					content: `Proposed edit to ${proposal.path} (+${stats.added} / -${stats.removed} lines, proposal ${proposal.id}). The user must approve it before it is applied.`,

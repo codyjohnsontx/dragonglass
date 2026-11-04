@@ -249,3 +249,30 @@ result of two or more words that lacks the other query words, the notes it
 links to are listed with an excerpt and read in full right after it. They get
 at most half the auto-read budget so the ranked results keep the rest; a
 one-word name is a topic, not a person, and does not trigger this.
+
+## 16. Batch apply is all or nothing
+
+A turn that proposes several notes is reviewed as one card, derived from the
+conversation at render time (every proposal between one user message and the
+next) rather than stored, so conversations saved before batches existed group
+the same way. The model gets one proposal per note per turn: a second
+`propose_edit_note` or `propose_create_note` for a note whose first proposal
+is still awaiting review is refused with a plain tool error telling it to put
+every change to that note in one call, so each card is one note built against
+what the user sees. Approve all and Undo all are all or nothing: every note in
+the batch is checked first, and one out-of-date note means nothing is written
+(or undone) and the error names it; the header also disables Approve all as
+soon as the live freshness tracking knows a note changed, and the click-time
+check stays as the backstop. Each write still goes through the per-note apply
+path of decision 5 (hash re-check, snapshot, equality check inside
+`Vault.process`); the batch composes those steps rather than bypassing them.
+If a write fails partway, the notes already written are restored from their
+snapshots and a note the batch created is moved to Obsidian's trash through
+`FileManager.trashFile`, which follows the user's "Deleted files" setting
+(the plugin never calls `Vault.delete` directly), and only while the note
+still holds exactly what the batch wrote; a note the user has since changed
+is left as it is. Undo all follows the same rule for created notes, while
+per-note undo still never removes a created note. A partial apply was
+rejected because the user approved the set as a whole, and a batch left half
+applied is the state they can least reason about. Telling the model which
+proposals were approved is a separate item.
