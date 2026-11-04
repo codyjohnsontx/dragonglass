@@ -335,8 +335,9 @@ vault:
   and no web tool without a key.
 - Folder, move, property and section changes with a scripted model: Approve
   all then Undo all across a new folder, a move that updates links (including
-  Obsidian's update-links prompt when automatic updates are off), a move into
-  a new folder reverted with the folder removed, a property change applied and
+  Obsidian's update-links prompt when automatic updates are off, a link added
+  in the same batch, and two moves in a row through one note), a move into a
+  new folder reverted with the folder removed, a property change applied and
   reverted exactly, a stale property change refused, and `replace_section`
   refusing a missing or ambiguous heading.
 - Conversation history persists across plugin reload.

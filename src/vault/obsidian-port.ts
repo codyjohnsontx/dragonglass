@@ -34,7 +34,8 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		);
 		plugin.registerEvent(
 			app.metadataCache.on('resolve', (file) => {
-				if (this.unindexed.delete(file.path) && this.unindexed.size === 0) [...this.indexWaiters].forEach((done) => done());
+				this.unindexed.delete(file.path);
+				this.releaseIndexWaiters();
 			}),
 		);
 		app.workspace.onLayoutReady(() => {
@@ -83,7 +84,6 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 			if (targets[path]) backlinks.push(source);
 		}
 		const frontmatter = cache?.frontmatter ? { ...cache.frontmatter } : null;
-		if (frontmatter) delete frontmatter['position'];
 		return {
 			path,
 			frontmatter,
@@ -153,8 +153,13 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 			return await write();
 		} catch (e) {
 			this.unindexed.delete(path);
+			this.releaseIndexWaiters();
 			throw e;
 		}
+	}
+
+	private releaseIndexWaiters(): void {
+		if (this.unindexed.size === 0) [...this.indexWaiters].forEach((done) => done());
 	}
 
 	/** Resolves once Obsidian has indexed every note this port wrote, or after `INDEX_WAIT_MS` if it never reports one. */
@@ -168,7 +173,7 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 			};
 			const timer = window.setTimeout(() => {
 				this.unindexed.clear();
-				done();
+				this.releaseIndexWaiters();
 			}, INDEX_WAIT_MS);
 			this.indexWaiters.add(done);
 		});

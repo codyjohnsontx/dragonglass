@@ -84,6 +84,14 @@ describe('replace_section', () => {
 		expect(replaceSection(twoCases, 'gate', 'new')).toBe('# Gate\n\nupper\n\n# gate\n\nnew\n');
 	});
 
+	it('names a heading containing > by its exact text before reading > as a path', () => {
+		const note = '# Gate\n\n## Road\n\nunder gate\n\n# Gate > Road\n\nold\n\n# Far >\n\nfar\n';
+		expect(replaceSection(note, 'Gate > Road', 'new')).toBe('# Gate\n\n## Road\n\nunder gate\n\n# Gate > Road\n\nnew\n\n# Far >\n\nfar\n');
+		expect(replaceSection(note, 'Far >', 'near')).toContain('# Far >\n\nnear\n');
+		expect(replaceSection('# Gate\n\n## Road\n\nold\n', 'Gate > Road', 'new')).toBe('# Gate\n\n## Road\n\nnew\n');
+		expect(() => replaceSection(note, 'Nope >', 'x')).toThrow(/needs the text of a heading/);
+	});
+
 	it('refuses a missing heading and names the headings there are', () => {
 		expect(() => replaceSection(SCRIPT, 'Act Four', 'x')).toThrow(/No heading "Act Four" in the note\. Its headings are: # Sequel; ## Act One; ### Notes/);
 		expect(() => replaceSection('plain text', 'Intro', 'x')).toThrow(/The note has no headings/);
@@ -246,6 +254,17 @@ describe('propose_update_frontmatter', () => {
 		}
 	});
 
+	it('changes a property named position like any other, and reverts it', async () => {
+		const note = '---\nposition: Warden of the Gate\n---\n# Kael\n';
+		const { vault, engine, call } = setup({ 'Kael.md': note });
+		const p = (await call('propose_update_frontmatter', { path: 'Kael.md', summary: 's', set: [{ key: 'position', value: 'Keeper of the Ember' }] })).proposal!;
+		expect(p.properties).toEqual([{ key: 'position', before: 'Warden of the Gate', after: 'Keeper of the Ember' }]);
+		await engine.apply(p);
+		expect(vault.files.get('Kael.md')).toBe('---\nposition: Keeper of the Ember\n---\n# Kael\n');
+		await engine.revert(p);
+		expect(vault.files.get('Kael.md')).toBe(note);
+	});
+
 	it('refuses changes that change nothing, bad arguments, missing notes and placeholders', async () => {
 		const { call } = setup({ 'A.md': NOTE });
 		const same = await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'draft' }], remove: ['nope'] });
@@ -253,7 +272,7 @@ describe('propose_update_frontmatter', () => {
 		expect((await call('propose_update_frontmatter', { path: 'A.md', summary: 's' })).content).toMatch(/at least one property/);
 		expect((await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'x', value: 'a', values: ['b'] }] })).content).toMatch(/exactly one of/);
 		expect((await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'x', value: 'a' }, { key: 'x', value: 'b' }] })).content).toMatch(/more than once/);
-		expect((await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'position', value: 'a' }] })).content).toMatch(/not a property name/);
+		expect((await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'a\nb', value: 'a' }] })).content).toMatch(/not a property name/);
 		expect((await call('propose_update_frontmatter', { path: 'Nope.md', summary: 's', set: [{ key: 'x', value: 'a' }] })).content).toMatch(/No note found/);
 		expect((await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'x', value: '[Insert era]' }] })).content).toMatch(/placeholder/);
 	});

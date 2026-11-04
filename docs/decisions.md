@@ -460,7 +460,9 @@ that starts with the same heading keeps it. Looser matching (any case,
 `## Act Two`) was dropped: it made headings differing only in case ambiguous
 and added spellings nothing needed. A missing heading is refused with the
 note's headings listed, and an ambiguous one with each candidate and the
-heading it sits under, which the model can name as `Act Two > Notes`.
+heading it sits under, which the model can name as `Act Two > Notes`. That
+path is read only when no heading has the whole text, so a heading that
+contains `>` can still be named exactly.
 
 A new folder is never removed by Revert or Undo all, as a created note is
 never removed by Revert; the review says so. Rolling back a failed Approve

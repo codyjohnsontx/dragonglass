@@ -230,7 +230,7 @@ export class ProposalEngine {
 		const changes: PropertyChange[] = [];
 		for (const edit of edits) {
 			const key = edit.key.trim();
-			if (key === '' || /[\n\r]/.test(key) || key === 'position') throw new ProposalError(`"${edit.key}" is not a property name that can be changed.`);
+			if (key === '' || /[\n\r]/.test(key)) throw new ProposalError(`"${edit.key}" is not a property name that can be changed.`);
 			if (changes.some((c) => c.key === key)) throw new ProposalError(`The property "${key}" is changed more than once. Change each property once.`);
 			const had = Object.prototype.hasOwnProperty.call(current, key);
 			const change: PropertyChange = { key };

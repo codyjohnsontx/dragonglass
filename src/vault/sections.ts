@@ -62,11 +62,7 @@ function frontmatterEnd(lines: readonly string[]): number {
 	return 0;
 }
 
-/**
- * Parse what the model names: the heading's text exactly as the note has it,
- * `Act Two`, or for a heading that appears more than once a path through the
- * headings above it, `Act Two > Notes`.
- */
+/** Parse a path through the headings above a heading, `Act Two > Notes`, as named for a heading that appears more than once. */
 function parseTarget(raw: string): string[] {
 	const path = raw.split('>').map((p) => p.trim());
 	if (path.some((p) => p === '')) throw new SectionError('replace_section needs the text of a heading in "heading".');
@@ -84,12 +80,22 @@ function describe(h: Heading): string {
 	return `${'#'.repeat(h.level)} ${h.text}`;
 }
 
-/** The one heading `raw` names; throws SectionError naming the note's headings when there is none, or the candidates when there are several. */
-export function findHeading(lines: readonly string[], raw: string): Heading {
-	const path = parseTarget(raw);
-	const headings = listHeadings(lines);
+/** The headings a path through the headings above them names. */
+function headingsAt(headings: readonly Heading[], path: readonly string[]): Heading[] {
 	const name = path[path.length - 1];
-	const matches = headings.filter((h) => h.text === name && underParents(h.parents, path.slice(0, -1)));
+	return headings.filter((h) => h.text === name && underParents(h.parents, path.slice(0, -1)));
+}
+
+/**
+ * The one heading `raw` names: its exact text, or when no heading has that
+ * text a path such as `Act Two > Notes`. Throws SectionError naming the
+ * note's headings when there is none, or the candidates when there are
+ * several.
+ */
+export function findHeading(lines: readonly string[], raw: string): Heading {
+	const headings = listHeadings(lines);
+	const exact = headings.filter((h) => h.text === raw.trim());
+	const matches = exact.length > 0 ? exact : headingsAt(headings, parseTarget(raw));
 	if (matches.length === 1) return matches[0] as Heading;
 	if (matches.length === 0) {
 		const known = headings.length === 0 ? 'The note has no headings.' : `Its headings are: ${headings.slice(0, 30).map(describe).join('; ')}${headings.length > 30 ? '; …' : ''}.`;

@@ -176,6 +176,21 @@ function statsText(core: DragonglassCore, p: ChangeProposal): string {
 	return `+${stats.added} −${stats.removed} lines`;
 }
 
+/** What a move's card says about links, or null when a move that did not happen, or was undone, has nothing true to say about them. */
+export function moveLinksText(p: ChangeProposal): string | null {
+	const count = p.linkUpdates?.length ?? 0;
+	if (count === 0) return baseName(p.path) === baseName(p.newPath ?? '') ? 'No links need to change.' : 'No other notes link to it.';
+	switch (p.status) {
+		case 'pending':
+		case 'stale':
+			return `Obsidian will update the links to it in ${plural(count, 'note')}, and asks first if "Automatically update internal links" is off:`;
+		case 'applied':
+			return `Obsidian updated the links to it in ${plural(count, 'note')}, unless you chose not to when it asked:`;
+		default:
+			return null;
+	}
+}
+
 /** What a move does: from, to, and the notes whose links Obsidian rewrites. */
 function renderMove(app: App, p: ChangeProposal, container: HTMLElement): void {
 	const box = container.createDiv({ cls: 'dg-move' });
@@ -186,17 +201,12 @@ function renderMove(app: App, p: ChangeProposal, container: HTMLElement): void {
 	};
 	row('From', p.path);
 	row('To', p.newPath ?? '');
-	const links = p.linkUpdates ?? [];
+	const text = moveLinksText(p);
+	if (text === null) return;
 	const note = box.createDiv({ cls: 'dg-move-links' });
-	if (links.length === 0) {
-		note.setText(baseName(p.path) === baseName(p.newPath ?? '') ? 'No links need to change.' : 'No other notes link to it.');
-		return;
-	}
-	note.setText(
-		p.status === 'applied'
-			? `Obsidian updated the links to it in ${plural(links.length, 'note')}, unless you chose not to when it asked:`
-			: `Obsidian will update the links to it in ${plural(links.length, 'note')}, and asks first if "Automatically update internal links" is off:`,
-	);
+	note.setText(text);
+	const links = p.linkUpdates ?? [];
+	if (links.length === 0) return;
 	const list = note.createEl('ul', { cls: 'dg-move-link-list' });
 	for (const path of links) {
 		const a = list.createEl('li').createEl('a', { text: path, href: '#' });
