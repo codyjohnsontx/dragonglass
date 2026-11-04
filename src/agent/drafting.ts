@@ -271,7 +271,7 @@ export function draftingRules(opts: DraftingOptions, toolsEnabled: boolean): str
 	switch (opts.format) {
 		case 'fountain':
 			lines.push(
-				`- Format: Fountain, ${note && opts.sample ? `matching the open script note ${note}` : opts.withheld ? 'as no script note is shared (ask which note the scene is for if it should match one)' : 'as nothing in the open note sets a format'}: scene headings such as INT. PLACE - DAY, action in plain paragraphs, a character name in capitals on its own line with the dialogue beneath, parentheticals in (parentheses), no Markdown.`,
+				`- Format: Fountain, ${note && opts.sample ? `matching the open script note ${note}` : opts.withheld ? 'as no script note is shared (ask which note the scene is for if it should match one)' : note ? 'as nothing in the open note sets a format' : 'as no note is open'}: scene headings such as INT. PLACE - DAY, action in plain paragraphs, a character name in capitals on its own line with the dialogue beneath, parentheticals in (parentheses), no Markdown.`,
 			);
 			break;
 		case 'markdown':

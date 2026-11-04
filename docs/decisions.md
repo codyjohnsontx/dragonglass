@@ -423,7 +423,9 @@ can read a note the user names with the read tools.
 
 How Insert writes: a direct editor replace, or a proposal. Writes still never
 write (decision 5). The insert reads the editor at the click (selection or
-cursor), after saving the view's pending edits, builds the whole new note
+cursor), after saving the view's pending edits and waiting briefly for a
+save already under way (the blur from the click starts one) to reach the
+vault, builds the whole new note
 text and goes through `ProposalEngine.proposeRewrite`, which refuses when
 the vault still differs from the editor and otherwise hashes the note like
 any edit; apply re-checks the hash inside `Vault.process`. The proposal

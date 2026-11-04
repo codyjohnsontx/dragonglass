@@ -168,8 +168,10 @@ describe('drafting rules in the system prompt', () => {
 		expect(s).toContain('```draft new');
 		expect(s).toContain('No [[links]], citations or commentary inside the block');
 		expect(s).toContain('Do not propose an edit to put a draft in the script');
-		expect(s).toContain('Format: Fountain, as nothing in the open note sets a format');
+		expect(s).toContain('Format: Fountain, as no note is open');
 		expect(s).not.toContain('<<<sample');
+		const empty = buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, drafting: draftingFor('Script/Scene 13.md', '') });
+		expect(empty).toContain('Format: Fountain, as nothing in the open note sets a format');
 		const off = buildSystemPrompt({ toolsEnabled: false, maxCharsPerNote: 100, drafting: draftingFor(null, null) });
 		expect(off).toContain('Draft from the notes in front of you');
 		expect(off).not.toContain('search_notes and read_note');
@@ -210,11 +212,13 @@ describe('drafting rules in the system prompt', () => {
 		expect(attached).toContain('Format: match the open note [[Today]], which is prose');
 
 		const none = await prompt(null, null);
-		expect(none).toContain('Format: Fountain, as nothing in the open note sets a format');
+		expect(none).toContain('Format: Fountain, as no note is open');
+		expect(none).not.toContain('nothing in the open note sets a format');
 		expect(none).not.toContain('no script note is shared');
 		for (const s of [await prompt('Journal/Today.md', null), await prompt('Journal/Today.md', 'Script/Scene 12.md')]) {
 			expect(s).toContain('Format: Fountain, as no script note is shared (ask which note the scene is for if it should match one)');
 			expect(s).not.toContain('nothing in the open note sets a format');
+			expect(s).not.toContain('no note is open');
 		}
 		for (const s of [await prompt('Journal/Today.md', null), await prompt('Journal/Today.md', 'Script/Scene 12.md'), none]) {
 			expect(s).not.toContain('<<<sample');
