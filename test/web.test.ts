@@ -87,6 +87,14 @@ describe('extractPageText', () => {
 		expect(text).toBe('The saga of Kael begins in the north, long before the war.\n\nBody text.');
 	});
 
+	it('keeps the text of a page wrapped in one form, dropping only its controls', () => {
+		const html = `<body><form id="aspnetForm" action="/x"><main><p>${'Kael led the Ember Guard north. '.repeat(10)}</p>
+			<label>Search <input name="q"></label><textarea>draft comment</textarea><select><option>Sort</option></select><button>Go</button></main></form></body>`;
+		const { text } = extractPageText(html);
+		expect(text).toContain('Kael led the Ember Guard north.');
+		expect(text).not.toMatch(/draft comment|Sort|Go/);
+	});
+
 	it('survives unclosed tags and comments without hanging', () => {
 		expect(extractPageText('<p>One<!-- hidden --> two<script>never closed').text).toBe('One two');
 		expect(extractPageText('<div>broken <b>bold').text).toBe('broken bold');

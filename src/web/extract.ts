@@ -2,7 +2,7 @@
  * Plain text from a web page, extracted in-house so reading a page needs no
  * runtime dependency and no DOM (it runs the same in tests). It is a reader,
  * not a browser: scripts, styles and page furniture (navigation, footers,
- * sidebars, forms) are dropped, the main or article element is preferred when
+ * sidebars, form controls) are dropped, the main or article element is preferred when
  * the page has one with real text in it, block elements become line breaks
  * and entities are decoded. Pages that build their text with JavaScript come
  * back nearly empty, and the caller says so.
@@ -17,7 +17,7 @@ export interface ExtractedPage {
 export const MAX_HTML_CHARS = 2_000_000;
 
 /** Elements whose content is never page text. */
-const DROPPED = ['script', 'style', 'noscript', 'template', 'svg', 'math', 'head', 'iframe', 'object', 'canvas', 'select', 'button', 'form'];
+const DROPPED = ['script', 'style', 'noscript', 'template', 'svg', 'math', 'head', 'iframe', 'object', 'canvas', 'select', 'button', 'textarea'];
 /** Page furniture: dropped when the page has a main or article element, or when they hold mostly links. */
 const FURNITURE = ['nav', 'footer', 'aside', 'header'];
 
