@@ -5,7 +5,7 @@ import { bodyStart, searchTerms, WordStartFinder, wordStartFinder } from '../sea
 import { SearchHit, SearchMode, VaultSearchIndex } from '../search/vault-index';
 import { VaultPort } from '../vault/port';
 import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
-import { ChangeProposal, EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
+import { ChangeProposal, EditOperation, ProposalEngine, ProposalError, ProposalKind, PropertyEdit, touchedPaths } from '../vault/proposals';
 import { relatedNotes } from './related-notes';
 
 /**
@@ -49,34 +49,45 @@ export function createVaultTools(
 		getActiveNoteTool(vault, opts),
 		proposeCreateNoteTool(proposals, turn),
 		proposeEditNoteTool(proposals, turn),
+		proposeUpdateFrontmatterTool(proposals, turn),
+		proposeMoveNoteTool(proposals, turn),
+		proposeCreateFolderTool(proposals, turn),
 	];
 }
+
+/** Refusal hints for a second proposal of the same kind whose tool can carry both changes in one call. */
+const COMBINED: Partial<Record<ProposalKind, string>> = {
+	edit: 'Put every change to the note text in a single propose_edit_note call (several edits in one call)',
+	frontmatter: 'Put every property change to the note in a single propose_update_frontmatter call (set and remove take several properties)',
+};
+
+const WAITING_FOR_REVIEW = 'It is waiting for the user to review. Ask the user to approve or reject it first, then propose this change';
 
 /**
  * The notes proposed through one tool registry. A registry lives for one
  * send, so this is one user turn: a second proposal for a note whose first
  * is still awaiting review is refused, and the user reviews one card per
  * note, built against the note as they see it. Once they approve or reject
- * the first, the note may be proposed again.
+ * the first, the note may be proposed again. A move claims both its paths.
  */
 class TurnProposals {
 	private readonly byPath = new Map<string, ChangeProposal>();
 
 	constructor(private readonly configDir: string) {}
 
-	/** Throws ProposalError when `rawPath` already has a pending proposal this turn. */
-	check(rawPath: unknown): void {
-		const path = validateVaultPath(rawPath, { configDir: this.configDir });
-		const earlier = this.byPath.get(path);
-		if (earlier && (earlier.status === 'pending' || earlier.status === 'stale')) {
-			throw new ProposalError(
-				`${path} already has a pending proposal in this turn. Put every change to one note in a single propose_edit_note call (several edits in one call); the user reviews one card per note. Nothing was proposed.`,
-			);
+	/** Throws ProposalError when one of the paths a `kind` proposal would touch already has a pending proposal this turn. */
+	check(kind: ProposalKind, ...rawPaths: unknown[]): void {
+		for (const raw of rawPaths) {
+			const path = validateVaultPath(raw, { markdown: false, configDir: this.configDir });
+			const earlier = this.byPath.get(path);
+			if (!earlier || (earlier.status !== 'pending' && earlier.status !== 'stale')) continue;
+			const hint = (earlier.kind === kind ? COMBINED[kind] : undefined) ?? WAITING_FOR_REVIEW;
+			throw new ProposalError(`${path} already has a pending proposal in this turn. ${hint}; the user reviews one card per note. Nothing was proposed.`);
 		}
 	}
 
 	record(proposal: ChangeProposal): void {
-		this.byPath.set(proposal.path, proposal);
+		for (const path of touchedPaths(proposal)) this.byPath.set(path, proposal);
 	}
 }
 
@@ -638,7 +649,7 @@ function proposeCreateNoteTool(proposals: ProposalEngine, turn: TurnProposals): 
 		},
 		async execute(args, ctx) {
 			try {
-				turn.check(args['path']);
+				turn.check('create', args['path']);
 				const proposal = await proposals.proposeCreate(
 					ctx.conversationId,
 					String(args['path']),
@@ -661,7 +672,7 @@ function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 	return {
 		name: 'propose_edit_note',
 		description:
-			'Propose an edit to an existing note. Prefer find_replace with enough surrounding context to be unique; use append to add to the end; use replace_all only when rewriting the whole note. Read the note first so `find` matches exactly. Nothing is written until the user approves.',
+			'Propose an edit to an existing note. Prefer find_replace with enough surrounding context to be unique; use replace_section to rewrite everything under one heading; use append to add to the end; use replace_all only when rewriting the whole note. Read the note first so `find` and `heading` match exactly. Nothing is written until the user approves.',
 		readOnly: false,
 		parameters: {
 			type: 'object',
@@ -674,11 +685,19 @@ function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 					items: {
 						type: 'object',
 						properties: {
-							type: { type: 'string', enum: ['find_replace', 'append', 'replace_all'] },
+							type: { type: 'string', enum: ['find_replace', 'replace_section', 'append', 'replace_all'] },
 							find: { type: 'string', description: 'Exact existing text (find_replace).' },
 							replace: { type: 'string', description: 'Replacement text (find_replace).' },
 							replaceAll: { type: 'boolean', description: 'Replace every occurrence (find_replace).' },
-							content: { type: 'string', description: 'Text to append or the full new content.' },
+							heading: {
+								type: 'string',
+								description:
+									'replace_section: the heading text exactly as the note has it, without the #s, e.g. "Act Two". If the heading appears more than once, name the heading above it too: "Act Two > Notes". The section runs to the next heading of the same or a higher level, so its subheadings are replaced too.',
+							},
+							content: {
+								type: 'string',
+								description: 'Text to append, the full new content (replace_all), or the section body only (replace_section): the new text under the heading, without the heading line, which stays as it is.',
+							},
 						},
 						required: ['type'],
 					},
@@ -688,7 +707,7 @@ function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 		},
 		async execute(args, ctx) {
 			try {
-				turn.check(args['path']);
+				turn.check('edit', args['path']);
 				const ops = toEditOperations(args['edits']);
 				const proposal = await proposals.proposeEdit(ctx.conversationId, String(args['path']), ops, String(args['summary']));
 				turn.record(proposal);
@@ -699,6 +718,142 @@ function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 				};
 			} catch (e) {
 				return wrapError(e);
+			}
+		},
+	};
+}
+
+function proposeUpdateFrontmatterTool(proposals: ProposalEngine, turn: TurnProposals): AgentTool {
+	return {
+		name: 'propose_update_frontmatter',
+		description:
+			"Propose setting or removing a note's properties (YAML frontmatter), such as status, tags or aliases. Obsidian writes the YAML; the user reviews each property's old and new value. Use this rather than propose_edit_note for properties. Nothing is written until the user approves.",
+		readOnly: false,
+		parameters: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Vault-relative path of the existing note.' },
+				summary: { type: 'string', description: 'One sentence describing the change for the user.' },
+				set: {
+					type: 'array',
+					description:
+						'Properties to add or change. "value" is a JSON string, number or boolean: for a number or checkbox property send 3 or true, not "3" or "true". Use "values" for a list.',
+					items: {
+						type: 'object',
+						properties: {
+							key: { type: 'string', description: 'Property name.' },
+							value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+							values: { type: 'array', items: { type: 'string' }, description: 'New value of a list property such as tags or aliases: the whole list.' },
+						},
+						required: ['key'],
+					},
+				},
+				remove: { type: 'array', items: { type: 'string' }, description: 'Names of properties to remove.' },
+			},
+			required: ['path', 'summary'],
+		},
+		async execute(args, ctx) {
+			try {
+				turn.check('frontmatter', args['path']);
+				const edits = toPropertyEdits(args['set'], args['remove']);
+				const proposal = await proposals.proposeFrontmatter(ctx.conversationId, String(args['path']), edits, String(args['summary']));
+				turn.record(proposal);
+				const keys = (proposal.properties ?? []).map((c) => c.key).join(', ');
+				return {
+					content: `Proposed changing properties of ${proposal.path} (${keys}; proposal ${proposal.id}). The user must approve it before it is applied.`,
+					proposal,
+				};
+			} catch (e) {
+				return wrapError(e);
+			}
+		},
+	};
+}
+
+export function toPropertyEdits(set: unknown, remove: unknown): PropertyEdit[] {
+	const edits: PropertyEdit[] = [];
+	if (set !== undefined) {
+		if (!Array.isArray(set)) throw new ProposalError('set must be an array.');
+		set.forEach((item, i) => {
+			const entry = item as Record<string, unknown>;
+			const key = entry['key'];
+			if (typeof key !== 'string') throw new ProposalError(`set[${i}] needs a string "key".`);
+			const hasValue = entry['value'] !== undefined;
+			if (hasValue === (entry['values'] !== undefined)) {
+				throw new ProposalError(`set[${i}] (${key}) needs exactly one of "value" (text, number or true/false) or "values" (a list).`);
+			}
+			edits.push({ key, value: hasValue ? entry['value'] : entry['values'] });
+		});
+	}
+	if (remove !== undefined) {
+		if (!Array.isArray(remove) || remove.some((k) => typeof k !== 'string')) throw new ProposalError('remove must be an array of property names.');
+		for (const key of remove as string[]) edits.push({ key, remove: true });
+	}
+	if (edits.length === 0) throw new ProposalError('Give at least one property in set or remove.');
+	return edits;
+}
+
+function proposeMoveNoteTool(proposals: ProposalEngine, turn: TurnProposals): AgentTool {
+	return {
+		name: 'propose_move_note',
+		description:
+			'Propose moving or renaming a note. When the user approves, Obsidian moves it and updates the links to it in other notes; the review lists those notes. Nothing is moved until the user approves.',
+		readOnly: false,
+		parameters: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Vault-relative path of the existing note.' },
+				new_path: {
+					type: 'string',
+					description: 'Its new vault-relative path ending in .md: a new name, a new folder, or both. Folders are created as needed.',
+				},
+				summary: { type: 'string', description: 'One sentence telling the user why.' },
+			},
+			required: ['path', 'new_path', 'summary'],
+		},
+		async execute(args, ctx) {
+			try {
+				turn.check('move', args['path'], args['new_path']);
+				const proposal = await proposals.proposeMove(ctx.conversationId, String(args['path']), String(args['new_path']), String(args['summary']));
+				turn.record(proposal);
+				const count = proposal.linkUpdates?.length ?? 0;
+				const links = count > 0 ? ` On approval Obsidian updates the links to it in ${count} other note${count === 1 ? '' : 's'}, asking the user first if their settings say so.` : '';
+				return {
+					content: `Proposed moving ${proposal.path} to ${proposal.newPath ?? ''} (proposal ${proposal.id}).${links} The user must approve it before it is moved; until then it is still at ${proposal.path}.`,
+					proposal,
+				};
+			} catch (e) {
+				return wrapError(e);
+			}
+		},
+	};
+}
+
+function proposeCreateFolderTool(proposals: ProposalEngine, turn: TurnProposals): AgentTool {
+	return {
+		name: 'propose_create_folder',
+		description:
+			'Propose creating an empty folder. Not needed before propose_create_note or propose_move_note, which create folders as needed. Nothing is created until the user approves.',
+		readOnly: false,
+		parameters: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Vault-relative folder path, e.g. "Lore/Factions".' },
+				summary: { type: 'string', description: 'One sentence telling the user what the folder is for.' },
+			},
+			required: ['path', 'summary'],
+		},
+		execute(args, ctx) {
+			try {
+				turn.check('folder', args['path']);
+				const proposal = proposals.proposeFolder(ctx.conversationId, String(args['path']), String(args['summary']));
+				turn.record(proposal);
+				return Promise.resolve({
+					content: `Proposed creating the folder ${proposal.path} (proposal ${proposal.id}). The user must approve it before it exists.`,
+					proposal,
+				});
+			} catch (e) {
+				return Promise.resolve(wrapError(e));
 			}
 		},
 	};
@@ -720,6 +875,11 @@ export function toEditOperations(raw: unknown): EditOperation[] {
 			case 'replace_all':
 				if (typeof op['content'] !== 'string') throw new ProposalError(`edits[${i}]: replace_all needs string "content".`);
 				return { type: 'replace_all', content: op['content'] };
+			case 'replace_section':
+				if (typeof op['heading'] !== 'string' || typeof op['content'] !== 'string') {
+					throw new ProposalError(`edits[${i}]: replace_section needs string "heading" and "content".`);
+				}
+				return { type: 'replace_section', heading: op['heading'], content: op['content'] };
 			default:
 				throw new ProposalError(`edits[${i}]: unknown type ${String(op['type'])}.`);
 		}

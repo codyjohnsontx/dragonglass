@@ -17,8 +17,9 @@ written.
   when you approve it. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
   inspect properties, links and backlinks, find the notes most related to one
-  and say why, and propose creating or editing notes. Edits are shown as a
-  diff; you approve, reject, or revert. Nothing is written otherwise.
+  and say why, and propose creating, editing, moving or renaming notes,
+  changing their properties and creating folders. Every change is shown for
+  review; you approve, reject, or revert. Nothing is written otherwise.
 - **Web fallback, on your say-so.** With a Tavily key, the model can search
   the web when the vault lacks an answer. You approve every search and can
   change its words first; the answer cites web pages as `[web N]`, and
@@ -247,7 +248,7 @@ Open the sidebar with the gem icon in the ribbon or the command
   one whose text was not in the model's context for that answer is marked
   unverified, one it saw only part of (a search excerpt, its properties or a
   selection) says so, and a link to a note that does not exist says "no such
-  note". Notes the same answer proposes creating or editing are not listed.
+  note". Notes the same answer proposes changing are not listed.
   Replies saved by an earlier version get no list, and in a conversation that
   has them, later answers leave such notes unflagged rather than guess.
 - When the vault lacks an answer and a Tavily key is set, the model may ask to
@@ -270,21 +271,29 @@ Open the sidebar with the gem icon in the ribbon or the command
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
   The model reads the note, proposes a change, and a card with the diff
   appears. Select **Approve** to apply or **Reject** to discard.
+- Beyond text edits, the model can propose rewriting one section by its
+  heading, setting or removing properties (reviewed as each property's old
+  and new value), moving or renaming a note (the card lists the notes whose
+  links change; links follow Obsidian's "Automatically update internal links"
+  setting) and creating a folder.
 - When one request changes several notes, the proposals appear as one card
   ("3 changes across 3 notes") with **Approve all** and **Reject all**; each
   note's diff is a collapsible section with its own Approve and Reject.
   Approve all is all or nothing: if any note changed since it was proposed,
   nothing is written and the card names the note. Once applied, **Undo all**
-  restores every note the same way, and sends notes the batch created to
-  Obsidian's trash if they are untouched. The model is asked for one proposal
-  per note per request, so each card is one note.
+  restores every note the same way, moves moved notes back, and sends notes
+  the batch created to Obsidian's trash if they are untouched; new folders
+  stay. The model is asked for one proposal per note per request, so each card
+  is one note.
 - If you edit the note yourself after a proposal was made, the card switches
   to out of date and approval is blocked; undoing your edit makes it
   approvable again. Otherwise ask again.
 - **Revert** on an applied edit restores the snapshot taken before it was
   applied. It is refused if the note changed after the edit was applied, so
-  later edits are never overwritten. Snapshots are kept under the plugin
-  folder (last 50).
+  later edits are never overwritten. Reverting a property change puts the
+  properties back, and reverting a move moves the note back; a created note
+  or folder, including a folder a move created, is not removed. Snapshots are
+  kept under the plugin folder (last 50).
 - **Stop** cancels generation. Partial text is kept.
 - Conversations persist in the vault's plugin folder and survive switching
   providers. Deleting one asks for confirmation first; there is no undo.
@@ -325,9 +334,18 @@ vault:
   search words, declining, Stop while it waits, preferred sites widening to
   the whole web, page reads, `[web N]` links, Save to vault through review,
   and no web tool without a key.
+- Folder, move, property and section changes with a scripted model: Approve
+  all then Undo all across a new folder, a move that updates links (including
+  Obsidian's update-links prompt when automatic updates are off, a link added
+  in the same batch, and two moves in a row through one note), a move into a
+  new folder reverted, a property change applied and
+  reverted exactly, a stale property change refused, and `replace_section`
+  refusing a missing or ambiguous heading.
 - Conversation history persists across plugin reload.
 
-Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
+Verified live against Ollama with qwen3:8b on a laptop (every scenario above
+except the folder, move, property and section changes, which have run only
+with the scripted model).
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
@@ -357,8 +375,7 @@ in its documented shape. To verify live:
   connection test even if chat works.
 - The model is not told whether a proposal was approved or rejected; it only
   knows the user must approve.
-- No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
-  yet.
+- No Canvas or Bases support yet.
 - No semantic search or stemming; search matches any query word at the start
   of a word in note names and content, ranking rarer words and notes that
   contain more of the words first. A paraphrase that shares no word with the

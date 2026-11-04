@@ -57,6 +57,13 @@ without redesigning the provider or tool architecture.
   explain ("both link to [[Fort Ashen]]", "shares #faction/ember"); the
   system prompt points the model at it for questions about a character,
   place, faction or what else connects to something.
+- **More write tools**, each a reviewed proposal in the turn's batch:
+  create folder, move or rename a note through `FileManager.renameFile`
+  (links follow the user's setting; the review lists the notes whose links
+  change), set or remove properties through `FileManager.processFrontMatter`
+  (reviewed as old and new values), and `replace_section` in
+  `propose_edit_note` to rewrite one section by heading. Moves and property
+  changes revert; folders, like created notes, do not.
 
 ## Next
 
@@ -64,17 +71,15 @@ without redesigning the provider or tool architecture.
    its proposals were approved, rejected or undone, so it does not assume a
    change it proposed was made. Today it learns only that the user must
    approve.
-2. **More write tools**: create folder, move/rename note, update frontmatter
-   through `FileManager.processFrontMatter`, section-level replace by heading.
-3. **Propose wikilinks**: suggest links between related notes, each with its
+2. **Propose wikilinks**: suggest links between related notes, each with its
    reason, as reviewed edits.
-4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+3. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-5. **Bases**: read and propose `.base` files once the format is stable.
-6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+4. **Bases**: read and propose `.base` files once the format is stable.
+5. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    fused with the keyword index, only if a measurement on a real vault shows
    they help; never required.
-7. **Cost estimates** for paid providers from a maintained price table,
+6. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
-8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+7. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
    been exercised on desktop.

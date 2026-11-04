@@ -1,6 +1,6 @@
 import { ToolCall, Usage } from '../providers/types';
 import type { Source } from '../agent/sources';
-import { ChangeProposal } from '../vault/proposals';
+import { ChangeProposal, PROPOSAL_KINDS } from '../vault/proposals';
 
 /**
  * Conversation model persisted locally. Messages carry everything the UI
@@ -197,7 +197,7 @@ function isProposal(v: unknown): v is ChangeProposal {
 		typeof p['id'] === 'string' &&
 		typeof p['path'] === 'string' &&
 		typeof p['after'] === 'string' &&
-		(p['kind'] === 'create' || p['kind'] === 'edit') &&
+		PROPOSAL_KINDS.includes(p['kind'] as ChangeProposal['kind']) &&
 		typeof p['status'] === 'string'
 	);
 }

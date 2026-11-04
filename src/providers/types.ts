@@ -54,7 +54,9 @@ export interface JsonSchema {
 }
 
 export interface JsonSchemaProperty {
-	type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+	/** Absent only with `anyOf`, which stands alone: Gemini refuses other fields beside it. */
+	type?: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
+	anyOf?: JsonSchemaProperty[];
 	description?: string;
 	enum?: string[];
 	items?: JsonSchemaProperty;

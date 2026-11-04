@@ -44,6 +44,12 @@ export type VaultChange =
 	| { type: 'create' | 'modify' | 'delete'; path: string }
 	| { type: 'rename'; path: string; oldPath: string };
 
+/** One link in another note that resolves to a given note: where it is and the link path as written (`Lore/Ashen Gate`, without alias or heading). */
+export interface LinkRef {
+	source: string;
+	link: string;
+}
+
 export interface ActiveContext {
 	path: string | null;
 	selection: string | null;
@@ -67,6 +73,31 @@ export interface VaultPort {
 	 * returns the new content; throwing inside `fn` aborts without writing.
 	 */
 	processNote(path: string, fn: (current: string) => string): Promise<void>;
+	/** Create a folder and any missing parents; throws if something already exists at the path. */
+	createFolder(path: string): Promise<void>;
+	/**
+	 * Move or rename a note through Obsidian's `FileManager.renameFile`, which
+	 * updates links to it following the user's preferences, once every note
+	 * written through this port, or rewritten by an earlier move, has been
+	 * indexed so links just written are among those updated. Creates the
+	 * destination folder when it is missing. Throws if there is no such note
+	 * or the destination exists.
+	 */
+	moveNote(from: string, to: string): Promise<void>;
+	/**
+	 * Atomically change a note's frontmatter through
+	 * `FileManager.processFrontMatter`. `fn` mutates the parsed properties;
+	 * throwing inside it aborts without writing. Resolves to the note's
+	 * content after the write.
+	 */
+	processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string>;
+	/**
+	 * Links in other notes (body, embeds and properties) that resolve to
+	 * `path`, once every note written through this port has been indexed.
+	 */
+	linksTo(path: string): Promise<LinkRef[]>;
+	/** Move a folder to the trash like `trashNote`. Throws if there is no such folder. */
+	trashFolder(path: string): Promise<void>;
 	/** Move a note to the trash, following the user's "Deleted files" setting; never `Vault.delete` directly. Throws if there is no such note. */
 	trashNote(path: string): Promise<void>;
 	/** Write a file under the plugin's private data dir (snapshots). */

@@ -258,8 +258,9 @@ next) rather than stored, so conversations saved before batches existed group
 the same way. The model gets one proposal per note per turn: a second
 `propose_edit_note` or `propose_create_note` for a note whose first proposal
 is still awaiting review is refused with a plain tool error telling it to put
-every change to that note in one call, so each card is one note built against
-what the user sees. Approve all and Undo all are all or nothing: every note in
+every change to that note in one call (decision 20 keeps that advice for
+changes one call can carry), so each card is one note built against what the
+user sees. Approve all and Undo all are all or nothing: every note in
 the batch is checked first, and one out-of-date note means nothing is written
 (or undone) and the error names it; the header also disables Approve all as
 soon as the live freshness tracking knows a note changed, and the click-time
@@ -403,3 +404,76 @@ with a count of the rest. The tool lists connections, not text, so it
 reports no sources: the model reads the notes that matter before citing
 them, and a note it cites from the list alone shows as unverified.
 Embeddings stay out (roadmap: semantic retrieval only if measured to help).
+
+## 20. Folder, move, property and section changes are proposals too
+
+Creating a folder, moving or renaming a note, changing its properties and
+rewriting one section by heading go through `ProposalEngine` like any edit:
+the tool proposes, the user reviews and approves, and apply re-checks the
+vault first. They join the turn's batch review and its one-proposal-per-note
+rule; a move claims both its old and its new path. The rule stays for a
+property change to a note whose text change is waiting (or the reverse): the
+second card would go stale as soon as the first applied, so the refusal tells
+the model to ask the user to review the first card, rather than to write the
+properties as raw YAML in `propose_edit_note`. Approve all writes new
+folders first, then note contents, then moves, so a note can go into a new
+folder and an edit to a note that links to a moved note is checked against
+the text it was proposed on before Obsidian rewrites that link. Obsidian
+indexes a note's links some time after it is written, and `renameFile` only
+rewrites links it has indexed, so a move waits until the notes the plugin
+just wrote, and the notes an earlier move rewrote links in, are indexed (at
+most five seconds); otherwise a link added in the same batch could be left
+pointing at the old name, or a second move could read link positions from
+before the first one's rewrite. Undo all goes newest first, so moves are
+undone before the notes whose links they rewrote, and those notes are checked
+when they are undone rather than up front.
+
+A move goes through `FileManager.renameFile`, so links follow the user's
+"Automatically update internal links" setting; with it off, Obsidian asks
+in its own dialog and the apply waits for the answer. The review lists the
+notes whose link text changes: every note linking to it when the name
+changes or the new name is shared, otherwise those that link by path.
+Undoing a move moves the note back (Obsidian rewrites the links again, in
+the user's link format) and leaves a folder the move created, as any created
+folder is left. Only a refused move and an Approve all rollback remove such
+a folder, while it is empty, because those leave the vault as it was.
+Forcing link updates regardless of the setting was rejected: the setting is
+the user's statement of how renames should behave.
+
+Property changes go through `FileManager.processFrontMatter`, so Obsidian
+writes the YAML. Because its output is not known before the write, the
+review shows each property's old and new value instead of a text diff, and
+the guard inside the write is per property: each changed property must
+still hold the value reviewed. The tool's `value` takes a string, number or
+boolean as given, and a text value for a property the note already holds as
+a number or checkbox keeps that type when it spells one. A new property's
+type is never inferred from other notes: the review could not show it. Undo
+restores the snapshot when the note is exactly as written, and otherwise puts
+each property back through `processFrontMatter` while it still holds the
+written value, so an edit elsewhere in the note, including a link Obsidian
+rewrote, survives.
+
+Section replace is an operation of `propose_edit_note` (`replace_section`)
+rather than its own tool, so every text change to one note stays one
+proposal and one diff. A section runs from its heading to the next heading
+of the same or a higher level. Boundaries follow Markdown, since a heading
+the parser missed would put the sections after it inside the rewrite:
+indented and underlined (setext) headings count, an empty heading ends a
+section but cannot be named, and headings in frontmatter and fenced code do
+not count. A fence opened after a list marker ends at a less indented line,
+as its list item does. The heading is named by its text exactly as the note
+has it (trimmed, case-sensitive, without `#`s), and `content` is the section body
+only: the heading line stays and is never taken from `content`, so content
+that starts with the same heading keeps it. Looser matching (any case,
+`## Act Two`) was dropped: it made headings differing only in case ambiguous
+and added spellings nothing needed. A missing heading is refused with the
+note's headings listed, and an ambiguous one with each candidate and the
+heading it sits under, which the model can name as `Act Two > Notes`. That
+path is read only when no heading has the whole text, so a heading that
+contains `>` can still be named exactly.
+
+A new folder is never removed by Revert or Undo all, as a created note is
+never removed by Revert; the review says so. Rolling back a failed Approve
+all does remove a folder it just created while the folder is empty, and so
+does a move that fails after making its folder, so a refused move leaves the
+vault as it was.
