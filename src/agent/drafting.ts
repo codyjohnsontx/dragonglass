@@ -203,7 +203,7 @@ export function inferFormat(content: string): DraftFormat {
 		} else if (MD_HEADING.test(line)) markdown += 1;
 	}
 	if (fountain >= 2 && fountain >= markdown) return 'fountain';
-	if (boldCues > 0) return 'markdown';
+	if (boldCues >= 2) return 'markdown';
 	return 'prose';
 }
 
