@@ -76,6 +76,24 @@ describe('replace_section', () => {
 		expect(() => replaceSection('# A\n\n```\n```js\n# not a heading\n```\n', 'not a heading', 'x')).toThrow(/No heading/);
 	});
 
+	it('keeps later sections after a fence opened on a list line or indented inside a list item', () => {
+		const rest = '\n\n# Act Two\n\nkeep me\n';
+		for (const body of ['- ```\n  code\n  ```', '- ```\n code\n ```', '1. ```js\n   code\n   ```', '- ~~~\n  code\n  ~~~', '- a\n  - ```\n    code\n    ```', '- ```\n  unclosed', '- item\n\n  ```\n  unclosed', '- ```\n  a\n  ```\n\nold\n\n- ```\n  b\n  ```']) {
+			expect(replaceSection(`# Act One\n\n${body}${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
+		}
+		expect(replaceSection(`# Act One\n\n- \`\`\`\n  # not a heading\n\n  more\n  \`\`\`${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
+		expect(replaceSection('# A\n\n```\n    ```\n# not a heading\n```\n\n# B\n', 'A', 'new')).toBe('# A\n\nnew\n\n# B\n');
+	});
+
+	it('finds an underlined heading under text a list marker cannot interrupt, and not under a rule', () => {
+		expect(replaceSection('## B\n\nIn the year\n1986. It fell\n---\n\nkeep\n\n## C\n', 'B', 'new')).toBe('## B\n\nnew\n\nIn the year\n1986. It fell\n---\n\nkeep\n\n## C\n');
+		expect(replaceSection('## B\n\nold\n\nThe gate\n* \n---\n\nkeep\n', 'B', 'new')).toBe('## B\n\nnew\n\nThe gate\n* \n---\n\nkeep\n');
+		expect(replaceSection('## B\n\n***\nThe gate\n---\n\nold\n', 'The gate', 'new')).toBe('## B\n\n***\nThe gate\n---\n\nnew\n');
+		expect(replaceSection('## B\n\n___\nThe gate\n---\n\nold\n', 'The gate', 'new')).toBe('## B\n\n___\nThe gate\n---\n\nnew\n');
+		expect(replaceSection('## B\n\nold\n\n2. item\n---\n\nmore\n', 'B', 'new')).toBe('## B\n\nnew\n');
+		expect(replaceSection('## B\n\nThe gate\n1. item\n---\n\nmore\n', 'B', 'new')).toBe('## B\n\nnew\n');
+	});
+
 	it('ends a section at indented, empty and underlined headings', () => {
 		for (const next of ['   # B', '## ', '##', '## ##', 'B\n===', 'B\n---', 'Two lines\nof title\n---', 'Two lines\n    run on\n---']) {
 			expect(replaceSection(`## A\n\nold\n\n${next}\n\nkeep me\n`, 'A', 'new')).toBe(`## A\n\nnew\n\n${next}\n\nkeep me\n`);
@@ -92,6 +110,11 @@ describe('replace_section', () => {
 	it('rewrites under an underlined heading, keeping its underline', () => {
 		expect(replaceSection('Act One\n===\n\nold\n\nAct Two\n===\n', 'Act One', 'new')).toBe('Act One\n===\n\nnew\n\nAct Two\n===\n');
 		expect(replaceSection('Two lines\nof title\n---\nold\n', 'Two lines of title', 'new')).toBe('Two lines\nof title\n---\nnew\n');
+	});
+
+	it('reads a very long line of list markers without stalling', () => {
+		const line = '-  '.repeat(5000);
+		expect(replaceSection(`# A\n\n${line}\n\n# B\n`, 'A', 'new')).toBe('# A\n\nnew\n\n# B\n');
 	});
 
 	it('cannot name an empty heading, and leaves it out of the headings it lists', () => {

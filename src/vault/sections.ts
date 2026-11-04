@@ -26,11 +26,13 @@ export class SectionError extends Error {
 }
 
 const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))??(?:[ \t]+#+)?[ \t]*$/;
-const FENCE_OPEN = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const FENCE_OPEN = /^( {0,3}(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)*)(`{3,}(?=[^`]*$)|~{3,})/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
 const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
-const QUOTE_OR_LIST = /^ {0,3}(?:>|[-+*][ \t]|\d{1,9}[.)][ \t])/;
-const INDENTED = /^(?: {4}|\t)/;
+/** Lines that end a paragraph: a quote, a list that may interrupt one (bullets, or numbered from 1, with text), a rule. */
+const ENDS_PARAGRAPH = /^ {0,3}(?:>|[-+*][ \t]+\S|1[.)][ \t]+\S|([*_])(?:[ \t]*\1){2,}[ \t]*$)/;
+/** Lines that do not start a paragraph, though they continue one: indented code, a list numbered from anything else. */
+const NOT_PARAGRAPH_START = /^(?: {4}|\t| {0,3}\d{1,9}[.)][ \t])/;
 
 /** The note's headings in order, with the headings each one sits under. */
 export function listHeadings(lines: readonly string[]): Heading[] {
@@ -42,21 +44,27 @@ export function listHeadings(lines: readonly string[]): Heading[] {
 		out.push(heading);
 		if (text !== '') stack.push(heading);
 	};
-	let fence: string | null = null;
+	/** The open fence, and the column of its marker: a less indented line ends the list item a fence sits in, and the fence with it. */
+	let fence: { marker: string; column: number } | null = null;
 	/** First line of the paragraph being read, which an underline turns into a heading. */
 	let paragraph: number | null = null;
 	for (let i = frontmatterEnd(lines); i < lines.length; i++) {
 		const line = (lines[i] ?? '').replace(/\r$/, '');
 		if (fence !== null) {
-			const close = FENCE_CLOSE.exec(line)?.[1] ?? '';
-			if (close[0] === fence[0] && close.length >= fence.length) fence = null;
-			continue;
+			if (line.trim() === '') continue;
+			const indent = line.length - line.trimStart().length;
+			if (indent >= fence.column) {
+				const close = FENCE_CLOSE.exec(line)?.[1] ?? '';
+				if (indent <= fence.column + 3 && close[0] === fence.marker[0] && close.length >= fence.marker.length) fence = null;
+				continue;
+			}
+			fence = null;
 		}
-		const open = FENCE_OPEN.exec(line)?.[1];
+		const open = FENCE_OPEN.exec(line);
 		const atx = ATX_HEADING.exec(line);
 		const underline = SETEXT_UNDERLINE.exec(line)?.[1];
 		if (open) {
-			fence = open;
+			fence = { marker: open[2] ?? '', column: (open[1] ?? '').length };
 			paragraph = null;
 		} else if (atx) {
 			add((atx[1] ?? '').length, (atx[2] ?? '').trim(), i, i + 1);
@@ -67,9 +75,9 @@ export function listHeadings(lines: readonly string[]): Heading[] {
 				add(underline[0] === '=' ? 1 : 2, text, paragraph, i + 1);
 			}
 			paragraph = null;
-		} else if (line.trim() === '' || QUOTE_OR_LIST.test(line)) {
+		} else if (line.trim() === '' || ENDS_PARAGRAPH.test(line)) {
 			paragraph = null;
-		} else if (paragraph === null && !INDENTED.test(line)) {
+		} else if (paragraph === null && !NOT_PARAGRAPH_START.test(line)) {
 			paragraph = i;
 		}
 	}

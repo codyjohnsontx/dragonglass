@@ -457,7 +457,10 @@ of the same or a higher level. Boundaries follow Markdown, since a heading
 the parser missed would put the sections after it inside the rewrite:
 indented and underlined (setext) headings count, an empty heading ends a
 section but cannot be named, and headings in frontmatter and fenced code do
-not count. The heading is named by its text exactly as the note has it
+not count. A fence belongs to the column of its marker, including one opened
+after a list marker, and a less indented line ends it as it ends a list item.
+That also ends an indented fence whose body is not indented, where a stray
+boundary only stops the rewrite early. The heading is named by its text exactly as the note has it
 (trimmed, case-sensitive, without `#`s), and `content` is the section body
 only: the heading line stays and is never taken from `content`, so content
 that starts with the same heading keeps it. Looser matching (any case,
