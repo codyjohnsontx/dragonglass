@@ -44,6 +44,12 @@ without redesigning the provider or tool architecture.
   sources list under the answer, checked against what the tools showed,
   flags cited notes whose text was not in the model's context. `[web N]`
   and "From the web" are ready for web results.
+- **Related notes**: a `related_notes` read tool ranks the notes connected to
+  one note by direct links, co-citation, shared outgoing links and shared
+  tags, read from the metadata cache, each with short reasons the model can
+  explain ("both link to [[Fort Ashen]]", "shares #faction/ember"); the
+  system prompt points the model at it for questions about a character,
+  place, faction or what else connects to something.
 
 ## Next
 
@@ -65,8 +71,8 @@ without redesigning the provider or tool architecture.
    approve.
 3. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-4. **Relationship tools**: "related notes" via shared links, tags and
-   co-citation; propose wikilinks with reasons.
+4. **Propose wikilinks**: suggest links between related notes, each with its
+   reason, as reviewed edits.
 5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
 6. **Bases**: read and propose `.base` files once the format is stable.

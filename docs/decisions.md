@@ -307,3 +307,29 @@ The `[web N]` format, the "From the web" group and `WebSource` exist before any
 web tool so the internet fallback only has to report its pages; the prompt's
 web rule stays off until then so a local model is not told about results it
 cannot get.
+
+## 18. Related notes ranked by link structure with Adamic-Adar weights
+
+Asked about one character, the model should also see the lore connected to
+it that a word search would not find: the event two characters both appear
+in, the place a faction is ruled from. `related_notes` ranks the notes
+related to one note from the metadata cache alone (resolved links and tags,
+one pass through a `VaultPort.linkGraph()` read), so it costs no note reads
+and needs no index of its own.
+
+Evidence counted: a direct link in either direction, co-citation (a third
+note links to both), shared outgoing links and shared tags. Options
+considered for weighting the shared kinds: a flat point per shared item, or
+the Adamic-Adar weight 1 / ln(degree) of each shared neighbour. Flat points
+let a hub dominate: every note an index note links to would be "linked
+together" with every other, and a tag on half the vault would count as much
+as a tag on two notes. Adamic-Adar keeps the evidence explainable (each
+reason names the shared note or tag) while a rare connection outweighs a
+common one. A direct link counts 2 per direction, above any single shared
+neighbour (at most 1 / ln 2). Ties fall back to path order, so the result is
+deterministic; it shows 10 notes by default and at most 25, with a count of
+the rest. The tool lists connections, not text: the model reads the notes
+that matter before citing them, and the sources list marks related notes it
+only saw listed as partly read. Embeddings stay out (roadmap: semantic
+retrieval only if measured to help).
+
