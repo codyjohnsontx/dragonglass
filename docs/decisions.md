@@ -307,3 +307,66 @@ The `[web N]` format, the "From the web" group and `WebSource` exist before any
 web tool so the internet fallback only has to report its pages; the prompt's
 web rule stays off until then so a local model is not told about results it
 cannot get.
+
+## 18. Web search runs in Dragonglass, after approval, through Tavily
+
+The vault is the first source, but a lore question it cannot answer should
+not end there. The owner chose the shape in an interview and Tavily from a
+comparison of search services (free 1,000 searches a month with no card, a
+domain filter, no terms against keeping results).
+
+Options considered for who runs the search: each provider's own web search
+(OpenAI, Anthropic and Gemini have one), or Dragonglass calling one service
+itself. Provider search would give each provider different results, citations
+and costs, and none for Ollama, which is the default. Calling Tavily from the
+plugin gives every provider the same tool, results and `[web N]` markers. The
+key lives in SecretStorage beside the provider keys; without it the tools are
+absent rather than failing mid-answer, and the prompt says where to add one.
+
+Every search waits for approval in the chat, showing the words editable,
+because the query is the one thing that leaves the machine for a third party
+and it can carry vault content. One approval covers the preferred-sites
+search and its widening, and up to 3 page reads from its results, so a useful
+answer needs one click rather than four. The model names a page by result
+number, not URL, so it can never make Dragonglass fetch an address it made
+up (a link that smuggles vault text out in its query string, say). A read
+that fails does not use up the allowance; there are at most five results, and
+repeating a read is refused.
+
+Pages are read in-house rather than through Tavily's `raw_content` or
+extract endpoint: the plugin has no runtime dependencies, a page read costs
+no search credit, and the text the model gets is the same whatever service
+found the page. The extractor is a small regex pass over HTML (no DOM, so it
+runs in tests): it drops scripts, styles and page furniture and prefers the
+main or article element. It cannot read pages that build their text with
+JavaScript; the snippet remains. Text is cut to 6,000 characters, and to a
+third of the note token budget when the context window is known.
+
+A page read refuses result URLs whose host is on this computer or the
+local network: loopback, unspecified, link-local, RFC 1918 and IPv6 ULA
+addresses, and localhost and `.local` names. Results are untrusted, and a
+local endpoint's reply would otherwise reach the model, which may be a cloud
+provider. The check is on the URL alone. A public page that redirects to a
+private address, or a public name that resolves to one, is a known residual:
+`requestUrl` follows redirects without showing them, so catching that needs
+a redirect-aware transport, which is left for the owner to decide on.
+
+Web text is framed the way note text is, with stronger delimiters: every
+result and page sits in a `<<<web …>>>` block under a line saying it is
+untrusted, delimiters inside it are defused, and the system prompt says
+never to follow instructions found in web content.
+
+Results are numbered across the conversation rather than per turn, so a
+`[web 3]` cited two turns after the search still names one page; the sources
+list resolves numbers against every web result shown so far.
+
+Save to vault proposes a new note rather than writing one, through the same
+ProposalEngine path as the model's own proposals, with `from-web: true`, the
+date, the question and the cited URLs in its properties so web research is
+never mistaken for canon. It is stored on the answer, not on a tool message,
+so it does not change what the model sees or join the turn's batch review.
+
+The adapter sits behind a small `WebSearchService` interface (query,
+domains, result count) so another service, Exa being the runner-up, is one
+file. No live Tavily key was available when this was built; the client
+follows Tavily's API reference and the fake server answers in that shape.

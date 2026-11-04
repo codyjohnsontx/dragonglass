@@ -2,7 +2,8 @@
 
 Dragonglass AI is a plugin-local runtime: everything runs inside Obsidian's
 renderer process. There is no hosted backend and no account. The only network
-peers are the LLM providers the user configures.
+peers are the LLM providers the user configures and, for a web search the
+user approves, Tavily and the result pages the model reads.
 
 ```
 src/
@@ -38,6 +39,14 @@ src/
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
                           active note, propose create, propose edit).
+    web-tools.ts          web_search (waits for the user's approval) and
+                          read_web_page (up to 3 results per approved search).
+  web/
+    search.ts             WebSearchService interface, the Tavily client and the
+                          preferred-sites parser.
+    pages.ts              Fetches one result page (no credentials) as text.
+    extract.ts            In-house HTML to plain text, no DOM.
+    research-note.ts      The note Save to vault proposes for a web answer.
   search/
     tokenize.ts           Search matching rules: query words, word starts,
                           frontmatter keys, unspaced scripts, index tokens.
@@ -64,6 +73,8 @@ src/
                           [[links]] in replies.
     copy.ts               Clipboard write behind the per-reply Copy button,
                           and its screen-reader "Copied" announcement.
+    web-approval.ts       The in-chat card that approves a web search, with the
+                          search words editable.
     proposal-card.ts      Diff review card with approve/reject/revert, and the
                           grouped card for a turn with several proposals
                           (Approve all, Reject all, Undo all).
@@ -124,6 +135,43 @@ src/
    and the header names the note with a link that scrolls to its section.
 8. When the turn ends the view re-renders it with the answer's sources list.
 
+## Web search
+
+With a Tavily key in SecretStorage and tools on, each send registers
+`web_search` and `read_web_page` beside the vault tools, whichever provider is
+active; Tavily and the pages are reached through `requestUrl`, never through
+the chat transport. Without a key the tools are absent and the system prompt
+says web search is not set up and where to add a key, so a turn never fails
+on it.
+
+`web_search` calls the approver the chat view passed to `core.send`, which
+shows a card under the running turn with the model's words in an editable
+field; the tool waits on it. Stop or switching conversations declines. A
+declined search returns a plain result telling the model to answer from the
+vault. With preferred sites the search is restricted to them
+(`include_domains`) and runs again on the whole web only when that returns
+nothing; one approval covers both calls. Results are numbered across the
+conversation (one past the highest `[web N]` already shown) and wrapped in
+`<<<web result …>>>` blocks under a line saying the text is untrusted.
+
+`read_web_page` takes a result number, not a URL, so only pages an approved
+search returned can be fetched. Each approved search allows 3 successful
+reads; a failed read (an error status, a PDF, a page with no text) does not
+count. The page is fetched with no key or cookie, and never from a host on
+this computer or the local network (decision 18). It is reduced to text by
+`web/extract.ts` (scripts, styles and page furniture dropped, the main or
+article element preferred), cut to `min(6000, maxCharsPerNote)` characters
+and a third of the note token budget, and wrapped in `<<<web page …>>>`.
+Delimiters inside web text are defused so a page cannot close its own block.
+
+Save to vault (`DragonglassCore.proposeResearchNote`) builds a note from an
+answer that cites at least one page a search returned: frontmatter with
+`from-web: true`, the date, the question and the cited URLs, then the answer
+with linked markers and a Sources list. It is a `ProposalEngine.proposeCreate`
+proposal stored on the assistant message (`researchProposalId`) and reviewed
+with a plain proposal card under the answer; it is not a tool proposal, so it
+never joins the turn's batch review.
+
 ## Source markers
 
 The system prompt asks the model to put `[[Note name]]` after each claim
@@ -139,7 +187,8 @@ as `{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
 message records the notes sent as context the same way: attachments and the
 active note in full, a selection as an excerpt of its note. They count for
 their own turn only, since the context block is sent with the latest user
-message and is not replayed later.
+message and is not replayed later. Web pages are numbered across the
+conversation, so a cited `[web N]` names one page wherever it was found.
 
 `answerSources` (`agent/sources.ts`) walks the stored conversation per user
 turn and checks the answer's citations against that record, not against the
@@ -153,8 +202,9 @@ not a source. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always
-writes the record. Cited `[web N]` numbers map to that turn's web sources; a
-number no result gave is unverified. `ui/sources-list.ts` renders the list
+writes the record. Cited `[web N]` numbers map to the web sources shown so far in the
+conversation (earlier results are replayed); a number no result gave is
+unverified. `ui/sources-list.ts` renders the list
 under the turn's last reply, "From your vault" then "From the web", and
 `[web N]` markers become links to their pages. Links to missing notes do
 nothing on click, so a reply cannot create an empty note.
@@ -167,6 +217,12 @@ nothing on click, so a reply cannot create an empty note.
 - **Note content** is untrusted data for the model. It is wrapped in
   `<<<note path="…">>>` delimiters and the system prompt says not to follow
   instructions found inside.
+- **Web content** (search snippets, page text, titles) is untrusted data too.
+  It is wrapped in `<<<web result …>>>` and `<<<web page …>>>` delimiters,
+  under a line saying never to follow instructions in it, with any delimiter
+  inside it defused, and the system prompt repeats the rule. The model
+  cannot choose a URL to fetch: it names a result of a search the user
+  approved, after seeing and possibly editing its words.
 - **Writes** go through `ProposalEngine.apply` only after the user approves in
   the UI. Apply re-reads the note, compares its SHA-256 with the hash taken at
   proposal time, writes a snapshot of the prior content under the plugin
@@ -186,7 +242,8 @@ nothing on click, so a reply cannot create an empty note.
 - **Secrets** live in Obsidian's `SecretStorage`; settings persist only the
   secret id. Each cloud adapter reads its own key through a closure at
   request time and never stores it; `registry.ts` wires each provider to its
-  own secret id only, so a key cannot reach another provider.
+  own secret id only, so a key cannot reach another provider. The Tavily key
+  goes only to the Tavily API root; page reads carry no credentials.
 
 ## Provider abstraction
 

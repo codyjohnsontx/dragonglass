@@ -13,11 +13,16 @@ written.
 - **Local-first and private.** Nothing leaves your machine except the message
   you type, the context you choose to attach, the results of the tools the
   model calls and a short vault overview (note count and top-level folder
-  names), and only to the provider you configured. No telemetry.
+  names), and only to the provider you configured. A web search goes out only
+  when you approve it. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
   inspect properties, links and backlinks, and propose creating or editing
   notes. Edits are shown as a diff; you approve, reject, or revert. Nothing is
   written otherwise.
+- **Web fallback, on your say-so.** With a Tavily key, the model can search
+  the web when the vault lacks an answer. You approve every search and can
+  change its words first; the answer cites web pages as `[web N]`, and
+  **Save to vault** proposes a research note with its sources.
 
 ## Status
 
@@ -213,6 +218,23 @@ Toggle them per message in the sidebar, or attach other notes with
 **Attach note…**. When a cloud provider is active the sidebar says so, and
 highlighted chips are exactly what gets sent.
 
+### Web search (optional)
+
+When the vault does not have an answer, the model can search the web. It
+works the same with every provider, including local Ollama models, because
+Dragonglass runs the search itself through [Tavily](https://tavily.com).
+
+1. Create a Tavily API key (the free plan has 1,000 searches a month and needs
+   no card).
+2. In **Settings → Dragonglass AI → Web search**, add it under **Tavily API
+   key**. It is stored in Obsidian's keychain and sent only to Tavily.
+3. Optionally list **Preferred sites**, one per line (a game's wiki, an
+   official site). They are searched first, and the search widens to the whole
+   web only when they have nothing, which uses a second search credit.
+
+Without a key there is no web search tool; the model says when the vault
+lacks an answer and can point you to this setting.
+
 ## Use
 
 Open the sidebar with the gem icon in the ribbon or the command
@@ -228,6 +250,19 @@ Open the sidebar with the gem icon in the ribbon or the command
   note". Notes the same answer proposes creating or editing are not listed.
   Replies saved by an earlier version get no list, and in a conversation that
   has them, later answers leave such notes unflagged rather than guess.
+- When the vault lacks an answer and a Tavily key is set, the model may ask to
+  search the web. A card shows the search words in an editable field: change
+  them if you like, then **Search** (or Enter), or **Don't search** (or
+  Escape) to keep the answer to your vault. One approval lets the model read
+  up to 3 of that search's result pages as plain text, cut to a length cap.
+  Claims from the web carry `[web N]` markers that link to their pages, and
+  **From the web** under the answer lists the cited pages. Web pages are
+  treated as untrusted: the model is told never to follow instructions in
+  them, and it can only read pages your approved search returned.
+- **Save to vault** under an answer that cites web pages proposes a new note
+  in `Web research/`: the answer with its links, the cited pages under
+  Sources, the date, and `from-web: true` in its properties so it is never
+  mistaken for canon. It is reviewed like any other new note.
 - Send a message with **Cmd+Enter** (**Ctrl+Enter** on Windows and Linux).
   Enter on its own adds a new line, so longer messages can be written out.
 - Copy a reply: select text in the sidebar and copy it as usual, or select
@@ -286,6 +321,10 @@ vault:
   Undo all puts them all back, trashing the notes it created.
 - Source markers: a cited answer's links open their notes, and the sources
   list flags an unread and a missing note.
+- Web search against a scripted Tavily stand-in: the approval card, edited
+  search words, declining, Stop while it waits, preferred sites widening to
+  the whole web, page reads, `[web N]` links, Save to vault through review,
+  and no web tool without a key.
 - Conversation history persists across plugin reload.
 
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
@@ -293,7 +332,9 @@ Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
 OpenRouter or another live service yet; it is the OpenAI adapter pointed at
-a different URL. To verify live:
+a different URL. Tavily has not been called with a real key yet; the adapter
+follows Tavily's API reference and is tested against a stand-in that answers
+in its documented shape. To verify live:
 
 1. Run Ollama with a tool-capable model and set it in settings; or add an
    OpenAI, Anthropic or Gemini key in the keychain.
@@ -303,6 +344,8 @@ a different URL. To verify live:
    `Launch date: November 1.` and send
    "Change the launch date in Projects/Launch.md to November 15".
 4. Approve the proposal and confirm the note changed.
+5. For web search, add a Tavily key, ask about something the vault lacks,
+   approve the search and check that the results and page reads make sense.
 
 ## Known limitations
 
@@ -324,6 +367,9 @@ a different URL. To verify live:
 - Desktop verified only. The code avoids desktop-only APIs but mobile has not
   been exercised.
 - Very long notes are truncated when attached or read (configurable limit).
+- Web pages are read as plain text from their HTML. Pages that build their
+  text with JavaScript, and PDFs, cannot be read; the model falls back to the
+  search snippet.
 
 ## Development
 
@@ -339,7 +385,7 @@ For a disposable in-app check without a real model:
 
 ```sh
 npm run build
-node test/fake-server/server.mjs 11435 &   # fake Ollama, OpenAI, Anthropic, Gemini on :11435
+node test/fake-server/server.mjs 11435 &   # fake Ollama, OpenAI, Anthropic, Gemini, Tavily on :11435
 node scripts/e2e-vault.mjs .e2e            # builds .e2e/vault and .e2e/userdata
 /Applications/Obsidian.app/Contents/MacOS/Obsidian \
   --user-data-dir="$PWD/.e2e/userdata" --remote-debugging-port=9333
@@ -352,7 +398,10 @@ real vaults or settings. The fake server answers scripted prompts such as
 providers need a keychain secret holding the fake key: `sk-fake` for OpenAI,
 `sk-ant-fake` for Anthropic, `gemini-fake` for Gemini. The custom endpoint
 starts on the fake server's `/local/v1`, which needs no key and rejects tools;
-`/keyed/v1` takes `custom-fake` in an `api-key` header.
+`/keyed/v1` takes `custom-fake` in an `api-key` header. For web search, store
+`tvly-fake` as a keychain secret, pick it under **Tavily API key**, set
+`webSearch.baseUrl` in the vault's plugin `data.json` to the fake server's
+`/tavily`, and send `web <words>`.
 
 Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
 [decision record](docs/decisions.md).
@@ -369,10 +418,14 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
   overview of the vault: the note count and the names of the top-level folders.
   Search itself reads every note locally to build its index; only those results
   are sent. With a cloud provider, all of that leaves your machine.
+- Web search contacts Tavily only for a search you approve, sending the
+  search words (which you see and can edit) and your preferred sites. Reading
+  a result page fetches that page with no key or cookie. Search results and
+  page text then go to your provider like any tool result.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
-- Note content is treated as data: the model is told not to follow
-  instructions found inside notes.
+- Note content and web content are treated as data: the model is told not to
+  follow instructions found inside notes or web pages.
 - All writes require your approval and are snapshotted for rollback.
 
 ## License

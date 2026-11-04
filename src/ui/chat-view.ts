@@ -14,6 +14,8 @@ import { markUnresolvedLinks, openInternalLink, renderSourcesList } from './sour
 import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
 import { isSendKey, sendShortcutLabel } from './composer-keys';
+import { renderWebSearchApproval } from './web-approval';
+import type { WebSearchDecision, WebSearchRequest } from '../tools/web-tools';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -63,6 +65,9 @@ export class ChatView extends ItemView {
 	private liveToolRow: HTMLElement | null = null;
 	private liveToolChips: HTMLElement[] = [];
 	private runningChip: HTMLElement | null = null;
+	private pendingApproval: { conv: Conversation; card: HTMLElement } | null = null;
+	/** The conversation whose turn is running, while one is. */
+	private liveConv: Conversation | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 	/** Serializes announcements to the shared copyStatusEl across concurrent copy clicks. */
 	private readonly copyAnnouncer = new CopyAnnouncer({
@@ -308,8 +313,25 @@ export class ChatView extends ItemView {
 		// One usage line per user turn, on its last reply, rather than one per tool round.
 		const usage = this.core.getSettings().showUsage ? usageByTurn(this.conv.messages) : new Map<string, TurnUsage>();
 		const sources = answerSources(this.conv.messages, this.conv.proposals, (link) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null);
-		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] });
+		const messages = this.conv.messages;
+		const answered = (c: ToolCall) => messages.some((t) => t.role === 'tool' && t.toolCallId === c.id);
+		// While a turn runs, the calls of its latest reply are running or waiting, not "not run".
+		const live = this.liveConv === this.conv ? [...messages].reverse().find((m) => m.role === 'assistant') : undefined;
+		// A stopped reply whose calls returned ends after their result rows, where the turn ended.
+		let stopped: StoredMessage | null = null;
+		for (const m of messages) {
+			if (stopped && m.role !== 'tool') {
+				this.renderTurnEnd(stopped, el.createDiv({ cls: 'dg-msg dg-msg-assistant' }), usage.get(stopped.id));
+				stopped = null;
+			}
+			const endAfterTools = !!m.interrupted && (m.toolCalls ?? []).some(answered);
+			this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] }, { live: m === live, endAfterTools });
+			if (endAfterTools) stopped = m;
+		}
+		if (stopped) this.renderTurnEnd(stopped, el.createDiv({ cls: 'dg-msg dg-msg-assistant' }), usage.get(stopped.id));
 		this.renderUsage(el);
+		if (live && this.liveToolRow) el.appendChild(this.liveToolRow);
+		if (this.pendingApproval?.conv === this.conv) el.appendChild(this.pendingApproval.card);
 		this.scrollToBottom();
 	}
 
@@ -318,7 +340,13 @@ export class ChatView extends ItemView {
 	 * (the chip in the summary), so an assistant turn that only called tools
 	 * renders as a bare step: its thinking, if any, and nothing else.
 	 */
-	private renderMessage(m: StoredMessage, parent: HTMLElement, turnUsage?: TurnUsage, sources?: { list?: AnswerSources; web: WebSource[] }): HTMLElement {
+	private renderMessage(
+		m: StoredMessage,
+		parent: HTMLElement,
+		turnUsage?: TurnUsage,
+		sources?: { list?: AnswerSources; web: WebSource[] },
+		opts: { live?: boolean; endAfterTools?: boolean } = {},
+	): HTMLElement {
 		const wrap = parent.createDiv({ cls: `dg-msg dg-msg-${m.role}` });
 		if (m.role === 'user') {
 			wrap.createDiv({ cls: 'dg-msg-body', text: m.content });
@@ -329,27 +357,28 @@ export class ChatView extends ItemView {
 				for (const a of m.context.attachments) ctx.createSpan({ cls: 'dg-chip', text: a.path });
 			}
 		} else if (m.role === 'assistant') {
-			const toolOnly = !m.content && !m.error && !m.interrupted && (m.toolCalls?.length ?? 0) > 0;
+			const toolOnly = !m.content && !m.error && (!m.interrupted || opts.endAfterTools) && (m.toolCalls?.length ?? 0) > 0;
 			if (toolOnly) wrap.addClass('dg-msg-step');
 			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
 			if (m.content) {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
 				void MarkdownRenderer.render(this.app, linkWebMarkers(m.content, sources?.web ?? []), body, '', this).then(() => markUnresolvedLinks(this.app, body));
 				if (sources?.list) renderSourcesList(wrap, sources.list);
-				this.addCopyButton(wrap, m.content);
+				const actions = this.addCopyButton(wrap, m.content);
+				if (this.conv && sources?.list?.web.some((w) => w.source)) this.renderResearch(this.conv, m, wrap, actions);
 			} else if (sources?.list) {
 				renderSourcesList(wrap, sources.list);
 			}
 			// A call whose result never arrived (the run died first) has no result row to live on.
-			const unanswered = (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
+			const unanswered = opts.live ? [] : (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
 			if (unanswered.length > 0) {
 				const calls = wrap.createDiv({ cls: 'dg-tool-calls' });
 				for (const c of unanswered) calls.createSpan({ cls: 'dg-chip dg-chip-tool', text: `${c.name}${argsPreview(c.argumentsJson)} (not run)` });
 			}
-			if (m.interrupted) wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
+			if (m.interrupted && !opts.endAfterTools) wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
 			for (const w of m.warnings ?? []) wrap.createDiv({ cls: 'dg-msg-warning', text: w });
 			if (m.error) wrap.createDiv({ cls: 'dg-msg-error', text: m.error });
-			if (turnUsage) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
+			if (turnUsage && !opts.endAfterTools) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
 			if (wrap.childElementCount === 0) wrap.addClass('dg-msg-hidden');
 		} else {
 			const details = wrap.createEl('details', { cls: `dg-tool-result${m.isError ? ' dg-tool-error' : ''}` });
@@ -362,6 +391,12 @@ export class ChatView extends ItemView {
 			if (m.proposalId && this.conv) this.renderReview(this.conv, m, wrap);
 		}
 		return wrap;
+	}
+
+	/** The Stopped note and usage line of a stopped reply, drawn after its tool results. */
+	private renderTurnEnd(m: StoredMessage, wrap: HTMLElement, turnUsage?: TurnUsage): void {
+		wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
+		if (turnUsage) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
 	}
 
 	/**
@@ -417,7 +452,7 @@ export class ChatView extends ItemView {
 	 * A visible Copy button under a reply. It puts the reply's Markdown on the
 	 * clipboard and reads "Copied" for a moment so a click is seen to work.
 	 */
-	private addCopyButton(wrap: HTMLElement, text: string): void {
+	private addCopyButton(wrap: HTMLElement, text: string): HTMLElement {
 		const row = wrap.createDiv({ cls: 'dg-msg-actions' });
 		const btn = row.createEl('button', { cls: 'dg-copy-btn', attr: { 'aria-label': 'Copy reply to clipboard' } });
 		const icon = btn.createSpan();
@@ -442,6 +477,57 @@ export class ChatView extends ItemView {
 					revert = null;
 				}, 1500);
 			});
+		});
+		return row;
+	}
+
+	/**
+	 * Save to vault, on an answer that cites web pages: proposes a research
+	 * note, reviewed in a card under the answer. Once proposed the card
+	 * replaces the button, unless the note was rejected, when it can be
+	 * proposed again.
+	 */
+	private renderResearch(conv: Conversation, m: StoredMessage, wrap: HTMLElement, actions: HTMLElement): void {
+		const proposal = m.researchProposalId ? conv.proposals[m.researchProposalId] : undefined;
+		if (proposal && proposal.status !== 'rejected') {
+			const card = wrap.createDiv({ cls: 'dg-research-review' });
+			card.dataset['proposalId'] = proposal.id;
+			renderProposalCard(this.app, this.core, conv, proposal, card, () => this.renderMessages());
+			return;
+		}
+		const btn = actions.createEl('button', { cls: 'dg-copy-btn dg-save-research', attr: { 'aria-label': 'Propose a research note with this answer and its web sources' } });
+		setIcon(btn.createSpan(), 'file-plus');
+		btn.createSpan({ text: 'Save to vault' });
+		btn.addEventListener('click', () => {
+			btn.disabled = true;
+			const resolve = (link: string) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null;
+			void this.core
+				.proposeResearchNote(conv, m.id, resolve)
+				.then((p) => {
+					if (!p) new Notice('This answer cites no web page, so there is nothing to save.');
+				})
+				.catch((e: unknown) => new Notice(`Could not propose the note: ${e instanceof Error ? e.message : String(e)}`, 10000))
+				.finally(() => {
+					if (this.conv === conv && !this.abort) this.renderMessages();
+					else btn.disabled = false;
+				});
+		});
+	}
+
+	/**
+	 * Ask the user to approve a web search, in the chat below the running
+	 * turn. Stop, or switching conversations, declines it.
+	 */
+	private askWebSearch(conv: Conversation, req: WebSearchRequest, signal: AbortSignal): Promise<WebSearchDecision> {
+		if (signal.aborted || this.conv !== conv) return Promise.resolve({ approved: false });
+		this.runningChip?.querySelector('.dg-chip-label')?.setText('Waiting for your approval to search the web…');
+		const card = this.messagesEl.createDiv({ cls: 'dg-msg dg-web-approval' });
+		const pending = { conv, card };
+		this.pendingApproval = pending;
+		this.scrollToBottom();
+		return renderWebSearchApproval(card, req, signal).finally(() => {
+			if (this.pendingApproval === pending) this.pendingApproval = null;
+			card.remove();
 		});
 	}
 
@@ -584,6 +670,7 @@ export class ChatView extends ItemView {
 		const selection = context.find((c) => c.kind === 'selection');
 		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
 		this.abort = new AbortController();
+		this.liveConv = conv;
 		this.sendBtn.setText('Stop');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
@@ -597,9 +684,11 @@ export class ChatView extends ItemView {
 				context,
 				signal: this.abort.signal,
 				onEvent: (ev) => this.onRunEvent(conv, ev),
+				approveWebSearch: (req, signal) => this.askWebSearch(conv, req, signal),
 			});
 		} finally {
 			this.abort = null;
+			this.liveConv = null;
 			this.liveEl = null;
 			this.endLiveTurn();
 			this.sendBtn.setText('Send');
@@ -800,6 +889,7 @@ function argsPreview(json: string): string {
 	try {
 		const parsed = JSON.parse(json) as Record<string, unknown>;
 		const path = parsed['path'] ?? parsed['query'] ?? parsed['folder'];
+		if (typeof parsed['n'] === 'number') return ` (web ${parsed['n']})`;
 		return typeof path === 'string' && path ? ` (${path})` : '';
 	} catch {
 		return '';

@@ -31,6 +31,12 @@ export interface StoredMessage {
 	isError?: boolean;
 	proposalId?: string;
 	/**
+	 * On an answer that drew on the web: the research note "Save to vault"
+	 * proposed for it, reviewed under the answer. Not a tool proposal, so it
+	 * is not part of the turn's batch review.
+	 */
+	researchProposalId?: string;
+	/**
 	 * What the message showed the model, for the answer's sources list: for a
 	 * tool result the notes and web pages it returned, for a user message the
 	 * notes sent as context. Absent on user messages saved before sources were
