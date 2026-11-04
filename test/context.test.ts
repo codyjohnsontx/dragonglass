@@ -49,9 +49,10 @@ describe('context building', () => {
 		const many = { noteCount: 1, folders: Array.from({ length: 40 }, (_, i) => `Folder ${i}`), activeNotePath: null };
 		const lines = buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: many }).split('\n');
 		expect(lines.at(-1)).toMatch(/Folder 14, and 25 more\.$/);
-		// The prompt was about 240 tokens before the map and the new rules; together they add under 150.
+		// The prompt was about 240 tokens before the map and the new rules; together they add under 150,
+		// and the citation rules under 80 more.
 		const typical = { noteCount: 16, folders: ['Areas', 'Daily', 'Inbox', 'Meetings', 'People', 'Projects', 'Reading', 'Reference'], activeNotePath: 'Projects/Launch.md' };
-		expect(estimateTokens(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: typical }))).toBeLessThan(240 + 150);
+		expect(estimateTokens(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: typical }))).toBeLessThan(240 + 150 + 80);
 	});
 
 	it('wraps attached context in delimiters and truncates', () => {

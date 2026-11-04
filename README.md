@@ -219,6 +219,15 @@ Open the sidebar with the gem icon in the ribbon or the command
 **Dragonglass AI: Open chat**.
 
 - Ask questions: "What does my Launch note say about the date?"
+- Answers cite the notes they draw on as links, `[[Launch]]`, right after
+  each claim, and anything without a source is worded as the model's
+  suggestion. Under the answer, **From your vault** lists the cited notes;
+  one whose text was not in the model's context for that answer is marked
+  unverified, one it saw only part of (a search excerpt, its properties or a
+  selection) says so, and a link to a note that does not exist says "no such
+  note". Notes the same answer proposes creating or editing are not listed.
+  Replies saved by an earlier version get no list, and in a conversation that
+  has them, later answers leave such notes unflagged rather than guess.
 - Send a message with **Cmd+Enter** (**Ctrl+Enter** on Windows and Linux).
   Enter on its own adds a new line, so longer messages can be written out.
 - Copy a reply: select text in the sidebar and copy it as usual, or select
@@ -275,6 +284,8 @@ vault:
 - Batch review: a request that changes several notes shows one grouped card;
   Approve all applies every note, is disabled while one is out of date, and
   Undo all puts them all back, trashing the notes it created.
+- Source markers: a cited answer's links open their notes, and the sources
+  list flags an unread and a missing note.
 - Conversation history persists across plugin reload.
 
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above).

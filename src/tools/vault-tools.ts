@@ -1,3 +1,4 @@
+import type { Source } from '../agent/sources';
 import { AgentTool, ToolResult } from '../agent/tools';
 import { estimateTokens, prefixWithinTokens } from '../providers/types';
 import { bodyStart, searchTerms, WordStartFinder, wordStartFinder } from '../search/tokenize';
@@ -77,8 +78,12 @@ class TurnProposals {
 	}
 }
 
-function ok(content: string): ToolResult {
-	return { content };
+function ok(content: string, sources?: Source[]): ToolResult {
+	return sources?.length ? { content, sources } : { content };
+}
+
+function fullText(path: string): Source {
+	return { kind: 'vault', path, seen: 'full' };
 }
 
 function fail(content: string): ToolResult {
@@ -159,7 +164,7 @@ function readNoteTool(vault: VaultPort, options: () => VaultToolOptions): AgentT
 				const content = await vault.readNote(found.path);
 				if (content === null) return fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`);
 				const { maxReadChars, maxReadTokens } = options();
-				return ok(`${found.notice}${formatNote(found.path, content, maxReadChars, maxReadTokens)}`);
+				return ok(`${found.notice}${formatNote(found.path, content, maxReadChars, maxReadTokens)}`, [fullText(found.path)]);
 			} catch (e) {
 				return wrapError(e);
 			}
@@ -252,8 +257,11 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				const linked = await linkedFromNamedResult(vault, hits, terms);
 				const links = linked ? linkedSection(linked) : '';
 				const budget = opts.autoReadTokens ?? 0;
-				const fullText = budget > 0 ? autoReadSection(autoReadOrder(hits, contents, linked), budget, opts.maxReadChars) : '';
-				return ok(`${scope}${list}${links ? `\n\n${links}` : ''}${fullText ? `\n\n${fullText}` : ''}`);
+				const full = budget > 0 ? autoReadSection(autoReadOrder(hits, contents, linked), budget, opts.maxReadChars) : { text: '', shown: [] };
+				const shown = new Set(full.shown);
+				const listed = [...hits.map((h) => h.path), ...(linked?.notes.map((n) => n.path) ?? [])];
+				const sources = [...new Set(listed)].map((path): Source => (shown.has(path) ? fullText(path) : { kind: 'vault', path, seen: 'excerpt' }));
+				return ok(`${scope}${list}${links ? `\n\n${links}` : ''}${full.text ? `\n\n${full.text}` : ''}`, sources);
 			} catch (e) {
 				return wrapError(e);
 			}
@@ -386,8 +394,9 @@ const MAX_NOT_SHOWN = 10;
  * Linked notes share at most half the budget, so the ranked results after
  * them keep the rest.
  */
-function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): string {
+function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): { text: string; shown: string[] } {
 	const shown: string[] = [];
+	const shownPaths: string[] = [];
 	const notShown: string[] = [];
 	let left = budget;
 	let linkedLeft = Math.floor(budget / 2);
@@ -405,10 +414,12 @@ function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): 
 		let spent = 0;
 		if (tokens <= room) {
 			shown.push(formatNote(note.path, content, maxChars));
+			shownPaths.push(note.path);
 			spent = tokens + NOTE_FRAME_TOKENS;
 			if (content.length > maxChars) notShown.push(cut);
 		} else if (room > 0 && room >= tokens / 2) {
 			shown.push(formatNote(note.path, content, maxChars, room));
+			shownPaths.push(note.path);
 			spent = cap;
 			notShown.push(cut);
 		} else {
@@ -417,7 +428,7 @@ function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): 
 		left -= spent;
 		if (note.linked) linkedLeft -= spent;
 	});
-	if (shown.length === 0) return '';
+	if (shown.length === 0) return { text: '', shown: [] };
 	const count = shown.length === 1 ? 'the best match' : `the ${shown.length} best matches`;
 	const lines = [`Full text of ${count} that fit:`, '', shown.join('\n\n')];
 	if (notShown.length > 0) {
@@ -425,7 +436,7 @@ function autoReadSection(notes: ShownNote[], budget: number, maxChars: number): 
 		const more = notShown.length > MAX_NOT_SHOWN ? `; and ${notShown.length - MAX_NOT_SHOWN} more` : '';
 		lines.push('', `Not shown in full: ${named}${more}. read_note one of them if the text above does not answer the question.`);
 	}
-	return lines.join('\n');
+	return { text: lines.join('\n'), shown: shownPaths };
 }
 
 /**
@@ -486,7 +497,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 				const meta = vault.getMetadata(found.path);
 				if (!meta) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
 				const shown = { ...meta, outgoingLinks: meta.outgoingLinks.map(linkLabel), backlinks: meta.backlinks.map(linkLabel) };
-				return Promise.resolve(ok(`${found.notice}${JSON.stringify(shown, null, 2)}`));
+				return Promise.resolve(ok(`${found.notice}${JSON.stringify(shown, null, 2)}`, [{ kind: 'vault', path: found.path, seen: 'excerpt' }]));
 			} catch (e) {
 				return Promise.resolve(wrapError(e));
 			}
@@ -561,7 +572,7 @@ function getActiveNoteTool(vault: VaultPort, options: () => VaultToolOptions): A
 			const { maxReadChars, maxReadTokens } = options();
 			const body = formatNote(ctx.path, content ?? '', maxReadChars, maxReadTokens);
 			const sel = ctx.selection ? `\n\nSelected text:\n<<<selection>>>\n${ctx.selection}\n<<<end selection>>>` : '';
-			return ok(body + sel);
+			return ok(body + sel, [fullText(ctx.path)]);
 		},
 	};
 }

@@ -14,6 +14,8 @@
  *   create <path>                          -> propose_create_note, then text
  *   (edit and create take comma-separated paths to propose several notes in one turn)
  *   search <query>                         -> search_notes, then text
+ *   cite <query>                           -> search_notes, then an answer citing [[Launch]] and [[Milestones]]
+ *                                             (e2e vault notes), the unread [[Welcome]] and a missing [[Ghost note]]
  *   bad tool                               -> calls a tool that does not exist
  *   bad args                               -> read_note with missing arguments
  *   loop                                   -> keeps calling list_files forever (iteration cap test)
@@ -246,6 +248,16 @@ function plan(messages, toolsAvailable) {
 		if (noTools) return { text: `I cannot search without tools.` };
 		if (stage === 0) return { tool: { name: 'search_notes', args: { query } } };
 		return { text: `Search results for "${query}":\n${lastResultText}` };
+	}
+	if ((m = /^cite\s+(.+)/i.exec(text))) {
+		if (noTools) return { text: `I cannot search without tools.` };
+		if (stage === 0) return { tool: { name: 'search_notes', args: { query: m[1] } } };
+		return {
+			text:
+				'The launch is on November 1 [[Launch]], after the beta on October 20 [[Milestones]]. ' +
+				'The vault is a test vault [[Welcome]], and an old plan said otherwise [[Ghost note]].\n\n' +
+				"I'd suggest announcing the date right after the beta.",
+		};
 	}
 	if (lower.startsWith('bad tool')) {
 		if (stage === 0) return { tool: { name: 'nonexistent_tool', args: {} } };

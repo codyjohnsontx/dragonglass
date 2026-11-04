@@ -276,3 +276,34 @@ per-note undo still never removes a created note. A partial apply was
 rejected because the user approved the set as a whole, and a batch left half
 applied is the state they can least reason about. Telling the model which
 proposals were approved is a separate item.
+
+## 17. Source markers checked against tool results
+
+Answers about the vault are only useful if the user can see where each claim
+came from and tell a read note from a guess. The model cites `[[Note name]]`
+(a working link) or `[web N]` after each sourced claim and words anything
+else as its own suggestion; Dragonglass renders the sources list itself,
+grouped "From your vault" and "From the web".
+
+The list is grounded in what the model was actually shown. Options
+considered: trust the links the model typed; parse note paths back out of the
+stored tool result text; or have each tool report what it showed as
+structured `sources` on its result, stored on the tool message. Typed links
+alone would present a note the model never opened as a source. Parsing result
+text ties the list to output formats that change for the model's sake (search
+results gained auto-read and linked notes within a few releases). Structured
+sources cost one optional field on stored tool and user messages and let a
+cited note whose text was not in the model's context be marked unverified,
+and one only partly seen (a search excerpt, its properties or a selection) be
+marked as such. A user message saved before this has no sources record, so
+its turn gets no list and its links stay plain links rather than all showing
+as unverified; in later turns of that conversation a cited note the record
+does not show as read is left unflagged, since the old turn's replayed tool
+results may have shown it. The list holds only cited notes: listing notes read
+but not cited put a box under nearly every reply, since the active note is
+sent by default.
+
+The `[web N]` format, the "From the web" group and `WebSource` exist before any
+web tool so the internet fallback only has to report its pages; the prompt's
+web rule stays off until then so a local model is not told about results it
+cannot get.

@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from './agent/context';
+import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages, userMessage, vaultMap } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -138,17 +138,7 @@ export class DragonglassCore {
 			opts.onEvent({ type: 'error', error: new ProviderError('invalid_request', 'No model selected. Pick one in settings or the model menu.') });
 			return;
 		}
-		const userMsg: StoredMessage = {
-			id: newId(),
-			role: 'user',
-			content: opts.text,
-			createdAt: Date.now(),
-			context: {
-				activeNotePath: opts.context.find((c) => c.kind === 'active')?.path ?? null,
-				selection: opts.context.find((c) => c.kind === 'selection')?.content ?? null,
-				attachments: opts.context.filter((c) => c.kind === 'attachment' && c.path).map((c) => ({ path: c.path as string })),
-			},
-		};
+		const userMsg = userMessage(newId(), opts.text, opts.context, Date.now());
 		if (conv.messages.length === 0) conv.title = deriveTitle(opts.text);
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
@@ -207,6 +197,7 @@ export class DragonglassCore {
 						toolName: ev.call.name,
 						isError: ev.result.isError,
 					};
+					if (ev.result.sources?.length) toolMsg.sources = ev.result.sources;
 					if (ev.result.proposal) {
 						conv.proposals[ev.result.proposal.id] = ev.result.proposal;
 						toolMsg.proposalId = ev.result.proposal.id;

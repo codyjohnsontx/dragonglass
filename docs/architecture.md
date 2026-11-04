@@ -33,6 +33,8 @@ src/
                           feed results back, cap iterations, handle cancel.
     tools.ts              Tool registry and JSON-schema argument validation.
     context.ts            System prompt and provider message construction.
+    sources.ts            Source markers: citations in an answer checked
+                          against what tool results and context showed.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
                           active note, propose create, propose edit).
@@ -58,6 +60,8 @@ src/
   ui/
     chat-view.ts          The sidebar ItemView.
     composer-keys.ts      Which composer keystroke sends (Mod+Enter) and its label.
+    sources-list.ts       The sources list under an answer, and opening
+                          [[links]] in replies.
     copy.ts               Clipboard write behind the per-reply Copy button,
                           and its screen-reader "Copied" announcement.
     proposal-card.ts      Diff review card with approve/reject/revert, and the
@@ -106,7 +110,8 @@ src/
    project), it lists the notes that result links to, each with an excerpt,
    and auto-reads them right after it within half the auto-read budget.
 6. Every message and proposal is written to the conversation store as it is
-   produced, so a crash mid-turn loses nothing already shown.
+   produced, so a crash mid-turn loses nothing already shown. A tool message
+   also stores the `sources` its result showed the model (see below).
 7. The view reviews proposals per turn (`proposalTurns`): the proposals made
    between one user message and the next render on the row of the last one,
    as a plain card for a single proposal or a grouped card for several, with
@@ -117,6 +122,42 @@ src/
    group the same way. While a note in the batch is known to be out of date
    (the same live tracking that marks a single card), Approve all is disabled
    and the header names the note with a link that scrolls to its section.
+8. When the turn ends the view re-renders it with the answer's sources list.
+
+## Source markers
+
+The system prompt asks the model to put `[[Note name]]` after each claim
+taken from a note and `[web N]` after each claim taken from a web search
+result (the web rule is added only when web results can be in the
+conversation), to word anything unsourced as its own suggestion, and not to
+write its own sources list.
+
+Read tools report what they showed as `Source`s on their result: `read_note`
+and `get_active_note` the note they read, `search_notes` each listed note as an
+excerpt or, when its text was auto-read, in full. A web tool reports each page
+as `{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
+message records the notes sent as context the same way: attachments and the
+active note in full, a selection as an excerpt of its note. They count for
+their own turn only, since the context block is sent with the latest user
+message and is not replayed later.
+
+`answerSources` (`agent/sources.ts`) walks the stored conversation per user
+turn and checks the answer's citations against that record, not against the
+model's word: a cited note is *read*, *excerpt* (only part of it was shown:
+a search excerpt, its properties or a selection), *unread* (not in the
+model's context for this answer: unverified) or *missing* (the link resolves
+to no note), counting tool results from earlier turns, which are replayed,
+and this turn's attached context. Only cited notes are listed, minus notes
+the same turn proposed creating or editing: a link to one names the change,
+not a source. A turn whose user message has no `sources` record was saved
+before source markers and gets no list; later turns of that conversation mark
+a cited note not shown as read since then *unchecked*, with no flag, as the
+unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always
+writes the record. Cited `[web N]` numbers map to that turn's web sources; a
+number no result gave is unverified. `ui/sources-list.ts` renders the list
+under the turn's last reply, "From your vault" then "From the web", and
+`[web N]` markers become links to their pages. Links to missing notes do
+nothing on click, so a reply cannot create an empty note.
 
 ## Trust boundaries
 

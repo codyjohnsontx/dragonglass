@@ -1,5 +1,6 @@
 import { JsonSchema, JsonSchemaProperty, ToolDefinition } from '../providers/types';
 import { ChangeProposal } from '../vault/proposals';
+import type { Source } from './sources';
 
 /**
  * The validated tool layer. The model never touches the vault directly: it
@@ -19,6 +20,8 @@ export interface ToolResult {
 	isError?: boolean;
 	/** For write tools: the proposal to surface in the review UI. */
 	proposal?: ChangeProposal;
+	/** What the result showed the model: notes read or found, web pages. Grounds the answer's sources list. */
+	sources?: Source[];
 }
 
 export interface AgentTool {

@@ -39,24 +39,41 @@ without redesigning the provider or tool architecture.
 - **Batch review**: the proposals of one turn are reviewed as one grouped
   card with Approve all, Reject all and Undo all, each all or nothing with
   rollback; one proposal per note per turn; each note keeps its own controls.
+- **Source markers**: answers cite `[[Note name]]` after each claim taken
+  from a note, unsourced text is worded as the model's suggestion, and a
+  sources list under the answer, checked against what the tools showed,
+  flags cited notes whose text was not in the model's context. `[web N]`
+  and "From the web" are ready for web results.
 
 ## Next
 
-1. **Review outcome to the model**: tell the model on the next turn which of
+1. **Internet fallback**: when the vault lacks an answer, search the web. Ask
+   before every search, showing the search words, which the user can edit.
+   Dragonglass runs the search itself through one web search service whose
+   key lives in settings, the same way for every provider including local
+   Ollama models, and treats results as untrusted content. One approval lets
+   the model read up to 3 of that search's result pages as length-capped
+   plain text extracted in-house (no runtime dependency). Claims from pages
+   carry `[web N]` markers and the pages appear under "From the web". A
+   "Save to vault" button proposes a reviewed research note with the sources,
+   the date and a from-the-web frontmatter marker. An optional preferred-sites
+   list is searched first, widening to the whole web only if nothing turns
+   up. The search service is Tavily.
+2. **Review outcome to the model**: tell the model on the next turn which of
    its proposals were approved, rejected or undone, so it does not assume a
    change it proposed was made. Today it learns only that the user must
    approve.
-2. **More write tools**: create folder, move/rename note, update frontmatter
+3. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-3. **Relationship tools**: "related notes" via shared links, tags and
+4. **Relationship tools**: "related notes" via shared links, tags and
    co-citation; propose wikilinks with reasons.
-4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-5. **Bases**: read and propose `.base` files once the format is stable.
-6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+6. **Bases**: read and propose `.base` files once the format is stable.
+7. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    fused with the keyword index, only if a measurement on a real vault shows
    they help; never required.
-7. **Cost estimates** for paid providers from a maintained price table,
+8. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
-8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+9. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
    been exercised on desktop.
