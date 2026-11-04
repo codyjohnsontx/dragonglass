@@ -37,6 +37,15 @@ describe('stream parsing', () => {
 		expect(client.supportsStreaming).toBe(false);
 		expect(await all(res.chunks)).toEqual(['body']);
 	});
+
+	it('gives up on a whole-body request as soon as its signal aborts', async () => {
+		const client = new RequestUrlHttpClient(() => new Promise(() => undefined));
+		const controller = new AbortController();
+		const pending = client.request({ url: 'u', method: 'GET', signal: controller.signal });
+		controller.abort();
+		await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+		await expect(client.stream({ url: 'u', method: 'GET', signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+	});
 });
 
 describe('error mapping', () => {

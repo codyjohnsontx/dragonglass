@@ -65,6 +65,7 @@ export class ChatView extends ItemView {
 	private liveToolRow: HTMLElement | null = null;
 	private liveToolChips: HTMLElement[] = [];
 	private runningChip: HTMLElement | null = null;
+	private pendingApproval: { conv: Conversation; card: HTMLElement } | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 	/** Serializes announcements to the shared copyStatusEl across concurrent copy clicks. */
 	private readonly copyAnnouncer = new CopyAnnouncer({
@@ -312,6 +313,7 @@ export class ChatView extends ItemView {
 		const sources = answerSources(this.conv.messages, this.conv.proposals, (link) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null);
 		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] });
 		this.renderUsage(el);
+		if (this.pendingApproval?.conv === this.conv) el.appendChild(this.pendingApproval.card);
 		this.scrollToBottom();
 	}
 
@@ -490,8 +492,11 @@ export class ChatView extends ItemView {
 		if (signal.aborted || this.conv !== conv) return Promise.resolve({ approved: false });
 		this.runningChip?.querySelector('.dg-chip-label')?.setText('Waiting for your approval to search the web…');
 		const card = this.messagesEl.createDiv({ cls: 'dg-msg dg-web-approval' });
+		const pending = { conv, card };
+		this.pendingApproval = pending;
 		this.scrollToBottom();
 		return renderWebSearchApproval(card, req, signal).finally(() => {
+			if (this.pendingApproval === pending) this.pendingApproval = null;
 			card.remove();
 		});
 	}

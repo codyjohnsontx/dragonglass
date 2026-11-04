@@ -114,7 +114,8 @@ function headersToRecord(headers: Headers): Record<string, string> {
 
 /**
  * Wraps a "whole body at once" requester (Obsidian's requestUrl) as an
- * HttpClient. Streams are emulated with a single chunk.
+ * HttpClient. Streams are emulated with a single chunk. requestUrl cannot be
+ * cancelled, so an aborted signal rejects at once and the reply is dropped.
  */
 export type WholeBodyRequester = (req: HttpRequest) => Promise<HttpResponse>;
 
@@ -124,11 +125,20 @@ export class RequestUrlHttpClient implements HttpClient {
 	constructor(private readonly requester: WholeBodyRequester) {}
 
 	request(req: HttpRequest): Promise<HttpResponse> {
-		return this.requester(req);
+		const signal = req.signal;
+		if (!signal) return this.requester(req);
+		if (signal.aborted) return Promise.reject(abortError());
+		return new Promise<HttpResponse>((resolve, reject) => {
+			const onAbort = () => reject(abortError());
+			signal.addEventListener('abort', onAbort, { once: true });
+			void this.requester(req)
+				.then(resolve, reject)
+				.finally(() => signal.removeEventListener('abort', onAbort));
+		});
 	}
 
 	async stream(req: HttpRequest): Promise<HttpStreamResponse> {
-		const res = await this.requester(req);
+		const res = await this.request(req);
 		return {
 			status: res.status,
 			headers: res.headers,
@@ -138,6 +148,10 @@ export class RequestUrlHttpClient implements HttpClient {
 			errorText: () => Promise.resolve(res.text),
 		};
 	}
+}
+
+function abortError(): Error {
+	return new DOMException('The operation was aborted.', 'AbortError');
 }
 
 /** Split an incoming chunk stream into complete lines (without line endings). */

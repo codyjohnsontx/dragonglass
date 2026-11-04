@@ -337,7 +337,7 @@ describe('web numbering across a conversation', () => {
 
 describe('research note', () => {
 	const cited = [
-		{ kind: 'web' as const, n: 1, url: 'https://lore.example/kael', title: 'Kael [Wiki]' },
+		{ kind: 'web' as const, n: 1, url: 'https://lore.example/kael', title: 'Kael [Wiki] <iframe src=x>' },
 		{ kind: 'web' as const, n: 3, url: 'https://lore.example/a>b', title: '' },
 	];
 
@@ -354,7 +354,7 @@ describe('research note', () => {
 		expect(note.content).toContain('---\nfrom-web: true\nresearched: 2026-11-04\nquestion: "What is Kael\'s personality? [spoilers]"\nsources:\n  - "https://lore.example/kael"\n  - "https://lore.example/a>b"\n---\n');
 		expect(note.content).toContain('# What is Kael\'s personality spoilers');
 		expect(note.content).toContain('Kael distrusts the Council [web 1](<https://lore.example/kael>) and grew up in [[Ashfall]] [web 3](<https://lore.example/a%3Eb>).');
-		expect(note.content).toContain('## Sources\n\n1. [Kael \\[Wiki\\]](<https://lore.example/kael>)\n3. [https://lore.example/a>b](<https://lore.example/a%3Eb>)');
+		expect(note.content).toContain('## Sources\n\n- [web 1] [Kael \\[Wiki\\] &lt;iframe src=x>](<https://lore.example/kael>)\n- [web 3] [https://lore.example/a>b](<https://lore.example/a%3Eb>)');
 	});
 
 	it('names the note from the question, safely and briefly', () => {

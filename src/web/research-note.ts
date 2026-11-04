@@ -51,7 +51,7 @@ export function buildResearchNote(input: ResearchNoteInput): ResearchNote {
 		'',
 		'## Sources',
 		'',
-		...input.cited.map((s) => `${s.n}. [${linkText(s.title || s.url)}](<${s.url.replace(/>/g, '%3E')}>)`),
+		...input.cited.map((s) => `- [web ${s.n}] [${linkText(s.title || s.url)}](<${s.url.replace(/>/g, '%3E')}>)`),
 		'',
 	];
 	return { path: freePath(title, input.exists), content: lines.join('\n') };
@@ -86,7 +86,7 @@ function yamlString(value: string): string {
 }
 
 function linkText(text: string): string {
-	return text.replace(/[[\]]/g, (c) => `\\${c}`).replace(/\s+/g, ' ').trim();
+	return text.replace(/[[\]]/g, (c) => `\\${c}`).replace(/</g, '&lt;').replace(/\s+/g, ' ').trim();
 }
 
 /**
