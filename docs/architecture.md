@@ -157,7 +157,8 @@ conversation (one past the highest `[web N]` already shown) and wrapped in
 `read_web_page` takes a result number, not a URL, so only pages an approved
 search returned can be fetched. Each approved search allows 3 successful
 reads; a failed read (an error status, a PDF, a page with no text) does not
-count. The page is fetched with no key or cookie, reduced to text by
+count. The page is fetched with no key or cookie, and never from a host on
+this computer or the local network (decision 18). It is reduced to text by
 `web/extract.ts` (scripts, styles and page furniture dropped, the main or
 article element preferred), cut to `min(6000, maxCharsPerNote)` characters
 and a third of the note token budget, and wrapped in `<<<web page …>>>`.
