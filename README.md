@@ -313,8 +313,9 @@ card, saying under it which notes shaped the scene; those notes appear under
 
 The draft matches the open note's format, read from the note itself: Fountain
 (`INT. PLACE - DAY`, names in capitals, dialogue beneath), a Markdown
-screenplay (headings and bold names), or prose. With nothing to match, drafts
-are Fountain.
+screenplay (headings and bold names), or prose. The note is read for this only
+when it is in the script folder (below) or attached to your message; otherwise,
+or with nothing to match, drafts are Fountain.
 
 Ask for changes in the chat ("make Kael colder") and the whole scene is
 rewritten as a new version; the card shows the latest with arrows to step back
@@ -326,9 +327,10 @@ under the card, and nothing is written until you approve it.
 
 An optional **Script folder** setting (Settings → Dragonglass AI → Writing)
 names the folder that holds your screenplay. Notes in it are the script, not
-lore, so the model's searches leave them out; the open note is the script a
-draft matches and goes into either way. Inserting into a note outside that
-folder still works, and the review says so.
+lore, so the model's searches leave them out, and the open note's format is
+matched when the note is in this folder. Drafts go into the open note either
+way: inserting into a note outside that folder still works, and the review
+says so.
 
 ## What works
 
