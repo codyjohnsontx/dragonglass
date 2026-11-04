@@ -125,6 +125,11 @@ describe('inferFormat', () => {
 		expect(inferFormat(prose)).toBe('prose');
 		// A prose note with Markdown headings is still prose: one heading is not a screenplay.
 		expect(inferFormat('# Chapter 1\n\n' + prose)).toBe('prose');
+		// Headings alone, however many, are not a screenplay without bold character cues.
+		expect(inferFormat('# Chapter 1\n\n## The Gates\n\nKael walked the wall for an hour.\n\nMira followed.\n')).toBe('prose');
+		// Markdown blockquotes in prose are not Fountain transitions; a forced transition in capitals is.
+		expect(inferFormat('Kael read the order twice.\n\n> Hold the gate until dawn.\n\nHe folded it.\n\n> Burn this letter.\n')).toBe('prose');
+		expect(inferFormat('Kael waits.\n\n> BURN TO WHITE.\n\n> FADE OUT.\n')).toBe('fountain');
 	});
 
 	it('defaults to Fountain when there is nothing to match', () => {

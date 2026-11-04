@@ -68,8 +68,8 @@ export class ChatView extends ItemView {
 	private liveToolChips: HTMLElement[] = [];
 	private runningChip: HTMLElement | null = null;
 	private pendingApproval: { conv: Conversation; card: HTMLElement } | null = null;
-	/** The draft version shown in each thread's card, by thread id, so a redraw keeps the user's place. */
-	private readonly shownDraft = new Map<string, string>();
+	/** The draft version shown in each thread's card, by thread id, with the thread's version count when it was picked: a redraw keeps the user's place until a new version arrives. */
+	private readonly shownDraft = new Map<string, { id: string; of: number }>();
 	/** The conversation whose turn is running, while one is. */
 	private liveConv: Conversation | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
@@ -422,7 +422,7 @@ export class ChatView extends ItemView {
 			this.drawDraft(conv, thread, card);
 		} else if (mine) {
 			renderDraftRef(wrap, mine.number, versions.length, () => {
-				this.shownDraft.set(thread, m.id);
+				this.shownDraft.set(thread, { id: m.id, of: versions.length });
 				const card = this.redrawDraft(conv, thread);
 				card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 			});
@@ -431,13 +431,15 @@ export class ChatView extends ItemView {
 	}
 
 	private drawDraft(conv: Conversation, thread: string, card: HTMLElement): void {
+		const versions = draftVersions(conv.messages, thread);
+		const pin = this.shownDraft.get(thread);
 		renderDraftCard(card, {
 			app: this.app,
 			core: this.core,
 			conv,
-			versions: draftVersions(conv.messages, thread),
-			shown: this.shownDraft.get(thread) ?? null,
-			onStep: (id) => this.shownDraft.set(thread, id),
+			versions,
+			shown: pin && pin.of === versions.length ? pin.id : null,
+			onStep: (id) => this.shownDraft.set(thread, { id, of: versions.length }),
 			insert: (id) => this.insertDraft(conv, id),
 			copy: (parent, text) => this.copyButton(parent, text, 'Copy draft to clipboard'),
 			onChange: () => this.redrawDraft(conv, thread),
