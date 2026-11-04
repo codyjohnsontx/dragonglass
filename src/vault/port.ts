@@ -67,8 +67,8 @@ export interface VaultPort {
 	/**
 	 * Move or rename a note through Obsidian's `FileManager.renameFile`, which
 	 * updates links to it following the user's preferences, once every note
-	 * written through this port has been indexed so links just written are
-	 * among those updated. Creates the
+	 * written through this port, or rewritten by an earlier move, has been
+	 * indexed so links just written are among those updated. Creates the
 	 * destination folder when it is missing. Throws if there is no such note
 	 * or the destination exists.
 	 */

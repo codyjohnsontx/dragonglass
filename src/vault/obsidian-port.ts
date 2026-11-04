@@ -13,9 +13,10 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	private readonly changeListeners = new Set<(change: VaultChange) => void>();
 	private listeningToVault = false;
 	/**
-	 * Notes this port wrote that Obsidian has not indexed yet. It parses a
-	 * note into `resolvedLinks` some time after the write, and both
-	 * `renameFile` and `linksTo` read links from there.
+	 * Notes this port wrote, or a rename through it rewrote links in, that
+	 * Obsidian has not indexed yet. It parses a note into `resolvedLinks`
+	 * some time after the write, and both `renameFile` and `linksTo` read
+	 * links from there.
 	 */
 	private readonly unindexed = new Set<string>();
 	private readonly indexWaiters = new Set<() => void>();
@@ -122,7 +123,14 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		const folder = parentFolder(to);
 		if (folder && !this.app.vault.getFolderByPath(folder)) await this.app.vault.createFolder(folder);
 		await this.whenIndexed();
-		await this.app.fileManager.renameFile(file, to);
+		const rewritten = this.app.vault.on('modify', (f) => {
+			if (f instanceof TFile && f.extension === 'md') this.unindexed.add(f.path);
+		});
+		try {
+			await this.app.fileManager.renameFile(file, to);
+		} finally {
+			this.app.vault.offref(rewritten);
+		}
 	}
 
 	async processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string> {

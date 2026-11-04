@@ -377,14 +377,20 @@ Creating a folder, moving or renaming a note, changing its properties and
 rewriting one section by heading go through `ProposalEngine` like any edit:
 the tool proposes, the user reviews and approves, and apply re-checks the
 vault first. They join the turn's batch review and its one-proposal-per-note
-rule; a move claims both its old and its new path. Approve all writes new
+rule; a move claims both its old and its new path. The rule stays for a
+property change to a note whose text change is waiting (or the reverse): the
+second card would go stale as soon as the first applied, so the refusal tells
+the model to ask the user to review the first card, rather than to write the
+properties as raw YAML in `propose_edit_note`. Approve all writes new
 folders first, then note contents, then moves, so a note can go into a new
 folder and an edit to a note that links to a moved note is checked against
 the text it was proposed on before Obsidian rewrites that link. Obsidian
 indexes a note's links some time after it is written, and `renameFile` only
 rewrites links it has indexed, so a move waits until the notes the plugin
-just wrote are indexed (at most five seconds); otherwise a link added in the
-same batch would be left pointing at the old name. Undo all
+just wrote, and the notes an earlier move rewrote links in, are indexed (at
+most five seconds); otherwise a link added in the same batch could be left
+pointing at the old name, or a second move could read link positions from
+before the first one's rewrite. Undo all
 goes newest first, so moves are undone before the notes whose links they
 rewrote, and those notes are checked when they are undone rather than up
 front.
@@ -414,9 +420,14 @@ Section replace is an operation of `propose_edit_note` (`replace_section`)
 rather than its own tool, so every text change to one note stays one
 proposal and one diff. A section runs from its heading to the next heading
 of the same or a higher level; headings in frontmatter and fenced code do
-not count. A missing heading is refused with the note's headings listed,
-and an ambiguous one with each candidate and the heading it sits under,
-which the model can name as `Act Two > Notes`.
+not count. The heading is named by its text exactly as the note has it
+(trimmed, case-sensitive, without `#`s), and `content` is the section body
+only: the heading line stays and is never taken from `content`, so content
+that starts with the same heading keeps it. Looser matching (any case,
+`## Act Two`) was dropped: it made headings differing only in case ambiguous
+and added spellings nothing needed. A missing heading is refused with the
+note's headings listed, and an ambiguous one with each candidate and the
+heading it sits under, which the model can name as `Act Two > Notes`.
 
 A new folder is never removed by Revert or Undo all, as a created note is
 never removed by Revert; the review says so. Rolling back a failed Approve

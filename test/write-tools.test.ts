@@ -69,11 +69,19 @@ describe('replace_section', () => {
 	it('replaces the last section to the end of the note and keeps its final newline', () => {
 		expect(replaceSection('# A\nold\n', 'A', 'new')).toBe('# A\nnew\n');
 		expect(replaceSection('# A\nold', 'A', 'new')).toBe('# A\nnew');
-		expect(replaceSection(SCRIPT, '## Act Three', 'Finale.')).toMatch(/## Act Three\n\nFinale\.\n$/);
+		expect(replaceSection(SCRIPT, 'Act Three', 'Finale.')).toMatch(/## Act Three\n\nFinale\.\n$/);
 	});
 
-	it('does not repeat the heading when the content starts with it', () => {
-		expect(replaceSection('# A\n\nold\n\n# B\n', 'A', '# A\n\nnew\n')).toBe('# A\n\nnew\n\n# B\n');
+	it('takes content as the section body only, keeping a first line that repeats the heading', () => {
+		expect(replaceSection('# A\n\nold\n\n# B\n', 'A', '# A\n\nnew\n')).toBe('# A\n\n# A\n\nnew\n\n# B\n');
+	});
+
+	it('matches the heading text exactly: case-sensitive, without #s', () => {
+		expect(() => replaceSection(SCRIPT, 'act one', 'x')).toThrow(/No heading "act one" in the note\..*without the #s/);
+		expect(() => replaceSection(SCRIPT, '## Act One', 'x')).toThrow(/No heading "## Act One"/);
+		expect(replaceSection(SCRIPT, '  Act One  ', 'Rewritten.')).toContain('## Act One\n\nRewritten.\n\n## Act Two');
+		const twoCases = '# Gate\n\nupper\n\n# gate\n\nlower\n';
+		expect(replaceSection(twoCases, 'gate', 'new')).toBe('# Gate\n\nupper\n\n# gate\n\nnew\n');
 	});
 
 	it('refuses a missing heading and names the headings there are', () => {
@@ -81,13 +89,12 @@ describe('replace_section', () => {
 		expect(() => replaceSection('plain text', 'Intro', 'x')).toThrow(/The note has no headings/);
 	});
 
-	it('refuses an ambiguous heading and resolves it by the heading above it or by level', () => {
+	it('refuses an ambiguous heading and resolves it by the heading above it', () => {
 		expect(() => replaceSection(SCRIPT, 'Notes', 'x')).toThrow(/appears 2 times: ### Notes under "Sequel > Act One"; ### Notes under "Sequel > Act Two"/);
 		const out = replaceSection(SCRIPT, 'Act Two > Notes', 'Fresh notes.');
 		expect(out).toContain('### Notes\n\nFresh notes.\n\n## Act Three');
 		expect(out).toContain('Act one notes.');
-		expect(() => replaceSection(SCRIPT, '#### Notes', 'x')).toThrow(/No heading/);
-		expect(replaceSection(SCRIPT, 'act one', 'Rewritten.')).toContain('## Act One\n\nRewritten.\n\n## Act Two');
+		expect(() => replaceSection(SCRIPT, 'act two > Notes', 'x')).toThrow(/No heading/);
 	});
 
 	it('is proposed through propose_edit_note, reviewed as a diff, and goes stale when the note changes', async () => {
@@ -194,6 +201,18 @@ describe('propose_update_frontmatter', () => {
 		expect(vault.getMetadata('Act Two.md')?.frontmatter).toEqual({ act: 2, published: true, status: 'true' });
 	});
 
+	it('refuses a property change to a note whose text change is waiting, telling the model to ask the user to review it', async () => {
+		const { call } = setup({ 'Act Two.md': NOTE });
+		expect((await call('propose_edit_note', { path: 'Act Two.md', summary: 's', edits: [{ type: 'append', content: 'Gate scene.' }] })).isError).toBeUndefined();
+		const props = await call('propose_update_frontmatter', { path: 'Act Two.md', summary: 's', set: [{ key: 'status', value: 'final' }] });
+		expect(props.isError).toBe(true);
+		expect(props.content).toBe(
+			'Error: Act Two.md already has a pending proposal in this turn. It is waiting for the user to review. Ask the user to approve or reject it first, then propose this change; the user reviews one card per note. Nothing was proposed.',
+		);
+		const edit = await call('propose_edit_note', { path: 'Act Two.md', summary: 's', edits: [{ type: 'append', content: 'More.' }] });
+		expect(edit.content).toMatch(/Put every change to the note text in a single propose_edit_note call/);
+	});
+
 	it('refuses changes that change nothing, bad arguments, missing notes and placeholders', async () => {
 		const { call } = setup({ 'A.md': NOTE });
 		const same = await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'draft' }], remove: ['nope'] });
@@ -272,7 +291,7 @@ describe('propose_move_note', () => {
 		expect((await call('propose_move_note', { path: 'Nope.md', new_path: 'X.md', summary: 's' })).content).toMatch(/No note found/);
 		expect((await call('propose_move_note', { path: 'Lore/Ashen Gate.md', new_path: 'Gate.md', summary: 's' })).isError).toBeUndefined();
 		const create = await call('propose_create_note', { path: 'Gate.md', content: 'x', summary: 's' });
-		expect(create.content).toMatch(/Gate\.md already has a pending proposal in this turn\. Wait until the user has reviewed it/);
+		expect(create.content).toMatch(/Gate\.md already has a pending proposal in this turn\. It is waiting for the user to review\. Ask the user to approve or reject it first/);
 		expect((await call('propose_edit_note', { path: 'Lore/Ashen Gate.md', summary: 's', edits: [{ type: 'append', content: 'x' }] })).isError).toBe(true);
 	});
 

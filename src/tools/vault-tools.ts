@@ -5,7 +5,7 @@ import { bodyStart, searchTerms, WordStartFinder, wordStartFinder } from '../sea
 import { SearchHit, SearchMode, VaultSearchIndex } from '../search/vault-index';
 import { VaultPort } from '../vault/port';
 import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
-import { ChangeProposal, EditOperation, ProposalEngine, ProposalError, PropertyEdit, touchedPaths } from '../vault/proposals';
+import { ChangeProposal, EditOperation, ProposalEngine, ProposalError, ProposalKind, PropertyEdit, touchedPaths } from '../vault/proposals';
 
 /**
  * Tools exposed to the model. Read tools return note content wrapped in
@@ -65,16 +65,16 @@ class TurnProposals {
 
 	constructor(private readonly configDir: string) {}
 
-	/** Throws ProposalError when one of the paths already has a pending proposal this turn. */
-	check(...rawPaths: unknown[]): void {
+	/** Throws ProposalError when one of the paths a `kind` proposal would touch already has a pending proposal this turn. */
+	check(kind: ProposalKind, ...rawPaths: unknown[]): void {
 		for (const raw of rawPaths) {
 			const path = validateVaultPath(raw, { markdown: false, configDir: this.configDir });
 			const earlier = this.byPath.get(path);
 			if (!earlier || (earlier.status !== 'pending' && earlier.status !== 'stale')) continue;
 			const hint =
-				earlier.kind === 'edit' || earlier.kind === 'create'
-					? 'Put every change to one note in a single propose_edit_note call (several edits in one call)'
-					: 'Wait until the user has reviewed it, or tell them what else you would change';
+				(earlier.kind === 'edit' || earlier.kind === 'create') && kind === 'edit'
+					? 'Put every change to the note text in a single propose_edit_note call (several edits in one call)'
+					: 'It is waiting for the user to review. Ask the user to approve or reject it first, then propose this change';
 			throw new ProposalError(`${path} already has a pending proposal in this turn. ${hint}; the user reviews one card per note. Nothing was proposed.`);
 		}
 	}
@@ -600,7 +600,7 @@ function proposeCreateNoteTool(proposals: ProposalEngine, turn: TurnProposals): 
 		},
 		async execute(args, ctx) {
 			try {
-				turn.check(args['path']);
+				turn.check('create', args['path']);
 				const proposal = await proposals.proposeCreate(
 					ctx.conversationId,
 					String(args['path']),
@@ -643,11 +643,11 @@ function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 							heading: {
 								type: 'string',
 								description:
-									'replace_section: the heading text, e.g. "Act Two" or "## Act Two". If the heading appears more than once, name the heading above it too: "Act Two > Notes". The section runs to the next heading of the same or a higher level, so its subheadings are replaced too.',
+									'replace_section: the heading text exactly as the note has it, without the #s, e.g. "Act Two". If the heading appears more than once, name the heading above it too: "Act Two > Notes". The section runs to the next heading of the same or a higher level, so its subheadings are replaced too.',
 							},
 							content: {
 								type: 'string',
-								description: 'Text to append, the full new content (replace_all), or the new text under the heading, without the heading line (replace_section).',
+								description: 'Text to append, the full new content (replace_all), or the section body only (replace_section): the new text under the heading, without the heading line, which stays as it is.',
 							},
 						},
 						required: ['type'],
@@ -658,7 +658,7 @@ function proposeEditNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 		},
 		async execute(args, ctx) {
 			try {
-				turn.check(args['path']);
+				turn.check('edit', args['path']);
 				const ops = toEditOperations(args['edits']);
 				const proposal = await proposals.proposeEdit(ctx.conversationId, String(args['path']), ops, String(args['summary']));
 				turn.record(proposal);
@@ -704,7 +704,7 @@ function proposeUpdateFrontmatterTool(proposals: ProposalEngine, turn: TurnPropo
 		},
 		async execute(args, ctx) {
 			try {
-				turn.check(args['path']);
+				turn.check('frontmatter', args['path']);
 				const edits = toPropertyEdits(args['set'], args['remove']);
 				const proposal = await proposals.proposeFrontmatter(ctx.conversationId, String(args['path']), edits, String(args['summary']));
 				turn.record(proposal);
@@ -763,7 +763,7 @@ function proposeMoveNoteTool(proposals: ProposalEngine, turn: TurnProposals): Ag
 		},
 		async execute(args, ctx) {
 			try {
-				turn.check(args['path'], args['new_path']);
+				turn.check('move', args['path'], args['new_path']);
 				const proposal = await proposals.proposeMove(ctx.conversationId, String(args['path']), String(args['new_path']), String(args['summary']));
 				turn.record(proposal);
 				const count = proposal.linkUpdates?.length ?? 0;
@@ -795,7 +795,7 @@ function proposeCreateFolderTool(proposals: ProposalEngine, turn: TurnProposals)
 		},
 		execute(args, ctx) {
 			try {
-				turn.check(args['path']);
+				turn.check('folder', args['path']);
 				const proposal = proposals.proposeFolder(ctx.conversationId, String(args['path']), String(args['summary']));
 				turn.record(proposal);
 				return Promise.resolve({

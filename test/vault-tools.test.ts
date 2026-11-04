@@ -571,7 +571,7 @@ describe('vault tools', () => {
 		expect(second.isError).toBe(true);
 		expect(second.proposal).toBeUndefined();
 		expect(second.content).toBe(
-			'Error: Projects/Launch.md already has a pending proposal in this turn. Put every change to one note in a single propose_edit_note call (several edits in one call); the user reviews one card per note. Nothing was proposed.',
+			'Error: Projects/Launch.md already has a pending proposal in this turn. Put every change to the note text in a single propose_edit_note call (several edits in one call); the user reviews one card per note. Nothing was proposed.',
 		);
 		// A create for a note with a pending edit, and any proposal after a pending create, are refused the same way.
 		expect((await create.execute({ path: 'Projects/Launch.md', content: 'x', summary: 's' }, ctx)).content).toMatch(/already has a pending proposal in this turn/);

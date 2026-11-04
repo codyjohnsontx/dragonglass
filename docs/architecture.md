@@ -150,9 +150,9 @@ A `ChangeProposal` has a kind:
 - `create` and `edit` carry the note's text before and after and are
   reviewed as a line diff. `propose_edit_note` takes find/replace, append,
   replace-all and `replace_section` operations; a section runs from its
-  heading to the next heading of the same or a higher level, and a missing or
-  ambiguous heading is refused with the headings the model can use
-  (`Act Two > Notes`).
+  heading, named by its exact text, to the next heading of the same or a
+  higher level, its content is the body only, and a missing or ambiguous
+  heading is refused with the headings the model can use (`Act Two > Notes`).
 - `frontmatter` carries the properties changed, each with its value before
   and after, and is reviewed as those values. It is written by
   `FileManager.processFrontMatter` after the hash check, with a guard inside

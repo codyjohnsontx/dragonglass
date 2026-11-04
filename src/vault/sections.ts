@@ -62,30 +62,21 @@ function frontmatterEnd(lines: readonly string[]): number {
 	return 0;
 }
 
-function normalize(text: string): string {
-	return text.replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 /**
- * Parse what the model names: `Act Two`, `## Act Two`, or a path through the
- * headings above it, `Act Two > Notes`. Leading `#`s pin the last heading's
- * level.
+ * Parse what the model names: the heading's text exactly as the note has it,
+ * `Act Two`, or for a heading that appears more than once a path through the
+ * headings above it, `Act Two > Notes`.
  */
-function parseTarget(raw: string): { path: string[]; level: number | null } {
-	const parts = raw.split('>').map((p) => p.trim()).filter((p) => p !== '');
-	if (parts.length === 0) throw new SectionError('replace_section needs the text of a heading in "heading".');
-	const last = parts[parts.length - 1] ?? '';
-	const m = /^(#{1,6})\s*(.*)$/.exec(last);
-	const level = m ? (m[1] ?? '').length : null;
-	const path = parts.map((p) => normalize(p.replace(/^#{1,6}\s*/, '')));
+function parseTarget(raw: string): string[] {
+	const path = raw.split('>').map((p) => p.trim());
 	if (path.some((p) => p === '')) throw new SectionError('replace_section needs the text of a heading in "heading".');
-	return { path, level };
+	return path;
 }
 
 /** Whether `wanted`, outermost first, appears in order among the heading's parents. */
 function underParents(parents: readonly string[], wanted: readonly string[]): boolean {
 	let i = 0;
-	for (const p of parents) if (i < wanted.length && normalize(p) === wanted[i]) i++;
+	for (const p of parents) if (i < wanted.length && p === wanted[i]) i++;
 	return i === wanted.length;
 }
 
@@ -95,16 +86,14 @@ function describe(h: Heading): string {
 
 /** The one heading `raw` names; throws SectionError naming the note's headings when there is none, or the candidates when there are several. */
 export function findHeading(lines: readonly string[], raw: string): Heading {
-	const target = parseTarget(raw);
+	const path = parseTarget(raw);
 	const headings = listHeadings(lines);
-	const name = target.path[target.path.length - 1];
-	const matches = headings.filter(
-		(h) => normalize(h.text) === name && (target.level === null || h.level === target.level) && underParents(h.parents, target.path.slice(0, -1)),
-	);
+	const name = path[path.length - 1];
+	const matches = headings.filter((h) => h.text === name && underParents(h.parents, path.slice(0, -1)));
 	if (matches.length === 1) return matches[0] as Heading;
 	if (matches.length === 0) {
 		const known = headings.length === 0 ? 'The note has no headings.' : `Its headings are: ${headings.slice(0, 30).map(describe).join('; ')}${headings.length > 30 ? '; …' : ''}.`;
-		throw new SectionError(`No heading "${raw.trim()}" in the note. ${known} Use one of them exactly, or use find_replace.`);
+		throw new SectionError(`No heading "${raw.trim()}" in the note. ${known} Use the text of one of them exactly, without the #s, or use find_replace.`);
 	}
 	const where = matches
 		.slice(0, 10)
@@ -118,8 +107,7 @@ export function findHeading(lines: readonly string[], raw: string): Heading {
 /**
  * Replace the body of the section `heading` names with `content`, keeping
  * the heading line itself. A blank line after the heading and before the
- * next heading is kept as the note had it. If `content` starts with the
- * heading line itself, that line is not repeated.
+ * next heading is kept as the note had it.
  */
 export function replaceSection(text: string, heading: string, content: string): string {
 	const lines = text.split('\n');
@@ -129,12 +117,7 @@ export function replaceSection(text: string, heading: string, content: string): 
 	const body = lines.slice(target.line + 1, end);
 	const blankAfterHeading = body.length > 0 && (body[0] ?? '').trim() === '';
 
-	let replacement = content.replace(/\r\n/g, '\n').split('\n');
-	const firstText = replacement.findIndex((l) => l.trim() !== '');
-	if (firstText >= 0) {
-		const m = HEADING.exec(replacement[firstText] ?? '');
-		if (m && (m[1] ?? '').length === target.level && normalize(m[2] ?? '') === normalize(target.text)) replacement = replacement.slice(firstText + 1);
-	}
+	const replacement = content.replace(/\r\n/g, '\n').split('\n');
 	while (replacement.length > 0 && (replacement[0] ?? '').trim() === '') replacement.shift();
 	while (replacement.length > 0 && (replacement[replacement.length - 1] ?? '').trim() === '') replacement.pop();
 
