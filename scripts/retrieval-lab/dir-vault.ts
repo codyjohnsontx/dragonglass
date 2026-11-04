@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../../src/vault/port';
+import { ActiveContext, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../../src/vault/port';
 import { baseName } from '../../src/vault/paths';
 
 /**
@@ -110,10 +110,20 @@ export class DirVaultPort implements VaultPort {
 		};
 	}
 
+	linkGraph(): NoteLinks[] {
+		return this.listMarkdownFiles().map(({ path }) => {
+			const meta = this.getMetadata(path) as NoteMetadata;
+			return { path, outgoingLinks: meta.outgoingLinks, tags: meta.tags };
+		});
+	}
+
 	createNote(): Promise<void> {
 		return Promise.reject(new Error('read-only lab vault'));
 	}
 	processNote(): Promise<void> {
+		return Promise.reject(new Error('read-only lab vault'));
+	}
+	trashNote(): Promise<void> {
 		return Promise.reject(new Error('read-only lab vault'));
 	}
 	writePluginFile(): Promise<void> {

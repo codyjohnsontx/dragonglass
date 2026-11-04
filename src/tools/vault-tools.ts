@@ -6,6 +6,7 @@ import { SearchHit, SearchMode, VaultSearchIndex } from '../search/vault-index';
 import { VaultPort } from '../vault/port';
 import { baseName, InvalidPathError, validateVaultPath } from '../vault/paths';
 import { ChangeProposal, EditOperation, ProposalEngine, ProposalError } from '../vault/proposals';
+import { relatedNotes } from './related-notes';
 
 /**
  * Tools exposed to the model. Read tools return note content wrapped in
@@ -44,6 +45,7 @@ export function createVaultTools(
 		readNoteTool(vault, opts),
 		searchNotesTool(vault, index, opts),
 		getNoteMetadataTool(vault),
+		relatedNotesTool(vault),
 		getActiveNoteTool(vault, opts),
 		proposeCreateNoteTool(proposals, turn),
 		proposeEditNoteTool(proposals, turn),
@@ -481,7 +483,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 		name: 'get_note_metadata',
 		description:
 			'Which notes link to this note (backlinks), which notes it links to, its tags, properties and headings. ' +
-			'Use this for questions like "what links to X" or "what is related to X", without reading full content.',
+			'Use this for questions like "what links to X", without reading full content. For "what is related to X", use related_notes.',
 		readOnly: true,
 		parameters: {
 			type: 'object',
@@ -498,6 +500,47 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 				if (!meta) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
 				const shown = { ...meta, outgoingLinks: meta.outgoingLinks.map(linkLabel), backlinks: meta.backlinks.map(linkLabel) };
 				return Promise.resolve(ok(`${found.notice}${JSON.stringify(shown, null, 2)}`, [{ kind: 'vault', path: found.path, seen: 'excerpt' }]));
+			} catch (e) {
+				return Promise.resolve(wrapError(e));
+			}
+		},
+	};
+}
+
+/** Related notes listed by default, and at most. */
+const DEFAULT_RELATED = 10;
+const MAX_RELATED = 25;
+
+function relatedNotesTool(vault: VaultPort): AgentTool {
+	return {
+		name: 'related_notes',
+		description:
+			'The notes most related to one note, best first, each with why: links between them, notes that link to both, ' +
+			'notes both link to, and shared tags. Use it to find the lore connected to a character, place, faction or topic, ' +
+			'including notes a word search would miss. It shows no note text: read_note a result before relying on its content.',
+		readOnly: true,
+		parameters: {
+			type: 'object',
+			properties: {
+				path: { type: 'string', description: 'Vault-relative path ending in .md. A wikilink name such as "Kael" also works.' },
+				limit: { type: 'integer', description: `Max notes (default ${DEFAULT_RELATED}).`, minimum: 1, maximum: MAX_RELATED },
+			},
+			required: ['path'],
+		},
+		execute(args) {
+			try {
+				const found = resolveNotePath(vault, args['path']);
+				if ('error' in found) return Promise.resolve(fail(found.error));
+				if (!vault.getMetadata(found.path)) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
+				const asked = typeof args['limit'] === 'number' ? Math.floor(args['limit']) : DEFAULT_RELATED;
+				const limit = Math.min(Math.max(asked, 1), MAX_RELATED);
+				const { notes, total } = relatedNotes(vault.linkGraph(), found.path, limit);
+				const name = `[[${baseName(found.path)}]]`;
+				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes share links or tags with ${name} (${found.path}).`));
+				const lines = notes.map((n, i) => `${i + 1}. ${linkLabel(n.path)}\n${n.reasons.map((r) => `   - ${r}`).join('\n')}`);
+				const more = total > notes.length ? `\n\n${total - notes.length} more related notes not shown; call again with a higher limit to see them.` : '';
+				const text = `${found.notice}Notes related to ${name} (${found.path}), most related first:\n\n${lines.join('\n')}${more}\n\nThese are connections only: read_note the ones that matter before citing them as [[Name]].`;
+				return Promise.resolve(ok(text));
 			} catch (e) {
 				return Promise.resolve(wrapError(e));
 			}

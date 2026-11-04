@@ -38,7 +38,11 @@ src/
                           against what tool results and context showed.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
-                          active note, propose create, propose edit).
+                          related notes, active note, propose create,
+                          propose edit).
+    related-notes.ts      Ranks the notes related to one note by links,
+                          co-citation, shared links and shared tags, with
+                          short reasons.
     web-tools.ts          web_search (waits for the user's approval) and
                           read_web_page (up to 3 results per approved search).
   web/
@@ -55,7 +59,8 @@ src/
                           vault events, serializes builds and searches.
   vault/
     port.ts               Narrow VaultPort interface over Obsidian's vault,
-                          including trashing a note (never `Vault.delete`).
+                          including trashing a note (never `Vault.delete`)
+                          and the whole vault's links and tags in one pass.
     obsidian-port.ts      VaultPort + StoreBackend implemented on App.
     paths.ts              Path validation at the trust boundary.
     proposals.ts          ChangeProposal model and ProposalEngine
@@ -120,6 +125,12 @@ src/
    that lacks its other words (a person note, asked about their climbing
    project), it lists the notes that result links to, each with an excerpt,
    and auto-reads them right after it within half the auto-read budget.
+   `related_notes` ranks the notes connected to one note from the metadata
+   cache's links and tags (decision 19) and names each one's reasons, such as
+   "both link to [[Fort Ashen]]" or "shares #faction/ember"; it shows no note
+   text, so the system prompt tells the model to call it for a character,
+   place, faction or other subject with its own note, or what else connects to
+   it, and to read the notes that matter.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown. A tool message
    also stores the `sources` its result showed the model (see below).
@@ -182,7 +193,8 @@ write its own sources list.
 
 Read tools report what they showed as `Source`s on their result: `read_note`
 and `get_active_note` the note they read, `search_notes` each listed note as an
-excerpt or, when its text was auto-read, in full. A web tool reports each page
+excerpt or, when its text was auto-read, in full; `related_notes` shows no
+note text and reports none. A web tool reports each page
 as `{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
 message records the notes sent as context the same way: attachments and the
 active note in full, a selection as an excerpt of its note. They count for

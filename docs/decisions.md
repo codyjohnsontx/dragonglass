@@ -370,3 +370,36 @@ The adapter sits behind a small `WebSearchService` interface (query,
 domains, result count) so another service, Exa being the runner-up, is one
 file. No live Tavily key was available when this was built; the client
 follows Tavily's API reference and the fake server answers in that shape.
+
+## 19. Related notes ranked by link structure with Adamic-Adar weights
+
+Asked about one character, the model should also see the lore connected to
+it that a word search would not find: the event two characters both appear
+in, the place a faction is ruled from. `related_notes` ranks the notes
+related to one note from the metadata cache alone (resolved links and tags,
+one pass through a `VaultPort.linkGraph()` read), so it costs no note reads
+and needs no index of its own.
+
+Evidence counted: a direct link in either direction, co-citation (a third
+note links to both), shared outgoing links and shared tags. Options
+considered for weighting the shared kinds: a flat point per shared item, or
+the Adamic-Adar weight 1 / ln(degree) of each shared neighbour. Flat points
+let a hub dominate: every note an index note links to would be "linked
+together" with every other, and a tag on half the vault would count as much
+as a tag on two notes. Adamic-Adar keeps the evidence explainable (each
+reason names the shared note or tag) while a rare connection outweighs a
+common one. A link from the note asked about counts 2, above any single
+shared neighbour (at most 1 / ln 2), so the notes a character page names
+rank highest however many it names. A link to it counts
+2 / max(1, ln(out-degree of the linking note)): never more than a link from
+the note asked about (a note with one or two links ties with it, and ties
+fall back to path order), while a link from an index or list note of 200
+notes counts about 0.38. A shared outgoing link is divided by the same
+max(1, ln(out-degree)) of the related note, so an index that links to the
+character and to all of its lore collects little from "both link to" either,
+and such notes do not crowd out the connected lore. Path order breaks ties,
+so the result is deterministic; it shows 10 notes by default and at most 25,
+with a count of the rest. The tool lists connections, not text, so it reports no sources:
+the model reads the notes that matter before citing them, and a note it
+cites from the list alone shows as unverified. Embeddings stay out
+(roadmap: semantic retrieval only if measured to help).

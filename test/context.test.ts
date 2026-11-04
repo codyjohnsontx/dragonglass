@@ -30,6 +30,7 @@ describe('context building', () => {
 		expect(s).toContain('Reference notes as [[Basename]] (Projects/Budget.md is [[Budget]]), never with folders or .md.');
 		expect(s).toContain('Tools take vault paths like Projects/Budget.md; links in notes look like [[Budget]] and resolve by basename.');
 		expect(s).toContain('If a tool returns an error, do not repeat the same call');
+		expect(s).toMatch(/character, place, faction .* call related_notes/);
 		expect(s).toMatch(/When an edit needs facts from other notes, search and read them first; never propose text with placeholders/);
 		const off = buildSystemPrompt({ toolsEnabled: false, maxCharsPerNote: 100 });
 		expect(off).toContain('Reference notes as [[Basename]]');
@@ -50,9 +51,9 @@ describe('context building', () => {
 		const lines = buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: many }).split('\n');
 		expect(lines.at(-1)).toMatch(/Folder 14, and 25 more\.$/);
 		// The prompt was about 240 tokens before the map and the new rules; together they add under 150,
-		// and the citation rules under 80 more.
+		// the citation rules under 80 more, and the related_notes rule under 50.
 		const typical = { noteCount: 16, folders: ['Areas', 'Daily', 'Inbox', 'Meetings', 'People', 'Projects', 'Reading', 'Reference'], activeNotePath: 'Projects/Launch.md' };
-		expect(estimateTokens(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: typical }))).toBeLessThan(240 + 150 + 80);
+		expect(estimateTokens(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: typical }))).toBeLessThan(240 + 150 + 80 + 50);
 	});
 
 	it('wraps attached context in delimiters and truncates', () => {

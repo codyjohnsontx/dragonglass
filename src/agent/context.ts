@@ -64,6 +64,7 @@ export function buildSystemPrompt(opts: PromptOptions): string {
 		lines.push(
 			'- Use the tools to look at the vault instead of guessing. Search or list before reading; read before editing.',
 			'- Tools take vault paths like Projects/Budget.md; links in notes look like [[Budget]] and resolve by basename.',
+			'- For a question about a character, place, faction or other subject with its own note, or what else connects to it, call related_notes on that note to find connected notes a search would miss; read those that matter.',
 			'- If a tool returns an error, do not repeat the same call; read the error and change the arguments.',
 			'- When an edit needs facts from other notes, search and read them first; never propose text with placeholders such as [insert …].',
 			'- You cannot write files. To change a note, call propose_edit_note or propose_create_note; the user reviews a diff and decides. After proposing, briefly explain what you proposed and stop; do not claim the change was applied.',

@@ -1,5 +1,5 @@
 import { StoreBackend } from '../src/persistence/store';
-import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
+import { ActiveContext, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
 import { baseName, parentFolder } from '../src/vault/paths';
 
 /** In-memory VaultPort + StoreBackend for tests. Mirrors Obsidian semantics closely enough. */
@@ -81,6 +81,13 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 			}
 		}
 		return { path, frontmatter: fm, tags, headings, outgoingLinks: [...new Set(outgoing)], unresolvedLinks: unresolved, backlinks: [...new Set(backlinks)].sort() };
+	}
+
+	linkGraph(): NoteLinks[] {
+		return this.listMarkdownFiles().map(({ path }) => {
+			const meta = this.getMetadata(path) as NoteMetadata;
+			return { path, outgoingLinks: meta.outgoingLinks, tags: [...new Set(meta.tags)] };
+		});
 	}
 
 	private resolveLink(link: string): string | null {
