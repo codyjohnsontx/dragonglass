@@ -464,7 +464,8 @@ button.dg-chip {
 	flex: 1;
 	min-width: 0;
 	display: flex;
-	gap: var(--size-2-2);
+	flex-wrap: wrap;
+	column-gap: var(--size-2-2);
 	align-items: baseline;
 }
 
@@ -473,10 +474,10 @@ button.dg-chip {
 	white-space: nowrap;
 }
 
+/* Paths wrap after a slash rather than cut: in a narrow sidebar an ellipsis left only the first letter. */
 .dg-proposal-path {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	min-width: 0;
+	overflow-wrap: break-word;
 }
 
 .dg-proposal-status {
@@ -567,6 +568,47 @@ button.dg-chip {
 .dg-proposal-warning {
 	color: var(--text-warning);
 	font-size: var(--font-ui-smaller);
+}
+
+.dg-proposal-note {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* A move or rename: from and to, then the notes whose links change. */
+.dg-move {
+	margin-top: var(--size-2-2);
+	padding: var(--size-2-2);
+	font-size: var(--font-ui-smaller);
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-s);
+}
+
+.dg-move-row {
+	display: flex;
+	gap: var(--size-2-2);
+}
+
+.dg-move-label {
+	flex: 0 0 3em;
+	color: var(--text-faint);
+}
+
+.dg-move-path {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: break-word;
+	font-family: var(--font-monospace);
+}
+
+.dg-move-links {
+	margin-top: var(--size-2-2);
+	color: var(--text-muted);
+}
+
+.dg-move-link-list {
+	margin: var(--size-2-1) 0 0;
+	padding-left: var(--size-4-4);
 }
 
 /* A turn with several proposals: one card, each note a collapsible section with its own controls. */

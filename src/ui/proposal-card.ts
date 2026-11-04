@@ -2,7 +2,8 @@ import { App, Notice, setIcon } from 'obsidian';
 import { DragonglassCore } from '../core';
 import { Conversation } from '../persistence/conversation';
 import { diffStats, toHunks } from '../vault/diff';
-import { ChangeProposal, ProposalError, summarizeBatch } from '../vault/proposals';
+import { baseName, parentFolder } from '../vault/paths';
+import { ChangeProposal, ProposalError, revertible, summarizeBatch } from '../vault/proposals';
 
 /** Renders one change proposal with its diff and approve / reject / revert controls. */
 export function renderProposalCard(
@@ -41,7 +42,7 @@ export function renderBatchCard(
 
 	const header = container.createDiv({ cls: 'dg-proposal-header dg-batch-header' });
 	setIcon(header.createSpan({ cls: 'dg-proposal-icon' }), 'files');
-	header.createDiv({ cls: 'dg-batch-title', text: `${plural(summary.changes, 'change')} across ${plural(summary.notes, 'note')}` });
+	header.createDiv({ cls: 'dg-batch-title', text: `${plural(summary.changes, 'change')} across ${across(summary.notes, summary.folders)}` });
 	container.createDiv({ cls: 'dg-proposal-stats', text: statusCounts(batch) });
 
 	const actions = container.createDiv({ cls: 'dg-proposal-actions dg-batch-actions' });
@@ -63,7 +64,10 @@ export function renderBatchCard(
 			disableControls(container);
 			void core
 				.approveAll(conv, batch)
-				.then((applied) => new Notice(`Applied ${plural(applied.length, 'change')} to ${plural(new Set(applied.map((p) => p.path)).size, 'note')}`))
+				.then((applied) => {
+					const { notes, folders } = summarizeBatch(applied);
+					new Notice(`Applied ${plural(applied.length, 'change')} to ${across(notes, folders)}`);
+				})
 				.catch((e: unknown) => new Notice(e instanceof ProposalError ? e.message : `Could not apply: ${String(e)}`, 10000))
 				.finally(onChange);
 		});
@@ -112,17 +116,95 @@ function revealItem(container: HTMLElement, proposalId: string): void {
 	item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-/** Icon, kind and the note's path as a link that opens it. */
+/** Icon, kind and the note's path as a link that opens it; a folder's path is plain text. */
 function renderTitle(app: App, proposal: ChangeProposal, header: HTMLElement): void {
 	const icon = header.createSpan({ cls: 'dg-proposal-icon' });
-	setIcon(icon, proposal.kind === 'create' ? 'file-plus' : 'file-pen');
+	setIcon(icon, KIND_ICON[proposal.kind]);
 	const titleEl = header.createDiv({ cls: 'dg-proposal-title' });
-	titleEl.createSpan({ cls: 'dg-proposal-kind', text: proposal.kind === 'create' ? 'Create' : 'Edit' });
-	const pathLink = titleEl.createEl('a', { cls: 'dg-proposal-path', text: proposal.path, href: '#' });
+	titleEl.createSpan({ cls: 'dg-proposal-kind', text: kindLabel(proposal) });
+	if (proposal.kind === 'folder') {
+		appendPath(titleEl.createSpan({ cls: 'dg-proposal-path' }), `${proposal.path}/`);
+		return;
+	}
+	// Once a move is applied the note lives at its new path.
+	const where = proposal.kind === 'move' && proposal.status === 'applied' ? (proposal.newPath ?? proposal.path) : proposal.path;
+	const pathLink = titleEl.createEl('a', { cls: 'dg-proposal-path', href: '#' });
+	appendPath(pathLink, proposal.path);
 	pathLink.addEventListener('click', (e) => {
 		e.preventDefault();
-		void app.workspace.openLinkText(proposal.path, '', false);
+		void app.workspace.openLinkText(where, '', false);
 	});
+}
+
+/** A path that a narrow sidebar may wrap after any slash, rather than inside a name. */
+function appendPath(el: HTMLElement, path: string): void {
+	path.split('/').forEach((part, i, parts) => {
+		el.appendText(i < parts.length - 1 ? `${part}/` : part);
+		if (i < parts.length - 1) el.createEl('wbr');
+	});
+}
+
+const KIND_ICON: Record<ChangeProposal['kind'], string> = {
+	create: 'file-plus',
+	edit: 'file-pen',
+	folder: 'folder-plus',
+	move: 'file-symlink',
+	frontmatter: 'list',
+};
+
+/** Create, Edit, New folder, Properties, and Rename or Move (a rename keeps the folder). */
+function kindLabel(p: ChangeProposal): string {
+	switch (p.kind) {
+		case 'create':
+			return 'Create';
+		case 'edit':
+			return 'Edit';
+		case 'folder':
+			return 'New folder';
+		case 'frontmatter':
+			return 'Properties';
+		case 'move':
+			return parentFolder(p.path) === parentFolder(p.newPath ?? '') ? 'Rename' : 'Move';
+	}
+}
+
+/** The stats row's text: lines for a text change, properties for a frontmatter change, nothing for a move or folder. */
+function statsText(core: DragonglassCore, p: ChangeProposal): string {
+	if (p.kind === 'frontmatter') return plural(p.properties?.length ?? 0, 'property', 'properties');
+	if (p.kind === 'move' || p.kind === 'folder') return '';
+	const stats = diffStats(core.proposals.diff(p));
+	return `+${stats.added} −${stats.removed} lines`;
+}
+
+/** What a move does: from, to, and the notes whose links Obsidian rewrites. */
+function renderMove(app: App, p: ChangeProposal, container: HTMLElement): void {
+	const box = container.createDiv({ cls: 'dg-move' });
+	const row = (label: string, path: string) => {
+		const r = box.createDiv({ cls: 'dg-move-row' });
+		r.createSpan({ cls: 'dg-move-label', text: label });
+		appendPath(r.createSpan({ cls: 'dg-move-path' }), path);
+	};
+	row('From', p.path);
+	row('To', p.newPath ?? '');
+	const links = p.linkUpdates ?? [];
+	const note = box.createDiv({ cls: 'dg-move-links' });
+	if (links.length === 0) {
+		note.setText(baseName(p.path) === baseName(p.newPath ?? '') ? 'No links need to change.' : 'No other notes link to it.');
+		return;
+	}
+	note.setText(
+		p.status === 'applied'
+			? `Obsidian updated the links to it in ${plural(links.length, 'note')}, unless you chose not to when it asked:`
+			: `Obsidian will update the links to it in ${plural(links.length, 'note')}, and asks first if "Automatically update internal links" is off:`,
+	);
+	const list = note.createEl('ul', { cls: 'dg-move-link-list' });
+	for (const path of links) {
+		const a = list.createEl('li').createEl('a', { text: path, href: '#' });
+		a.addEventListener('click', (e) => {
+			e.preventDefault();
+			void app.workspace.openLinkText(path, '', false);
+		});
+	}
 }
 
 /** Summary, stats, diff and the proposal's own approve / reject / revert controls. The status goes on the stats row unless the title already shows it. */
@@ -137,23 +219,15 @@ function renderDetails(
 ): void {
 	container.createDiv({ cls: 'dg-proposal-summary', text: proposal.summary });
 
-	const lines = core.proposals.diff(proposal);
-	const stats = diffStats(lines);
-	const statsRow = container.createDiv({ cls: 'dg-proposal-stats' });
-	statsRow.createSpan({ text: `+${stats.added} −${stats.removed} lines${showStatus ? ' · ' : ''}` });
-	if (showStatus) statsRow.createSpan({ cls: `dg-proposal-status dg-status-${proposal.status}`, text: statusLabel(proposal.status) });
-
-	const diffEl = container.createEl('pre', { cls: 'dg-diff' });
-	const hunks = toHunks(lines, 3);
-	for (const hunk of hunks) {
-		if (hunk.skippedBefore > 0) diffEl.createDiv({ cls: 'dg-diff-skip', text: `… ${hunk.skippedBefore} unchanged lines` });
-		for (const line of hunk.lines) {
-			const row = diffEl.createDiv({ cls: `dg-diff-line dg-diff-${line.op}` });
-			row.createSpan({ cls: 'dg-diff-sign', text: line.op === 'add' ? '+' : line.op === 'del' ? '−' : ' ' });
-			row.createSpan({ cls: 'dg-diff-text', text: line.text });
-		}
+	const stats = statsText(core, proposal);
+	if (stats || showStatus) {
+		const statsRow = container.createDiv({ cls: 'dg-proposal-stats' });
+		if (stats) statsRow.createSpan({ text: `${stats}${showStatus ? ' · ' : ''}` });
+		if (showStatus) statsRow.createSpan({ cls: `dg-proposal-status dg-status-${proposal.status}`, text: statusLabel(proposal.status) });
 	}
-	if (hunks.length === 0) diffEl.createDiv({ cls: 'dg-diff-skip', text: '(no visible changes)' });
+
+	if (proposal.kind === 'move') renderMove(app, proposal, container);
+	else if (proposal.kind !== 'folder') renderDiff(core, proposal, container);
 
 	const actions = container.createDiv({ cls: 'dg-proposal-actions' });
 	if (proposal.status === 'pending' || proposal.status === 'stale') {
@@ -166,7 +240,7 @@ function renderDetails(
 			approve.disabled = true;
 			void core
 				.approveProposal(conv, proposal)
-				.then(() => new Notice(`Applied change to ${proposal.path}`))
+				.then(() => new Notice(appliedNotice(proposal)))
 				.catch((e: unknown) => new Notice(e instanceof ProposalError ? e.message : `Could not apply: ${String(e)}`))
 				.finally(onChange);
 		});
@@ -175,7 +249,15 @@ function renderDetails(
 			core.rejectProposal(conv, proposal);
 			onChange();
 		});
-	} else if (proposal.status === 'applied' && proposal.kind === 'edit') {
+	} else if (proposal.status === 'applied' && !revertible(proposal)) {
+		actions.createSpan({
+			cls: 'dg-proposal-note',
+			text:
+				proposal.kind === 'folder'
+					? 'Revert and Undo all do not remove a new folder. Delete it yourself if you do not want it.'
+					: 'Revert does not delete a new note. Delete it yourself if you do not want it.',
+		});
+	} else if (proposal.status === 'applied') {
 		const revert = actions.createEl('button', { text: 'Revert' });
 		revert.addEventListener('click', () => {
 			revert.disabled = true;
@@ -189,6 +271,34 @@ function renderDetails(
 	if (proposal.error) actions.createSpan({ cls: 'dg-proposal-warning', text: proposal.error });
 }
 
+/** The change as diff lines: the note's text, or for properties each one's old and new value. */
+function renderDiff(core: DragonglassCore, proposal: ChangeProposal, container: HTMLElement): void {
+	const diffEl = container.createEl('pre', { cls: 'dg-diff' });
+	const hunks = toHunks(core.proposals.diff(proposal), 3);
+	for (const hunk of hunks) {
+		if (hunk.skippedBefore > 0) diffEl.createDiv({ cls: 'dg-diff-skip', text: `… ${hunk.skippedBefore} unchanged lines` });
+		for (const line of hunk.lines) {
+			const row = diffEl.createDiv({ cls: `dg-diff-line dg-diff-${line.op}` });
+			row.createSpan({ cls: 'dg-diff-sign', text: line.op === 'add' ? '+' : line.op === 'del' ? '−' : ' ' });
+			row.createSpan({ cls: 'dg-diff-text', text: line.text });
+		}
+	}
+	if (hunks.length === 0) diffEl.createDiv({ cls: 'dg-diff-skip', text: '(no visible changes)' });
+}
+
+function appliedNotice(p: ChangeProposal): string {
+	switch (p.kind) {
+		case 'create':
+			return `Created ${p.path}`;
+		case 'folder':
+			return `Created the folder ${p.path}`;
+		case 'move':
+			return `Moved ${p.path} to ${p.newPath ?? ''}`;
+		default:
+			return `Applied change to ${p.path}`;
+	}
+}
+
 /** "2 awaiting review · 1 applied", in status order. */
 function statusCounts(batch: readonly ChangeProposal[]): string {
 	const order: ChangeProposal['status'][] = ['pending', 'stale', 'applied', 'rejected', 'reverted', 'failed'];
@@ -200,8 +310,15 @@ function statusCounts(batch: readonly ChangeProposal[]): string {
 		.join(' · ');
 }
 
-function plural(n: number, noun: string): string {
-	return `${n} ${noun}${n === 1 ? '' : 's'}`;
+/** "3 notes", "1 folder", or "3 notes and 1 folder". */
+function across(notes: number, folders: number): string {
+	if (folders === 0) return plural(notes, 'note');
+	if (notes === 0) return plural(folders, 'folder');
+	return `${plural(notes, 'note')} and ${plural(folders, 'folder')}`;
+}
+
+function plural(n: number, noun: string, many = `${noun}s`): string {
+	return `${n} ${n === 1 ? noun : many}`;
 }
 
 function statusLabel(status: ChangeProposal['status']): string {

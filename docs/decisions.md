@@ -370,3 +370,49 @@ The adapter sits behind a small `WebSearchService` interface (query,
 domains, result count) so another service, Exa being the runner-up, is one
 file. No live Tavily key was available when this was built; the client
 follows Tavily's API reference and the fake server answers in that shape.
+
+## 19. Folder, move, property and section changes are proposals too
+
+Creating a folder, moving or renaming a note, changing its properties and
+rewriting one section by heading go through `ProposalEngine` like any edit:
+the tool proposes, the user reviews and approves, and apply re-checks the
+vault first. They join the turn's batch review and its one-proposal-per-note
+rule; a move claims both its old and its new path. Approve all writes new
+folders first, then note contents, then moves, so a note can go into a new
+folder and an edit to a note that links to a moved note is checked against
+the text it was proposed on before Obsidian rewrites that link. Undo all
+goes newest first, so moves are undone before the notes whose links they
+rewrote, and those notes are checked when they are undone rather than up
+front.
+
+A move goes through `FileManager.renameFile`, so links follow the user's
+"Automatically update internal links" setting; with it off, Obsidian asks
+in its own dialog and the apply waits for the answer. The review lists the
+notes whose link text changes: every note linking to it when the name
+changes or the new name is shared, otherwise those that link by path.
+Undoing a move moves the note back (Obsidian rewrites the links again, in
+the user's link format) and removes a folder the move created while it is
+empty. Forcing link updates regardless of the setting was rejected: the
+setting is the user's statement of how renames should behave.
+
+Property changes go through `FileManager.processFrontMatter`, so Obsidian
+writes the YAML. Because its output is not known before the write, the
+review shows each property's old and new value instead of a text diff, and
+the guard inside the write is per property: each changed property must
+still hold the value reviewed. A text value given for a number or checkbox
+property keeps that type when it spells one. Undo restores the snapshot
+when the note is exactly as written, and otherwise puts each property back
+through `processFrontMatter` while it still holds the written value, so an
+edit elsewhere in the note, including a link Obsidian rewrote, survives.
+
+Section replace is an operation of `propose_edit_note` (`replace_section`)
+rather than its own tool, so every text change to one note stays one
+proposal and one diff. A section runs from its heading to the next heading
+of the same or a higher level; headings in frontmatter and fenced code do
+not count. A missing heading is refused with the note's headings listed,
+and an ambiguous one with each candidate and the heading it sits under,
+which the model can name as `Act Two > Notes`.
+
+A new folder is never removed by Revert or Undo all, as a created note is
+never removed by Revert; the review says so. Rolling back a failed Approve
+all does remove a folder it just created while the folder is empty.

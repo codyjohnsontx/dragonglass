@@ -38,7 +38,9 @@ src/
                           against what tool results and context showed.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
-                          active note, propose create, propose edit).
+                          active note, and the propose tools: create note,
+                          edit note, update frontmatter, move note, create
+                          folder).
     web-tools.ts          web_search (waits for the user's approval) and
                           read_web_page (up to 3 results per approved search).
   web/
@@ -55,12 +57,17 @@ src/
                           vault events, serializes builds and searches.
   vault/
     port.ts               Narrow VaultPort interface over Obsidian's vault,
-                          including trashing a note (never `Vault.delete`).
+                          including trashing a note (never `Vault.delete`),
+                          moving one through `FileManager.renameFile` and
+                          changing properties through `processFrontMatter`.
     obsidian-port.ts      VaultPort + StoreBackend implemented on App.
     paths.ts              Path validation at the trust boundary.
     proposals.ts          ChangeProposal model and ProposalEngine
                           (propose, diff, freshness check, apply, revert, and
-                          the all-or-nothing batch apply and undo with rollback).
+                          the all-or-nothing batch apply and undo with rollback)
+                          for note creates and edits, folders, moves and
+                          property changes.
+    sections.ts           Headings of a note and replacing one section by heading.
     diff.ts               Line diff (LCS) and hunk collapsing for review.
   persistence/
     conversation.ts       Stored conversation/message model and sanitizer;
@@ -99,7 +106,8 @@ src/
    are still streaming.
 4. Each tool call is validated against the tool's JSON schema
    (`agent/tools.ts`). Only then does the tool run. Read tools return text.
-   Write tools return a `ChangeProposal` and *do not write*. A tool registry
+   Write tools return a `ChangeProposal` and *do not write* (see "Write
+   proposals" below for the kinds). A tool registry
    lives for one send, and a second proposal for a note whose first proposal
    of that turn is still awaiting review is refused with a tool error telling
    the model to put every change to the note in one call.
@@ -134,6 +142,33 @@ src/
    (the same live tracking that marks a single card), Approve all is disabled
    and the header names the note with a link that scrolls to its section.
 8. When the turn ends the view re-renders it with the answer's sources list.
+
+## Write proposals
+
+A `ChangeProposal` has a kind:
+
+- `create` and `edit` carry the note's text before and after and are
+  reviewed as a line diff. `propose_edit_note` takes find/replace, append,
+  replace-all and `replace_section` operations; a section runs from its
+  heading to the next heading of the same or a higher level, and a missing or
+  ambiguous heading is refused with the headings the model can use
+  (`Act Two > Notes`).
+- `frontmatter` carries the properties changed, each with its value before
+  and after, and is reviewed as those values. It is written by
+  `FileManager.processFrontMatter` after the hash check, with a guard inside
+  the write that each property still holds the reviewed value; `after` is
+  filled with the note as Obsidian wrote it.
+- `move` carries `newPath` and `linkUpdates`, the notes whose link text
+  changes, and is reviewed as from, to and that list. It is written by
+  `FileManager.renameFile`, which updates links as the user's settings say
+  (asking in Obsidian's dialog when "Automatically update internal links" is
+  off). Freshness is the note still at its path and nothing at the new one.
+- `folder` creates an empty folder and is never undone.
+
+Revert undoes an edit or property change, or moves a note back; it does not
+remove a created note or folder. Approve all writes folders, then note
+contents, then moves; Undo all goes newest first, skips folders, and checks a
+note whose links a move rewrote only after that move is undone (decision 19).
 
 ## Web search
 
@@ -238,7 +273,9 @@ nothing on click, so a reply cannot create an empty note.
   note still holds exactly what the batch wrote. Undo all checks every applied
   note the same way before undoing any, newest change first so a note changed
   twice in one turn is checked against its latest change, and trashes created
-  notes under the same rule; per-note revert never removes a note.
+  notes under the same rule; per-note revert never removes a note. Moves,
+  property changes and new folders are proposals under the same rules (see
+  "Write proposals").
 - **Secrets** live in Obsidian's `SecretStorage`; settings persist only the
   secret id. Each cloud adapter reads its own key through a closure at
   request time and never stores it; `registry.ts` wires each provider to its

@@ -1,5 +1,5 @@
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
+import { ActiveContext, LinkRef, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
@@ -94,6 +94,46 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) throw new Error(`No note at ${path}`);
 		await this.app.vault.process(file, fn);
+	}
+
+	async createFolder(path: string): Promise<void> {
+		await this.app.vault.createFolder(path);
+	}
+
+	async moveNote(from: string, to: string): Promise<void> {
+		const file = this.app.vault.getFileByPath(from);
+		if (!file) throw new Error(`No note at ${from}`);
+		if (this.app.vault.getAbstractFileByPath(to)) throw new Error(`A file already exists at ${to}`);
+		const folder = parentFolder(to);
+		if (folder && !this.app.vault.getFolderByPath(folder)) await this.app.vault.createFolder(folder);
+		await this.app.fileManager.renameFile(file, to);
+	}
+
+	async processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string> {
+		const file = this.app.vault.getFileByPath(path);
+		if (!file) throw new Error(`No note at ${path}`);
+		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => fn(fm));
+		return this.app.vault.read(file);
+	}
+
+	linksTo(path: string): LinkRef[] {
+		const refs: LinkRef[] = [];
+		for (const [source, targets] of Object.entries(this.app.metadataCache.resolvedLinks)) {
+			if (source === path || !targets[path]) continue;
+			const file = this.app.vault.getFileByPath(source);
+			const cache = file ? this.app.metadataCache.getFileCache(file) : null;
+			for (const ref of [...(cache?.links ?? []), ...(cache?.embeds ?? []), ...(cache?.frontmatterLinks ?? [])]) {
+				const link = ref.link.split(/[#|]/)[0] ?? '';
+				if (this.app.metadataCache.getFirstLinkpathDest(link, source)?.path === path) refs.push({ source, link });
+			}
+		}
+		return refs;
+	}
+
+	async trashFolder(path: string): Promise<void> {
+		const folder = this.app.vault.getFolderByPath(path);
+		if (!folder) throw new Error(`No folder at ${path}`);
+		await this.app.fileManager.trashFile(folder);
 	}
 
 	/** Obsidian's own trash, honouring the user's "Deleted files" preference; never `Vault.delete`. */

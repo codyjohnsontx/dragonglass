@@ -1,24 +1,59 @@
 import { diffLines, diffStats, DiffLine } from './diff';
 import { hashContent } from './hash';
 import { VaultPort } from './port';
-import { validateVaultPath } from './paths';
+import { baseName, parentFolder, validateVaultPath } from './paths';
+import { replaceSection, SectionError } from './sections';
 
 /**
- * A proposed change to one note. Proposals are created by write tools, shown
- * to the user as a diff, and only applied through `ProposalEngine.apply`
- * after approval. The base hash guards against clobbering edits the user made
- * after the proposal was computed.
+ * What a proposal does: create a note, edit its text, create a folder, move
+ * or rename a note (`FileManager.renameFile`, which updates links to it), or
+ * change its properties (`FileManager.processFrontMatter`).
+ */
+export type ProposalKind = 'create' | 'edit' | 'folder' | 'move' | 'frontmatter';
+
+export const PROPOSAL_KINDS: readonly ProposalKind[] = ['create', 'edit', 'folder', 'move', 'frontmatter'];
+
+/** One property a frontmatter proposal changes. A missing `before` means the note did not have it; a missing `after` means it is removed. */
+export interface PropertyChange {
+	key: string;
+	before?: unknown;
+	after?: unknown;
+}
+
+/** A property the model asks to set or remove, before it is compared with the note. */
+export type PropertyEdit = { key: string; remove: true } | { key: string; remove?: false; value: unknown };
+
+/**
+ * A proposed change to one note or folder. Proposals are created by write
+ * tools, shown to the user for review, and only applied through
+ * `ProposalEngine.apply` after approval. The base hash guards against
+ * clobbering edits the user made after the proposal was computed.
  */
 export interface ChangeProposal {
 	id: string;
 	conversationId: string;
-	kind: 'create' | 'edit';
+	kind: ProposalKind;
+	/** The note (or, for `folder`, the folder) the proposal is about; for `move`, where the note is now. */
 	path: string;
-	/** Content when the proposal was computed; null for create. */
+	/** Content when the proposal was computed; null for create and folder. */
 	before: string | null;
+	/**
+	 * Content after the change: the new note for create and edit, the note
+	 * unchanged for move, empty for folder. For frontmatter it is empty
+	 * while pending, since Obsidian writes the YAML, and set to the note as
+	 * written once applied.
+	 */
 	after: string;
-	/** SHA-256 of `before`, null for create. */
+	/** SHA-256 of `before` for edit and frontmatter; null otherwise. */
 	baseHash: string | null;
+	/** Move: the note's new path. */
+	newPath?: string;
+	/** Move: notes whose links to the note Obsidian rewrites, as computed when proposed and again when applied. */
+	linkUpdates?: string[];
+	/** Move: the outermost folder the move created, removed again when the move is undone and it is still empty. */
+	createdFolder?: string;
+	/** Frontmatter: the properties changed. */
+	properties?: PropertyChange[];
 	summary: string;
 	status: 'pending' | 'applied' | 'rejected' | 'reverted' | 'stale' | 'failed';
 	createdAt: number;
@@ -31,7 +66,8 @@ export interface ChangeProposal {
 export type EditOperation =
 	| { type: 'replace_all'; content: string }
 	| { type: 'append'; content: string }
-	| { type: 'find_replace'; find: string; replace: string; replaceAll?: boolean };
+	| { type: 'find_replace'; find: string; replace: string; replaceAll?: boolean }
+	| { type: 'replace_section'; heading: string; content: string };
 
 export class ProposalError extends Error {
 	constructor(message: string) {
@@ -49,6 +85,8 @@ export interface BatchSummary {
 	changes: number;
 	/** Distinct notes. */
 	notes: number;
+	/** New folders. */
+	folders: number;
 	/** Awaiting review (`pending`) or already known to be out of date (`stale`), in order. */
 	pending: ChangeProposal[];
 	applied: ChangeProposal[];
@@ -56,13 +94,40 @@ export interface BatchSummary {
 	blocker: ChangeProposal | null;
 }
 
+/** Whether Undo all can take an applied proposal back. A new folder is never removed; delete it yourself. */
+export function undoable(p: ChangeProposal): boolean {
+	return p.kind !== 'folder';
+}
+
+/** Whether the per-proposal Revert button applies: created notes and folders are not removed by it. */
+export function revertible(p: ChangeProposal): boolean {
+	return p.kind === 'edit' || p.kind === 'frontmatter' || p.kind === 'move';
+}
+
+/** Every vault path a proposal changes or claims: the note, and for a move its new path too. */
+export function touchedPaths(p: ChangeProposal): string[] {
+	return p.kind === 'move' && p.newPath ? [p.path, p.newPath] : [p.path];
+}
+
+/**
+ * The order a batch is written in: new folders first, so notes can go into
+ * them; then note contents; then moves, so an edit to a note that links to a
+ * moved note is checked against the text it was proposed on, before
+ * Obsidian rewrites that link.
+ */
+function applyOrder(proposals: readonly ChangeProposal[]): ChangeProposal[] {
+	const phase = (p: ChangeProposal) => (p.kind === 'folder' ? 0 : p.kind === 'move' ? 2 : 1);
+	return proposals.map((p, i) => ({ p, i })).sort((a, b) => phase(a.p) - phase(b.p) || a.i - b.i).map(({ p }) => p);
+}
+
 export function summarizeBatch(batch: readonly ChangeProposal[]): BatchSummary {
 	const pending = batch.filter((p) => p.status === 'pending' || p.status === 'stale');
 	return {
 		changes: batch.length,
-		notes: new Set(batch.map((p) => p.path)).size,
+		notes: new Set(batch.filter((p) => p.kind !== 'folder').map((p) => p.path)).size,
+		folders: batch.filter((p) => p.kind === 'folder').length,
 		pending,
-		applied: batch.filter((p) => p.status === 'applied'),
+		applied: batch.filter((p) => p.status === 'applied' && undoable(p)),
 		blocker: pending.find((p) => p.status === 'stale') ?? null,
 	};
 }
@@ -125,7 +190,90 @@ export class ProposalEngine {
 		};
 	}
 
+	/** A new folder, with any missing parents. */
+	proposeFolder(conversationId: string, rawPath: string, summary: string): ChangeProposal {
+		const path = validateVaultPath(rawPath, { markdown: false, configDir: this.vault.configDir });
+		if (/\.md$/i.test(path)) throw new ProposalError(`${path} looks like a note. Use propose_create_note for notes; folders are created as needed.`);
+		if (this.vault.exists(path)) {
+			throw new ProposalError(this.vault.isFolder(path) ? `The folder ${path} already exists.` : `A file already exists at ${path}.`);
+		}
+		return this.base(conversationId, 'folder', path, null, '', null, summary);
+	}
+
+	/** Move or rename a note. Obsidian updates links to it when the move is applied. */
+	async proposeMove(conversationId: string, rawPath: string, rawNewPath: string, summary: string): Promise<ChangeProposal> {
+		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
+		const newPath = validateVaultPath(rawNewPath, { configDir: this.vault.configDir });
+		const content = await this.vault.readNote(path);
+		if (content === null) throw new ProposalError(`No note found at ${path}.`);
+		if (newPath === path) throw new ProposalError('The new path is the same as the current one.');
+		if (this.vault.exists(newPath)) throw new ProposalError(`A file already exists at ${newPath}. Choose another name.`);
+		const proposal = this.base(conversationId, 'move', path, content, content, null, summary);
+		proposal.newPath = newPath;
+		proposal.linkUpdates = this.linkUpdates(path, newPath);
+		return proposal;
+	}
+
+	/**
+	 * Set or remove properties. The change is written by Obsidian's
+	 * `processFrontMatter` when approved; what is reviewed is each property's
+	 * value before and after. A value given as text for a property that is a
+	 * number or a checkbox keeps that type when the text says one.
+	 */
+	async proposeFrontmatter(conversationId: string, rawPath: string, edits: PropertyEdit[], summary: string): Promise<ChangeProposal> {
+		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
+		const before = await this.vault.readNote(path);
+		if (before === null) throw new ProposalError(`No note found at ${path}.`);
+		if (edits.length === 0) throw new ProposalError('No property changes supplied.');
+		const current = this.vault.getMetadata(path)?.frontmatter ?? {};
+		const changes: PropertyChange[] = [];
+		for (const edit of edits) {
+			const key = edit.key.trim();
+			if (key === '' || /[\n\r]/.test(key) || key === 'position') throw new ProposalError(`"${edit.key}" is not a property name that can be changed.`);
+			if (changes.some((c) => c.key === key)) throw new ProposalError(`The property "${key}" is changed more than once. Change each property once.`);
+			const had = Object.prototype.hasOwnProperty.call(current, key);
+			const change: PropertyChange = { key };
+			if (had) change.before = current[key];
+			if (!edit.remove) change.after = keepType(current[key], edit.value);
+			if (had === (change.after !== undefined) && sameValue(change.before, change.after)) continue;
+			changes.push(change);
+		}
+		if (changes.length === 0) throw new ProposalError('The proposed property change makes no changes.');
+		rejectNewPlaceholders(changes.map((c) => formatValue(c.before)).join('\n'), changes.map((c) => formatValue(c.after)).join('\n'));
+		const proposal = this.base(conversationId, 'frontmatter', path, before, '', await hashContent(before), summary);
+		proposal.properties = changes;
+		return proposal;
+	}
+
+	private base(
+		conversationId: string,
+		kind: ProposalKind,
+		path: string,
+		before: string | null,
+		after: string,
+		baseHash: string | null,
+		summary: string,
+	): ChangeProposal {
+		return { id: this.newId(), conversationId, kind, path, before, after, baseHash, summary, status: 'pending', createdAt: this.now() };
+	}
+
+	/**
+	 * Notes whose links Obsidian rewrites when `from` moves to `to`: every
+	 * note linking to it when its name changes or the new name is shared
+	 * with another note (the shortest link then needs a folder), else the
+	 * notes that link to it by path.
+	 */
+	private linkUpdates(from: string, to: string): string[] {
+		const refs = this.vault.linksTo(from);
+		const name = baseName(to).toLowerCase();
+		const shared = this.vault.listMarkdownFiles().some((f) => f.path !== from && f.name.toLowerCase() === name);
+		const all = baseName(from) !== baseName(to) || shared;
+		return [...new Set(refs.filter((r) => all || r.link.includes('/')).map((r) => r.source))].sort();
+	}
+
 	diff(p: ChangeProposal): DiffLine[] {
+		if (p.kind === 'frontmatter') return propertyDiff(p.properties ?? []);
+		if (p.kind === 'folder' || p.kind === 'move') return [];
 		return diffLines(p.before ?? '', p.after);
 	}
 
@@ -138,7 +286,11 @@ export class ProposalEngine {
 	 * the note changed since the proposal was computed.
 	 */
 	async checkFreshness(p: ChangeProposal): Promise<'fresh' | 'stale' | 'missing' | 'exists'> {
-		if (p.kind === 'create') return this.vault.exists(p.path) ? 'exists' : 'fresh';
+		if (p.kind === 'create' || p.kind === 'folder') return this.vault.exists(p.path) ? 'exists' : 'fresh';
+		if (p.kind === 'move') {
+			if (!this.vault.exists(p.path)) return 'missing';
+			return this.vault.exists(p.newPath ?? '') ? 'exists' : 'fresh';
+		}
 		const current = await this.vault.readNote(p.path);
 		if (current === null) return 'missing';
 		return (await hashContent(current)) === p.baseHash ? 'fresh' : 'stale';
@@ -206,11 +358,24 @@ export class ProposalEngine {
 		if (freshness === 'exists') {
 			p.status = 'failed';
 			p.error = 'file already exists';
-			throw new ProposalError(`A file already exists at ${p.path}.`);
+			throw new ProposalError(`A file already exists at ${claimedPath(p)}.`);
 		}
 		try {
 			if (p.kind === 'create') {
 				await this.vault.createNote(p.path, p.after);
+			} else if (p.kind === 'folder') {
+				await this.vault.createFolder(p.path);
+			} else if (p.kind === 'move') {
+				const newPath = p.newPath ?? '';
+				p.linkUpdates = this.linkUpdates(p.path, newPath);
+				const created = this.missingFolder(newPath);
+				if (created) p.createdFolder = created;
+				else delete p.createdFolder;
+				await this.vault.moveNote(p.path, newPath);
+			} else if (p.kind === 'frontmatter') {
+				p.snapshotPath = await this.writeSnapshot(p);
+				// Final guard inside the atomic write: each property still holds what was reviewed.
+				p.after = await this.setProperties(p, 'before', 'after', 'The note changed while applying. Nothing was written.');
 			} else {
 				const snapshotPath = await this.writeSnapshot(p);
 				p.snapshotPath = snapshotPath;
@@ -248,13 +413,17 @@ export class ProposalEngine {
 	 * applied. Returns the proposals applied; resolved ones are skipped.
 	 */
 	async applyAll(batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
-		const pending = batch.filter((p) => p.status === 'pending' || p.status === 'stale');
+		const pending = applyOrder(batch.filter((p) => p.status === 'pending' || p.status === 'stale'));
 		if (pending.length === 0) return [];
-		const repeated = pending.find((p, i) => pending.findIndex((q) => q.path === p.path) !== i);
-		if (repeated) {
-			throw new ProposalError(
-				`Nothing was applied: ${repeated.path} has more than one change waiting in this batch. Approve or reject those changes one at a time.`,
-			);
+		const seen = new Set<string>();
+		for (const p of pending) {
+			const repeated = touchedPaths(p).find((path) => seen.has(path));
+			if (repeated) {
+				throw new ProposalError(
+					`Nothing was applied: ${repeated} has more than one change waiting in this batch. Approve or reject those changes one at a time.`,
+				);
+			}
+			touchedPaths(p).forEach((path) => seen.add(path));
 		}
 		this.claim(pending);
 		try {
@@ -277,7 +446,7 @@ export class ProposalEngine {
 				}
 				written.push(p);
 			}
-			return written;
+			return batch.filter((p) => written.includes(p));
 		} finally {
 			this.release(pending);
 		}
@@ -296,16 +465,37 @@ export class ProposalEngine {
 	 * created note. Returns the proposals undone, in batch order.
 	 */
 	async revertAll(batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
-		const applied = batch.filter((p) => p.status === 'applied');
+		const applied = batch.filter((p) => p.status === 'applied' && undoable(p));
 		if (applied.length === 0) return [];
-		const newestFirst = [...applied].reverse();
+		const order = applyOrder(applied);
+		const newestFirst = order
+			.map((p, i) => ({ p, i }))
+			.sort((a, b) => (b.p.resolvedAt ?? 0) - (a.p.resolvedAt ?? 0) || b.i - a.i)
+			.map(({ p }) => p);
 		this.claim(applied);
 		try {
 			const expected = new Map<string, string | null>();
+			// Where a note's text is read from during the check: a move undone earlier in the walk puts the note back at its old path.
+			const readFrom = new Map<string, string>();
+			const vacated = new Set<string>();
+			const existsThen = (path: string) => readFrom.has(path) || (this.vault.exists(path) && !vacated.has(path));
+			// Notes whose links a move rewrote: moving it back first rewrites them back, so their text is checked only when they are undone.
+			const relinked = new Set<string>();
 			for (const p of newestFirst) {
-				const current = expected.has(p.path) ? (expected.get(p.path) ?? null) : await this.vault.readNote(p.path);
+				if (p.kind === 'move') {
+					const newPath = p.newPath ?? '';
+					if (!existsThen(newPath)) throw new ProposalError(`Nothing was undone: ${newPath} no longer exists.`);
+					if (existsThen(p.path)) throw new ProposalError(`Nothing was undone: a file now exists at ${p.path}, so ${newPath} cannot move back.`);
+					readFrom.set(p.path, readFrom.get(newPath) ?? newPath);
+					readFrom.delete(newPath);
+					vacated.add(newPath);
+					for (const path of p.linkUpdates ?? []) relinked.add(path);
+					continue;
+				}
+				const current = expected.has(p.path) ? (expected.get(p.path) ?? null) : await this.vault.readNote(readFrom.get(p.path) ?? p.path);
 				if (current === null) throw new ProposalError(`Nothing was undone: ${p.path} no longer exists.`);
-				if (current !== p.after) {
+				const unchanged = current === p.after || relinked.has(p.path) || (p.kind === 'frontmatter' && !expected.has(p.path) && this.propertiesHold(p, 'after'));
+				if (!unchanged) {
 					throw new ProposalError(`Nothing was undone: ${p.path} changed after this batch was applied. Undoing would overwrite those changes.`);
 				}
 				expected.set(p.path, p.kind === 'create' ? null : await this.restoreContent(p));
@@ -314,6 +504,8 @@ export class ProposalEngine {
 			for (const p of newestFirst) {
 				try {
 					if (p.kind === 'create') await this.trashCreated(p);
+					else if (p.kind === 'move') await this.undoMove(p);
+					else if (p.kind === 'frontmatter') await this.undoFrontmatter(p, UNDO_CHANGED);
 					else await this.undoEdit(p);
 				} catch (e) {
 					const outcome = await this.redo(undone);
@@ -326,7 +518,7 @@ export class ProposalEngine {
 				p.resolvedAt = this.now();
 				undone.push(p);
 			}
-			return undone.reverse();
+			return batch.filter((p) => undone.includes(p));
 		} finally {
 			this.release(applied);
 		}
@@ -346,6 +538,13 @@ export class ProposalEngine {
 			try {
 				if (p.kind === 'create') {
 					await this.trashCreated(p);
+				} else if (p.kind === 'folder') {
+					if (!this.vault.isFolder(p.path) || !this.emptyTree(p.path)) throw new ProposalError(`${p.path} changed after it was written`);
+					await this.vault.trashFolder(p.path);
+				} else if (p.kind === 'move') {
+					await this.moveBack(p, 'written');
+				} else if (p.kind === 'frontmatter') {
+					await this.undoFrontmatter(p, `${p.path} changed after it was written`);
 				} else {
 					const restore = await this.restoreContent(p);
 					await this.vault.processNote(p.path, (current) => {
@@ -356,6 +555,7 @@ export class ProposalEngine {
 				p.status = 'pending';
 				delete p.resolvedAt;
 				delete p.snapshotPath;
+				if (p.kind === 'frontmatter') p.after = '';
 				outcome.done.push(p);
 			} catch (e) {
 				if (e instanceof ProposalError && /changed after it was written/.test(e.message)) outcome.left.push(p);
@@ -373,6 +573,12 @@ export class ProposalEngine {
 				if (p.kind === 'create') {
 					if (this.vault.exists(p.path)) throw new ProposalError(`${p.path} changed after it was undone`);
 					await this.vault.createNote(p.path, p.after);
+				} else if (p.kind === 'move') {
+					const newPath = p.newPath ?? '';
+					if (!this.vault.exists(p.path) || this.vault.exists(newPath)) throw new ProposalError(`${p.path} changed after it was undone`);
+					await this.vault.moveNote(p.path, newPath);
+				} else if (p.kind === 'frontmatter') {
+					p.after = await this.setProperties(p, 'before', 'after', `${p.path} changed after it was undone`);
 				} else {
 					const restored = await this.restoreContent(p);
 					await this.vault.processNote(p.path, (current) => {
@@ -405,15 +611,20 @@ export class ProposalEngine {
 		return p;
 	}
 
-	/** Restore the snapshot taken when an edit proposal was applied. */
+	/** Undo an applied edit or property change from its snapshot, or move a moved note back. */
 	async revert(p: ChangeProposal): Promise<void> {
 		if (p.status !== 'applied') throw new ProposalError('Only applied proposals can be reverted.');
 		if (p.kind === 'create') {
 			throw new ProposalError('Created notes are not deleted automatically. Delete the note yourself if you do not want it.');
 		}
+		if (p.kind === 'folder') {
+			throw new ProposalError('Created folders are not deleted automatically. Delete the folder yourself if you do not want it.');
+		}
 		this.claim([p]);
 		try {
-			await this.undoEdit(p);
+			if (p.kind === 'move') await this.undoMove(p);
+			else if (p.kind === 'frontmatter') await this.undoFrontmatter(p, UNDO_CHANGED);
+			else await this.undoEdit(p);
 		} finally {
 			this.release([p]);
 		}
@@ -421,14 +632,78 @@ export class ProposalEngine {
 		p.resolvedAt = this.now();
 	}
 
-	private async undoEdit(p: ChangeProposal): Promise<void> {
+	private async undoMove(p: ChangeProposal): Promise<void> {
+		await this.moveBack(p, 'moved');
+	}
+
+	/** Move a moved note back to where it was, while it is still at its new path and nothing has taken the old one. */
+	private async moveBack(p: ChangeProposal, step: 'written' | 'moved'): Promise<void> {
+		const newPath = p.newPath ?? '';
+		if (!this.vault.exists(newPath)) {
+			throw new ProposalError(step === 'written' ? `${newPath} changed after it was written` : `${newPath} no longer exists, so it cannot be moved back.`);
+		}
+		if (this.vault.exists(p.path)) {
+			throw new ProposalError(step === 'written' ? `${p.path} changed after it was written` : `A file now exists at ${p.path}, so ${newPath} cannot be moved back.`);
+		}
+		await this.vault.moveNote(newPath, p.path);
+		if (p.createdFolder && this.vault.isFolder(p.createdFolder) && this.emptyTree(p.createdFolder)) await this.vault.trashFolder(p.createdFolder);
+	}
+
+	/** The outermost folder above `path` that does not exist yet, or null. */
+	private missingFolder(path: string): string | null {
+		let missing: string | null = null;
+		for (let folder = parentFolder(path); folder && !this.vault.exists(folder); folder = parentFolder(folder)) missing = folder;
+		return missing;
+	}
+
+	/** Whether a folder holds nothing but empty folders. */
+	private emptyTree(folder: string): boolean {
+		return (this.vault.listFolder(folder)?.children ?? []).every((c) => this.vault.isFolder(c) && this.emptyTree(c));
+	}
+
+	private async undoEdit(p: ChangeProposal, changed = UNDO_CHANGED): Promise<void> {
 		const restore = await this.restoreContent(p);
 		await this.vault.processNote(p.path, (current) => {
-			if (current !== p.after) {
-				throw new ProposalError('The note changed after this edit was applied. Reverting would overwrite those changes, so nothing was written.');
-			}
+			if (current !== p.after) throw new ProposalError(changed);
 			return restore;
 		});
+	}
+
+	/**
+	 * Undo a property change: restore the snapshot while the note holds
+	 * exactly what was written, else put each property back through
+	 * `processFrontMatter` while it still holds the value written, so a
+	 * change elsewhere in the note (Obsidian rewriting a link after a move,
+	 * an edit to the body) is kept.
+	 */
+	private async undoFrontmatter(p: ChangeProposal, changed: string): Promise<void> {
+		if ((await this.vault.readNote(p.path)) === p.after) {
+			try {
+				return await this.undoEdit(p, changed);
+			} catch (e) {
+				if (!(e instanceof ProposalError)) throw e;
+			}
+		}
+		await this.setProperties(p, 'after', 'before', changed);
+	}
+
+	/** Through `processFrontMatter`: refuse unless each changed property holds its `from` value, then give it its `to` value (absent means removed). Resolves to the note as written. */
+	private setProperties(p: ChangeProposal, from: 'before' | 'after', to: 'before' | 'after', changed: string): Promise<string> {
+		const changes = p.properties ?? [];
+		return this.vault.processFrontMatter(p.path, (fm) => {
+			if (!changes.every((c) => holds(fm, c.key, c[from]))) throw new ProposalError(changed);
+			for (const c of changes) {
+				const value = c[to];
+				if (value === undefined) delete fm[c.key];
+				else fm[c.key] = value;
+			}
+		});
+	}
+
+	/** Whether the note's properties, as the metadata cache has them, hold every changed property's `which` value. */
+	private propertiesHold(p: ChangeProposal, which: 'before' | 'after'): boolean {
+		const fm = this.vault.getMetadata(p.path)?.frontmatter ?? {};
+		return (p.properties ?? []).every((c) => holds(fm, c.key, c[which]));
 	}
 
 	private async writeSnapshot(p: ChangeProposal): Promise<string> {
@@ -449,6 +724,14 @@ export class ProposalEngine {
 	}
 }
 
+const UNDO_CHANGED = 'The note changed after this edit was applied. Reverting would overwrite those changes, so nothing was written.';
+
+/** Whether `fm` has `value` under `key`, where an undefined value means the key is absent. */
+function holds(fm: Record<string, unknown>, key: string, value: unknown): boolean {
+	const has = Object.prototype.hasOwnProperty.call(fm, key);
+	return value === undefined ? !has : has && sameValue(fm[key], value);
+}
+
 /** What a rollback managed: notes put back, notes left because the user had changed them, and notes it could not touch. */
 interface RollbackOutcome {
 	done: ChangeProposal[];
@@ -463,8 +746,51 @@ function freshnessProblem(p: ChangeProposal, freshness: 'stale' | 'missing' | 'e
 		case 'missing':
 			return `${p.path} no longer exists.`;
 		case 'exists':
-			return `a file already exists at ${p.path}.`;
+			return `a file already exists at ${claimedPath(p)}.`;
 	}
+}
+
+/** The path a proposal needs to be free: the new note or folder, or a move's destination. */
+function claimedPath(p: ChangeProposal): string {
+	return p.kind === 'move' ? (p.newPath ?? p.path) : p.path;
+}
+
+/** A property value as the review shows it: text as is, lists as `[a, b]`, anything else as JSON. */
+export function formatValue(value: unknown): string {
+	if (value === undefined) return '';
+	if (typeof value === 'string') return value;
+	if (Array.isArray(value)) return `[${value.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(', ')}]`;
+	return JSON.stringify(value);
+}
+
+/** The review of a property change as diff lines: `key: old` removed, `key: new` added. */
+function propertyDiff(changes: readonly PropertyChange[]): DiffLine[] {
+	const lines: DiffLine[] = [];
+	for (const c of changes) {
+		if (c.before !== undefined) lines.push({ op: 'del', text: `${c.key}: ${formatValue(c.before)}` });
+		if (c.after !== undefined) lines.push({ op: 'add', text: `${c.key}: ${formatValue(c.after)}` });
+	}
+	return lines;
+}
+
+/** Deep equality for property values (JSON data). */
+export function sameValue(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (a === undefined || b === undefined || a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => sameValue(v, b[i]));
+	const ka = Object.keys(a);
+	const kb = Object.keys(b);
+	return ka.length === kb.length && ka.every((k) => sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+/** A value given as text for a property that is a number or a checkbox keeps that type when the text spells one. */
+function keepType(existing: unknown, value: unknown): unknown {
+	if (typeof value !== 'string') return value;
+	const text = value.trim();
+	if (typeof existing === 'number' && text !== '' && Number.isFinite(Number(text))) return Number(text);
+	if (typeof existing === 'boolean' && (text === 'true' || text === 'false')) return text === 'true';
+	return value;
 }
 
 /** The sentences after a batch failure, in batch order: "The changes to A and B were rolled back. C was changed after it was written and was left as it is." */
@@ -534,6 +860,14 @@ export function applyOperations(before: string, ops: EditOperation[]): string {
 				}
 				break;
 			}
+			case 'replace_section':
+				try {
+					text = replaceSection(text, op.heading, op.content);
+				} catch (e) {
+					if (e instanceof SectionError) throw new ProposalError(e.message);
+					throw e;
+				}
+				break;
 		}
 	}
 	return text;

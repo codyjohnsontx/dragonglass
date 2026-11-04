@@ -1,5 +1,5 @@
 import { StoreBackend } from '../src/persistence/store';
-import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
+import { ActiveContext, LinkRef, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
 import { baseName, parentFolder } from '../src/vault/paths';
 
 /** In-memory VaultPort + StoreBackend for tests. Mirrors Obsidian semantics closely enough. */
@@ -10,6 +10,8 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	pluginFiles = new Map<string, string>();
 	/** Notes moved to the trash, by their former path, with the content they held. */
 	trashed = new Map<string, string>();
+	/** Folders moved to the trash. */
+	trashedFolders: string[] = [];
 	active: ActiveContext = { path: null, selection: null };
 	private listeners = new Set<(change: VaultChange) => void>();
 	private clock = 1_700_000_000_000;
@@ -105,6 +107,84 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		return Promise.resolve();
 	}
 
+	createFolder(path: string): Promise<void> {
+		if (this.exists(path)) return Promise.reject(new Error(`Folder already exists: ${path}`));
+		let folder: string | null = path;
+		while (folder) {
+			this.folders.add(folder);
+			folder = parentFolder(folder);
+		}
+		this.emit({ type: 'create', path });
+		return Promise.resolve();
+	}
+
+	/**
+	 * Like `FileManager.renameFile` with "Automatically update internal links"
+	 * on: links in other notes that name the old path or the old name are
+	 * rewritten to the new path (shortest form when the new name is unique).
+	 */
+	moveNote(from: string, to: string): Promise<void> {
+		const content = this.files.get(from);
+		if (content === undefined) return Promise.reject(new Error(`No note at ${from}`));
+		if (this.exists(to)) return Promise.reject(new Error(`A file already exists at ${to}`));
+		const refs = this.linksTo(from);
+		this.rename(from, to);
+		const oldName = baseName(from);
+		const unique = [...this.files.keys()].filter((p) => baseName(p) === baseName(to)).length === 1;
+		const target = unique ? baseName(to) : to.replace(/\.md$/, '');
+		for (const source of new Set(refs.map((r) => r.source))) {
+			const text = this.files.get(source);
+			if (text === undefined) continue;
+			const next = text.replace(/\[\[([^\]|#]+)/g, (whole, link: string) => {
+				const l = link.trim();
+				return l === oldName || l === from || l === from.replace(/\.md$/, '') ? `[[${target}` : whole;
+			});
+			if (next !== text) {
+				this.files.set(source, next);
+				this.emit({ type: 'modify', path: source });
+			}
+		}
+		return Promise.resolve();
+	}
+
+	/** Parses and writes a small YAML subset (scalars and lists), enough for tests; Obsidian's own YAML is used in the app. */
+	processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string> {
+		const content = this.files.get(path);
+		if (content === undefined) return Promise.reject(new Error(`No note at ${path}`));
+		const m = /^---\n([\s\S]*?)\n?---\n?/.exec(content);
+		const fm = m ? parseYaml(m[1] ?? '') : {};
+		try {
+			fn(fm);
+		} catch (e) {
+			return Promise.reject(e instanceof Error ? e : new Error(String(e)));
+		}
+		const body = m ? content.slice(m[0].length) : content;
+		const yaml = Object.keys(fm).length > 0 ? `---\n${toYaml(fm)}---\n` : '';
+		const next = yaml + body;
+		this.files.set(path, next);
+		this.emit({ type: 'modify', path });
+		return Promise.resolve(next);
+	}
+
+	linksTo(path: string): LinkRef[] {
+		const refs: LinkRef[] = [];
+		for (const [source, text] of this.files) {
+			if (source === path) continue;
+			for (const m of text.matchAll(/\[\[([^\]|#]+)/g)) {
+				const link = (m[1] as string).trim();
+				if (this.resolveLink(link) === path) refs.push({ source, link });
+			}
+		}
+		return refs;
+	}
+
+	trashFolder(path: string): Promise<void> {
+		if (!this.folders.has(path)) return Promise.reject(new Error(`No folder at ${path}`));
+		this.delete(path);
+		this.trashedFolders.push(path);
+		return Promise.resolve();
+	}
+
 	trashNote(path: string): Promise<void> {
 		const content = this.files.get(path);
 		if (content === undefined) return Promise.reject(new Error(`No note at ${path}`));
@@ -195,11 +275,51 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 function parseFrontmatter(content: string): Record<string, unknown> | null {
 	const m = /^---\n([\s\S]*?)\n---\n/.exec(content);
 	if (!m) return null;
+	return parseYaml(m[1] as string);
+}
+
+function parseScalar(text: string): unknown {
+	const t = text.trim();
+	if (t === '') return null;
+	if (t === 'true' || t === 'false') return t === 'true';
+	if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+	if (/^".*"$/.test(t)) return JSON.parse(t) as unknown;
+	if (t.startsWith('[') && t.endsWith(']')) return t.slice(1, -1).split(',').map((v) => parseScalar(v)).filter((v) => v !== null);
+	return t;
+}
+
+/** `key: value` lines, and `key:` followed by `  - item` lines for lists. */
+function parseYaml(yaml: string): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
-	for (const line of (m[1] as string).split('\n')) {
+	let list: unknown[] | null = null;
+	for (const line of yaml.split('\n')) {
+		const item = /^\s+-\s*(.*)$/.exec(line);
+		if (item && list) {
+			list.push(parseScalar(item[1] as string));
+			continue;
+		}
 		const idx = line.indexOf(':');
 		if (idx < 0) continue;
-		out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+		const key = line.slice(0, idx).trim();
+		const rest = line.slice(idx + 1);
+		if (rest.trim() === '') {
+			list = [];
+			out[key] = list;
+		} else {
+			list = null;
+			out[key] = parseScalar(rest);
+		}
+	}
+	for (const [k, v] of Object.entries(out)) if (Array.isArray(v) && v.length === 0) out[k] = null;
+	return out;
+}
+
+function toYaml(fm: Record<string, unknown>): string {
+	let out = '';
+	for (const [key, value] of Object.entries(fm)) {
+		if (Array.isArray(value)) out += `${key}:\n${value.map((v) => `  - ${String(v)}\n`).join('')}`;
+		else if (value === null) out += `${key}:\n`;
+		else out += `${key}: ${typeof value === 'string' && /^(true|false|-?\d+(\.\d+)?)$/.test(value) ? JSON.stringify(value) : String(value)}\n`;
 	}
 	return out;
 }

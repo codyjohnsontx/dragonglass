@@ -1,5 +1,5 @@
 import type { StoredMessage } from '../persistence/conversation';
-import type { ChangeProposal } from '../vault/proposals';
+import { ChangeProposal, touchedPaths } from '../vault/proposals';
 
 /**
  * Source markers. The model cites a vault note as [[Note name]] and a web
@@ -184,7 +184,7 @@ export function answerSources(
 			if (m.role === 'assistant') assistants.push(m);
 			if (m.role !== 'tool') continue;
 			const proposal = m.proposalId ? proposals[m.proposalId] : undefined;
-			if (proposal) proposed.add(proposal.path);
+			if (proposal) touchedPaths(proposal).forEach((path) => proposed.add(path));
 			for (const s of sanitizeSources(m.sources)) {
 				if (s.kind === 'vault') {
 					if (s.seen === 'full' || !seenEver.has(s.path)) seenEver.set(s.path, s.seen);
