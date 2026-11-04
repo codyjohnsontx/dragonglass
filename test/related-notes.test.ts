@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { userMessage } from '../src/agent/context';
+import { answerSources } from '../src/agent/sources';
 import { ToolRegistry } from '../src/agent/tools';
+import { StoredMessage } from '../src/persistence/conversation';
 import { VaultSearchIndex } from '../src/search/vault-index';
 import { relatedNotes } from '../src/tools/related-notes';
 import { createVaultTools, DEFAULT_TOOL_OPTIONS } from '../src/tools/vault-tools';
+import { baseName } from '../src/vault/paths';
 import { ProposalEngine } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 
@@ -36,11 +40,11 @@ describe('relatedNotes', () => {
 		expect(total).toBe(6);
 		expect(notes.map((n) => [n.path, n.reasons])).toEqual([
 			['Characters/Mira.md', ['links both ways with [[Kael]]', 'both link to [[Fort Ashen]]', 'shares #character']],
-			['Characters/Brann.md', ['linked together with [[Kael]] from 2 notes: [[Siege]], [[Treaty]]', 'shares #character']],
 			['Places/Fort Ashen.md', ['[[Kael]] links to it', 'linked together with [[Kael]] from [[Mira]]']],
-			['Factions/Ember Order.md', ['both link to [[Fort Ashen]]', 'shares #faction/ember']],
+			['Characters/Brann.md', ['linked together with [[Kael]] from 2 notes: [[Siege]], [[Treaty]]', 'shares #character']],
 			['Events/Siege.md', ['links to [[Kael]]']],
 			['Events/Treaty.md', ['links to [[Kael]]']],
+			['Factions/Ember Order.md', ['both link to [[Fort Ashen]]', 'shares #faction/ember']],
 		]);
 		expect(notes.map((n) => n.path)).not.toContain('Unrelated.md');
 	});
@@ -49,7 +53,7 @@ describe('relatedNotes', () => {
 		const forward = related(LORE, 'Characters/Kael.md');
 		const reversed = relatedNotes(new MemoryVaultPort(LORE).linkGraph().reverse(), 'Characters/Kael.md', 10);
 		expect(reversed).toEqual(forward);
-		const [siege, treaty] = forward.notes.slice(-2);
+		const [siege, treaty] = forward.notes.slice(3, 5);
 		expect(siege!.score).toBe(treaty!.score);
 		expect([siege!.path, treaty!.path]).toEqual(['Events/Siege.md', 'Events/Treaty.md']);
 	});
@@ -64,8 +68,8 @@ describe('relatedNotes', () => {
 		for (let i = 0; i < 10; i++) notes[`N${i}.md`] = `N${i}`;
 		const paths = related(notes, 'A.md').notes.map((n) => [n.path, n.reasons]);
 		expect(paths.slice(0, 3)).toEqual([
-			['Index.md', ['links to [[A]]']],
 			['C.md', ['shares #rare']],
+			['Index.md', ['links to [[A]]']],
 			['B.md', ['linked together with [[A]] from [[Index]]']],
 		]);
 	});
@@ -97,7 +101,7 @@ describe('relatedNotes', () => {
 });
 
 describe('related_notes tool', () => {
-	it('lists related notes with reasons, cites them by name and reports them as partly seen', async () => {
+	it('lists related notes with reasons and cites them by name, reporting no sources since it shows no note text', async () => {
 		const r = await tool(LORE).execute({ path: 'Kael' }, ctx);
 		expect(r.isError).toBeUndefined();
 		expect(r.content).toContain('(Resolved Kael.md to Characters/Kael.md; use the full path next time.)');
@@ -105,15 +109,22 @@ describe('related_notes tool', () => {
 		expect(r.content).toContain('1. Mira (Characters/Mira.md)\n   - links both ways with [[Kael]]\n   - both link to [[Fort Ashen]]\n   - shares #character');
 		expect(r.content).toContain('read_note the ones that matter before citing them as [[Name]]');
 		expect(r.content).not.toContain('more related notes not shown');
-		expect(r.sources?.[0]).toEqual({ kind: 'vault', path: 'Characters/Kael.md', seen: 'excerpt' });
-		expect(r.sources?.map((s) => (s.kind === 'vault' ? s.path : ''))).toEqual([
-			'Characters/Kael.md',
-			'Characters/Mira.md',
-			'Characters/Brann.md',
-			'Places/Fort Ashen.md',
-			'Factions/Ember Order.md',
-			'Events/Siege.md',
-			'Events/Treaty.md',
+		expect(r.sources).toBeUndefined();
+	});
+
+	it('leaves a related note cited without being read unverified in the sources list', async () => {
+		const listed = await tool(LORE).execute({ path: 'Kael' }, ctx);
+		expect(listed.content).toContain('Brann (Characters/Brann.md)');
+		const resolve = (link: string) => Object.keys(LORE).find((p) => baseName(p) === link) ?? null;
+		const messages: StoredMessage[] = [
+			userMessage('u1', "What's Kael like?", [], 0),
+			{ id: 'a1', role: 'assistant', content: '', createdAt: 0, toolCalls: [{ id: 't1', name: 'related_notes', argumentsJson: '{"path":"Kael"}' }] },
+			{ id: 'r1', role: 'tool', content: listed.content, createdAt: 0, toolCallId: 't1', sources: listed.sources },
+			{ id: 'a2', role: 'assistant', content: "Brann was Kael's sworn brother [[Brann]]. Kael is gruff [[Kael]].", createdAt: 0 },
+		];
+		expect(answerSources(messages, {}, resolve).lists.get('a2')?.vault).toEqual([
+			{ link: 'Brann', path: 'Characters/Brann.md', status: 'unread' },
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'unread' },
 		]);
 	});
 
@@ -135,7 +146,7 @@ describe('related_notes tool', () => {
 		const t = tool(LORE);
 		const none = await t.execute({ path: 'Unrelated.md' }, ctx);
 		expect(none.content).toBe('No notes share links or tags with [[Unrelated]] (Unrelated.md).');
-		expect(none.sources).toEqual([{ kind: 'vault', path: 'Unrelated.md', seen: 'excerpt' }]);
+		expect(none.sources).toBeUndefined();
 		const missing = await t.execute({ path: 'Nobody' }, ctx);
 		expect(missing.isError).toBe(true);
 		expect(missing.sources).toBeUndefined();

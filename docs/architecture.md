@@ -145,8 +145,8 @@ write its own sources list.
 
 Read tools report what they showed as `Source`s on their result: `read_note`
 and `get_active_note` the note they read, `search_notes` each listed note as an
-excerpt or, when its text was auto-read, in full, and `related_notes` the note
-asked about and each related note as an excerpt. A web tool reports each page
+excerpt or, when its text was auto-read, in full; `related_notes` shows no
+note text and reports none. A web tool reports each page
 as `{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
 message records the notes sent as context the same way: attachments and the
 active note in full, a selection as an excerpt of its note. They count for

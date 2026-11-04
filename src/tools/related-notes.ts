@@ -10,11 +10,13 @@ import { baseName } from '../vault/paths';
  * - shared outgoing links: both link to the same note;
  * - shared tags (compared case-insensitively, as Obsidian does).
  *
- * A direct link scores `DIRECT_LINK` per direction. Each shared neighbour
- * (the citing note, the shared target, the tag) scores 1 / ln(its degree),
- * the Adamic-Adar weighting: a tag on two notes or a note cited by two notes
- * says much more than a tag on half the vault or an index note that links to
- * everything. The order is deterministic: score, then path.
+ * Each shared neighbour (the citing note, the shared target, the tag) scores
+ * 1 / ln(its degree), the Adamic-Adar weighting: a tag on two notes or a note
+ * cited by two notes says much more than a tag on half the vault or an index
+ * note that links to everything. A direct link scores `DIRECT_LINK` times the
+ * same weight of the linking note's out-degree, per direction, so a link from
+ * an index or list note counts little. The order is deterministic: score,
+ * then path.
  */
 
 export interface RelatedNote {
@@ -24,14 +26,16 @@ export interface RelatedNote {
 	reasons: string[];
 }
 
-/** Score of a direct link, per direction: above any one shared neighbour (at most 1 / ln 2). */
+/** Score of a direct link, per direction, before damping by the linking note's out-degree. */
 const DIRECT_LINK = 2;
 /** Notes or tags named in one reason before "and N more". */
 const NAMED_PER_REASON = 3;
 
 interface Evidence {
-	linksTo: boolean;
-	linkedFrom: boolean;
+	/** Weight of its link to the target, 0 if none. */
+	linksTo: number;
+	/** Weight of the target's link to it, 0 if none. */
+	linkedFrom: number;
 	/** Notes linking to both, with their weight. */
 	citedBy: Map<string, number>;
 	/** Notes both link to, with their weight. */
@@ -61,15 +65,15 @@ export function relatedNotes(graph: NoteLinks[], target: string, limit: number):
 	const evidence = (path: string): Evidence => {
 		let e = found.get(path);
 		if (!e) {
-			e = { linksTo: false, linkedFrom: false, citedBy: new Map(), sharedLinks: new Map(), sharedTags: new Map() };
+			e = { linksTo: 0, linkedFrom: 0, citedBy: new Map(), sharedLinks: new Map(), sharedTags: new Map() };
 			found.set(path, e);
 		}
 		return e;
 	};
 	const linked = out.get(target) ?? [];
 	const linking = inbound.get(target) ?? [];
-	for (const p of linked) evidence(p).linkedFrom = true;
-	for (const p of linking) evidence(p).linksTo = true;
+	for (const p of linked) evidence(p).linkedFrom = DIRECT_LINK * weight(linked.length);
+	for (const p of linking) evidence(p).linksTo = DIRECT_LINK * weight(out.get(p)?.length ?? 1);
 	for (const citing of linking) {
 		const cited = out.get(citing) ?? [];
 		for (const p of cited) if (p !== target) evidence(p).citedBy.set(citing, weight(cited.length));
@@ -89,13 +93,13 @@ export function relatedNotes(graph: NoteLinks[], target: string, limit: number):
 	return { notes: ranked.slice(0, Math.max(0, limit)), total: ranked.length };
 }
 
-/** Adamic-Adar weight of a shared neighbour with `degree` connections (at least 2, since both notes share it). */
+/** Adamic-Adar weight of a neighbour with `degree` connections, counted as at least 2. */
 function weight(degree: number): number {
 	return 1 / Math.log(Math.max(2, degree));
 }
 
 function score(e: Evidence): number {
-	let s = (e.linksTo ? DIRECT_LINK : 0) + (e.linkedFrom ? DIRECT_LINK : 0);
+	let s = e.linksTo + e.linkedFrom;
 	for (const w of [...e.citedBy.values(), ...e.sharedLinks.values(), ...e.sharedTags.values()]) s += w;
 	// Rounded so equal evidence reached in a different order ties exactly and falls back to the path.
 	return Math.round(s * 1e9) / 1e9;
@@ -104,9 +108,9 @@ function score(e: Evidence): number {
 function reasons(e: Evidence, target: string): string[] {
 	const t = link(target);
 	const out: string[] = [];
-	if (e.linksTo && e.linkedFrom) out.push(`links both ways with ${t}`);
-	else if (e.linkedFrom) out.push(`${t} links to it`);
-	else if (e.linksTo) out.push(`links to ${t}`);
+	if (e.linksTo > 0 && e.linkedFrom > 0) out.push(`links both ways with ${t}`);
+	else if (e.linkedFrom > 0) out.push(`${t} links to it`);
+	else if (e.linksTo > 0) out.push(`links to ${t}`);
 	if (e.citedBy.size > 0) {
 		const from = named(e.citedBy, link);
 		out.push(e.citedBy.size === 1 ? `linked together with ${t} from ${from}` : `linked together with ${t} from ${e.citedBy.size} notes: ${from}`);
