@@ -243,6 +243,26 @@ export class DragonglassSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Web search',
+				items: [
+					{
+						name: 'About',
+						desc: 'When the vault does not have an answer, the model can search the web through Tavily, the same way for every provider including Ollama. Each search waits for your approval in the chat, where you can change the search words, and one approval lets the model read up to 3 of the result pages. Without a key there is no web search.',
+					},
+					{
+						name: 'Tavily API key',
+						desc: 'A key from tavily.com (the free plan has 1,000 searches a month, no card). Stored in Obsidian\'s keychain (Settings → General → Keychain), never in plugin files or notes. Sent only to Tavily, never to the pages read.',
+						control: { type: 'secret', key: 'webSearch.apiKeySecretId' },
+					},
+					{
+						name: 'Preferred sites',
+						desc: 'Optional. Sites to search first, one per line, for example a game\'s wiki. Only when they have nothing does the search widen to the whole web, which uses a second search credit.',
+						control: { type: 'textarea', key: 'webSearch.preferredSites', placeholder: 'example.fandom.com', rows: 4 },
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'Usage',
 				items: [
 					{
@@ -278,7 +298,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'What is sent',
-						desc: 'Only your message, the context you attach (highlighted in the sidebar), and the results of tools the model calls are sent, and only to the provider you configured. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
+						desc: 'Only your message, the context you attach (highlighted in the sidebar), and the results of tools the model calls are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
 					},
 				],
 			},

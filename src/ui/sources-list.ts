@@ -17,7 +17,8 @@ export function renderSourcesList(parent: HTMLElement, sources: AnswerSources): 
 	}
 	if (sources.web.length > 0) {
 		box.createDiv({ cls: 'dg-sources-heading', text: 'From the web' });
-		const list = box.createEl('ol', { cls: 'dg-sources-list' });
+		// Each item carries its own "web N" label, so the list shows no numbers of its own.
+		const list = box.createEl('ol', { cls: 'dg-sources-list dg-sources-web' });
 		for (const { n, source } of sources.web) {
 			const item = list.createEl('li', { attr: { value: String(n) } });
 			item.createSpan({ cls: 'dg-cite-web', text: `web ${n}` });

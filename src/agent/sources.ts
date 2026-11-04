@@ -68,7 +68,7 @@ export interface AnswerSources {
 	vault: VaultEntry[];
 	/** Cited web pages in number order. */
 	web: WebEntry[];
-	/** Web sources shown this turn, for turning [web N] markers into links. */
+	/** Web sources shown so far in the conversation, for turning [web N] markers into links. */
 	webSources: WebSource[];
 }
 
@@ -147,7 +147,9 @@ export function sanitizeSources(raw: unknown): Source[] {
  * turn), or when this turn's attached context did (attached context is sent
  * with its own turn only); a note sent only as a selection counts as an
  * excerpt. Links to notes the turn proposed changes to are left out. Web
- * numbers are per turn, as the tools number them.
+ * numbers run across the conversation, as the web tools number them, so a
+ * turn may cite a page an earlier turn's search found (its result is
+ * replayed); a number no result gave so far is unverified.
  * A turn whose user message has no sources record predates source markers
  * and gets no list; after one, a cited note the record does not show as read
  * is unchecked rather than unread, since the unrecorded turn may have shown it.
@@ -160,13 +162,13 @@ export function answerSources(
 	const lists = new Map<string, AnswerSources>();
 	const webByMessage = new Map<string, WebSource[]>();
 	const seenEver = new Map<string, 'full' | 'excerpt'>();
+	const webEver: WebSource[] = [];
 	let historyRecorded = true;
 
 	let i = 0;
 	while (i < messages.length) {
 		const turnContext = new Map<string, 'full' | 'excerpt'>();
 		const proposed = new Set<string>();
-		const web: WebSource[] = [];
 		const assistants: StoredMessage[] = [];
 		const user = messages[i]?.role === 'user' ? messages[i]! : null;
 		if (user) {
@@ -187,13 +189,14 @@ export function answerSources(
 				if (s.kind === 'vault') {
 					if (s.seen === 'full' || !seenEver.has(s.path)) seenEver.set(s.path, s.seen);
 				} else {
-					const at = web.findIndex((w) => w.n === s.n);
-					if (at >= 0) web[at] = s;
-					else web.push(s);
+					const at = webEver.findIndex((w) => w.n === s.n);
+					if (at >= 0) webEver[at] = s;
+					else webEver.push(s);
 				}
 			}
 		}
 		if (assistants.length === 0) continue;
+		const web = [...webEver];
 		for (const a of assistants) webByMessage.set(a.id, web);
 		if (!turnRecorded) continue;
 		const seen = (path: string) => {

@@ -14,6 +14,8 @@ import { markUnresolvedLinks, openInternalLink, renderSourcesList } from './sour
 import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
 import { isSendKey, sendShortcutLabel } from './composer-keys';
+import { renderWebSearchApproval } from './web-approval';
+import type { WebSearchDecision, WebSearchRequest } from '../tools/web-tools';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
 
@@ -336,7 +338,8 @@ export class ChatView extends ItemView {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
 				void MarkdownRenderer.render(this.app, linkWebMarkers(m.content, sources?.web ?? []), body, '', this).then(() => markUnresolvedLinks(this.app, body));
 				if (sources?.list) renderSourcesList(wrap, sources.list);
-				this.addCopyButton(wrap, m.content);
+				const actions = this.addCopyButton(wrap, m.content);
+				if (this.conv && sources?.list?.web.some((w) => w.source)) this.renderResearch(this.conv, m, wrap, actions);
 			} else if (sources?.list) {
 				renderSourcesList(wrap, sources.list);
 			}
@@ -417,7 +420,7 @@ export class ChatView extends ItemView {
 	 * A visible Copy button under a reply. It puts the reply's Markdown on the
 	 * clipboard and reads "Copied" for a moment so a click is seen to work.
 	 */
-	private addCopyButton(wrap: HTMLElement, text: string): void {
+	private addCopyButton(wrap: HTMLElement, text: string): HTMLElement {
 		const row = wrap.createDiv({ cls: 'dg-msg-actions' });
 		const btn = row.createEl('button', { cls: 'dg-copy-btn', attr: { 'aria-label': 'Copy reply to clipboard' } });
 		const icon = btn.createSpan();
@@ -442,6 +445,54 @@ export class ChatView extends ItemView {
 					revert = null;
 				}, 1500);
 			});
+		});
+		return row;
+	}
+
+	/**
+	 * Save to vault, on an answer that cites web pages: proposes a research
+	 * note, reviewed in a card under the answer. Once proposed the card
+	 * replaces the button, unless the note was rejected, when it can be
+	 * proposed again.
+	 */
+	private renderResearch(conv: Conversation, m: StoredMessage, wrap: HTMLElement, actions: HTMLElement): void {
+		const proposal = m.researchProposalId ? conv.proposals[m.researchProposalId] : undefined;
+		if (proposal && proposal.status !== 'rejected') {
+			const card = wrap.createDiv({ cls: 'dg-research-review' });
+			card.dataset['proposalId'] = proposal.id;
+			renderProposalCard(this.app, this.core, conv, proposal, card, () => this.renderMessages());
+			return;
+		}
+		const btn = actions.createEl('button', { cls: 'dg-copy-btn dg-save-research', attr: { 'aria-label': 'Propose a research note with this answer and its web sources' } });
+		setIcon(btn.createSpan(), 'file-plus');
+		btn.createSpan({ text: 'Save to vault' });
+		btn.addEventListener('click', () => {
+			btn.disabled = true;
+			const resolve = (link: string) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null;
+			void this.core
+				.proposeResearchNote(conv, m.id, resolve)
+				.then((p) => {
+					if (!p) new Notice('This answer cites no web page, so there is nothing to save.');
+				})
+				.catch((e: unknown) => new Notice(`Could not propose the note: ${e instanceof Error ? e.message : String(e)}`, 10000))
+				.finally(() => {
+					if (this.conv === conv && !this.abort) this.renderMessages();
+					else btn.disabled = false;
+				});
+		});
+	}
+
+	/**
+	 * Ask the user to approve a web search, in the chat below the running
+	 * turn. Stop, or switching conversations, declines it.
+	 */
+	private askWebSearch(conv: Conversation, req: WebSearchRequest, signal: AbortSignal): Promise<WebSearchDecision> {
+		if (signal.aborted || this.conv !== conv) return Promise.resolve({ approved: false });
+		this.runningChip?.querySelector('.dg-chip-label')?.setText('Waiting for your approval to search the web…');
+		const card = this.messagesEl.createDiv({ cls: 'dg-msg dg-web-approval' });
+		this.scrollToBottom();
+		return renderWebSearchApproval(card, req, signal).finally(() => {
+			card.remove();
 		});
 	}
 
@@ -597,6 +648,7 @@ export class ChatView extends ItemView {
 				context,
 				signal: this.abort.signal,
 				onEvent: (ev) => this.onRunEvent(conv, ev),
+				approveWebSearch: (req, signal) => this.askWebSearch(conv, req, signal),
 			});
 		} finally {
 			this.abort = null;
@@ -800,6 +852,7 @@ function argsPreview(json: string): string {
 	try {
 		const parsed = JSON.parse(json) as Record<string, unknown>;
 		const path = parsed['path'] ?? parsed['query'] ?? parsed['folder'];
+		if (typeof parsed['n'] === 'number') return ` (web ${parsed['n']})`;
 		return typeof path === 'string' && path ? ` (${path})` : '';
 	} catch {
 		return '';

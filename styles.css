@@ -217,6 +217,11 @@
 	padding-inline-start: var(--size-4-5);
 }
 
+.dg-sources-web {
+	list-style: none;
+	padding-inline-start: var(--size-4-2);
+}
+
 .dg-source-flag {
 	color: var(--text-faint);
 }
@@ -650,4 +655,61 @@ button.dg-chip {
 	flex: 0 0 auto;
 	font-size: var(--font-ui-smaller);
 	white-space: nowrap;
+}
+
+/* Web search approval: one card per search, below the running turn. */
+.dg-web-approval {
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+	background-color: var(--background-primary);
+}
+
+.dg-web-approval-header {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+	font-weight: var(--font-semibold);
+}
+
+.dg-web-approval-icon {
+	display: inline-flex;
+	color: var(--interactive-accent);
+}
+
+.dg-web-approval-icon svg {
+	width: var(--icon-s);
+	height: var(--icon-s);
+}
+
+.dg-web-approval-label {
+	display: block;
+	margin-top: var(--size-4-2);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.dg-web-approval-input {
+	display: block;
+	width: 100%;
+	margin-top: var(--size-2-1);
+	font-size: var(--font-ui-small);
+}
+
+.dg-web-approval-desc {
+	margin-top: var(--size-2-3);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.dg-web-approval-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-2);
+	margin-top: var(--size-4-2);
+}
+
+.dg-msg-actions {
+	gap: var(--size-2-2);
 }

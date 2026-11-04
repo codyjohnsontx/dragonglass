@@ -12,6 +12,9 @@ import { ConnectionStatus, Provider, ProviderError, ProviderId, Usage } from './
 import { DragonglassSettings } from './settings';
 import { VaultSearchIndex } from './search/vault-index';
 import { createVaultTools } from './tools/vault-tools';
+import { createWebTools, DEFAULT_MAX_PAGE_CHARS, nextWebNumber, WebSearchApprover } from './tools/web-tools';
+import { researchNoteFor } from './web/research-note';
+import { parsePreferredSites, TavilySearch } from './web/search';
 import { ObsidianVaultPort } from './vault/obsidian-port';
 import { ChangeProposal, ProposalEngine } from './vault/proposals';
 
@@ -25,6 +28,8 @@ export interface SendOptions {
 	context: ContextItem[];
 	signal: AbortSignal;
 	onEvent: (ev: RunEvent) => void;
+	/** Asks the user to approve a web search. Without it, or without a Tavily key, the model has no web tools. */
+	approveWebSearch?: WebSearchApprover;
 }
 
 export class DragonglassCore {
@@ -35,6 +40,8 @@ export class DragonglassCore {
 	private readonly providers;
 	private readonly fetchClient = new FetchHttpClient();
 	private readonly requestUrlClient: HttpClient;
+	private readonly webSearch: TavilySearch;
+	private readonly getSecret: (id: string) => string | null;
 	private settings: DragonglassSettings;
 	private readonly saveSettings: () => Promise<void>;
 
@@ -48,6 +55,9 @@ export class DragonglassCore {
 		// After layout ready: Obsidian reports every file as created while it loads the vault.
 		app.workspace.onLayoutReady(() => void this.searchIndex.start());
 		this.requestUrlClient = createRequestUrlClient();
+		this.getSecret = (id) => app.secretStorage.getSecret(id);
+		// Search and page reads go through requestUrl whatever the chat transport: no CORS, and the same for every provider.
+		this.webSearch = new TavilySearch(this.requestUrlClient, () => ({ baseUrl: this.settings.webSearch.baseUrl, apiKey: () => this.webSearchKey() }));
 		this.providers = createProviders(
 			() => (this.settings.transport === 'requestUrl' ? this.requestUrlClient : this.fetchClient),
 			() => this.settings,
@@ -94,6 +104,13 @@ export class DragonglassCore {
 		return loadModelChoices(this.provider(id), signal);
 	}
 
+	/** The Tavily key from SecretStorage, or null when none is set. */
+	private webSearchKey(): string | null {
+		const id = this.settings.webSearch.apiKeySecretId;
+		const key = id ? this.getSecret(id) : null;
+		return key?.trim() ? key : null;
+	}
+
 	/** True when the active provider sends data off the machine. */
 	activeProviderIsRemote(): boolean {
 		return this.provider().capabilities.remote;
@@ -114,7 +131,7 @@ export class DragonglassCore {
 	 * note budgets the read tools apply are the ones computed for that send's
 	 * provider and model, even when two sends overlap.
 	 */
-	private createTools(contextWindow: number | undefined): ToolRegistry {
+	private createTools(contextWindow: number | undefined, web: { approve: WebSearchApprover; firstNumber: number } | null): ToolRegistry {
 		const tools = new ToolRegistry();
 		const maxReadTokens = noteTokenBudget(contextWindow);
 		const options = () => ({
@@ -124,6 +141,19 @@ export class DragonglassCore {
 			autoReadTokens: autoReadBudget(this.settings.autoReadTokens, contextWindow),
 		});
 		for (const t of createVaultTools(this.vault, this.proposals, options, this.searchIndex)) tools.register(t);
+		if (web) {
+			const webTools = createWebTools({
+				search: this.webSearch,
+				http: this.requestUrlClient,
+				approve: web.approve,
+				preferredSites: () => parsePreferredSites(this.settings.webSearch.preferredSites),
+				maxPageChars: Math.min(DEFAULT_MAX_PAGE_CHARS, this.settings.maxCharsPerNote),
+				// Three pages share the room one note read gets.
+				maxPageTokens: maxReadTokens === undefined ? undefined : Math.floor(maxReadTokens / 3),
+				firstNumber: web.firstNumber,
+			});
+			for (const t of webTools) tools.register(t);
+		}
 		return tools;
 	}
 
@@ -148,14 +178,18 @@ export class DragonglassCore {
 		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null);
+		const webReady = this.webSearchKey() !== null && opts.approveWebSearch !== undefined;
+		const webSearch = webReady ? 'available' : 'needs-key';
+		const pastSources = conv.messages.map((m) => m.sources);
+		const webSources = conv.messages.some((m) => m.sources?.some((src) => src.kind === 'web'));
 
 		let current: StoredMessage | null = null;
 		const events = runAgent({
 			provider,
 			model,
-			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map }),
+			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map, webSearch, webSources }),
 			messages,
-			tools: this.createTools(contextWindow),
+			tools: this.createTools(contextWindow, webReady && opts.approveWebSearch ? { approve: opts.approveWebSearch, firstNumber: nextWebNumber(pastSources) } : null),
 			toolsEnabled: this.settings.toolsEnabled,
 			conversationId: conv.id,
 			signal: opts.signal,
@@ -229,6 +263,23 @@ export class DragonglassCore {
 			opts.onEvent(ev);
 		}
 		this.store.touch(conv);
+	}
+
+	/**
+	 * Save to vault: propose a research note for an answer that cites web
+	 * pages. It goes through the ProposalEngine like any new note and is
+	 * reviewed under the answer; nothing is written until the user approves.
+	 * Returns null when the answer cites no web page a search returned.
+	 */
+	async proposeResearchNote(conv: Conversation, messageId: string, resolve: (link: string) => string | null): Promise<ChangeProposal | null> {
+		const note = researchNoteFor(conv.messages, conv.proposals, messageId, resolve, (path) => this.vault.exists(path), new Date());
+		const message = conv.messages.find((m) => m.id === messageId);
+		if (!note || !message) return null;
+		const proposal = await this.proposals.proposeCreate(conv.id, note.path, note.content, 'Research note from a web-sourced answer');
+		conv.proposals[proposal.id] = proposal;
+		message.researchProposalId = proposal.id;
+		this.store.touch(conv);
+		return proposal;
 	}
 
 	/** Total tokens reported by the provider across the conversation. */

@@ -56,6 +56,16 @@ export interface CustomSettings {
 	toolCalling: boolean;
 }
 
+/** The internet fallback. With no key set there is no web search tool. */
+export interface WebSearchSettings {
+	/** Id of the Tavily key in Obsidian's SecretStorage. The key itself is never stored here. */
+	apiKeySecretId: string;
+	/** Sites searched first, one per line; the whole web only when they have nothing. See `parsePreferredSites`. */
+	preferredSites: string;
+	/** Tavily API root. Not in the settings tab; tests point it at the fake server. */
+	baseUrl: string;
+}
+
 export interface DragonglassSettings {
 	activeProvider: ProviderId;
 	ollama: OllamaSettings;
@@ -63,6 +73,7 @@ export interface DragonglassSettings {
 	anthropic: AnthropicSettings;
 	gemini: GeminiSettings;
 	custom: CustomSettings;
+	webSearch: WebSearchSettings;
 	/** Default toggles for new messages. */
 	includeActiveNote: boolean;
 	includeSelection: boolean;
@@ -95,6 +106,7 @@ export const DEFAULT_SETTINGS: DragonglassSettings = {
 	anthropic: { apiKeySecretId: '', model: 'claude-sonnet-5-5', baseUrl: 'https://api.anthropic.com/v1', maxTokens: 8192 },
 	gemini: { apiKeySecretId: '', model: 'gemini-3.8-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
 	custom: { baseUrl: '', model: '', apiKeySecretId: '', auth: 'bearer', authHeader: '', streaming: true, toolCalling: true },
+	webSearch: { apiKeySecretId: '', preferredSites: '', baseUrl: 'https://api.tavily.com' },
 	includeActiveNote: true,
 	includeSelection: true,
 	toolsEnabled: true,
@@ -140,6 +152,12 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 		if (typeof custom['authHeader'] === 'string') out.custom.authHeader = custom['authHeader'];
 		if (typeof custom['streaming'] === 'boolean') out.custom.streaming = custom['streaming'];
 		if (typeof custom['toolCalling'] === 'boolean') out.custom.toolCalling = custom['toolCalling'];
+	}
+	const web = r['webSearch'] as Record<string, unknown> | undefined;
+	if (web && typeof web === 'object') {
+		for (const key of ['apiKeySecretId', 'preferredSites', 'baseUrl'] as const) {
+			if (typeof web[key] === 'string') out.webSearch[key] = web[key];
+		}
 	}
 	for (const key of ['includeActiveNote', 'includeSelection', 'toolsEnabled', 'showUsage'] as const) {
 		if (typeof r[key] === 'boolean') out[key] = r[key];

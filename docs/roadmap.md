@@ -44,36 +44,31 @@ without redesigning the provider or tool architecture.
   sources list under the answer, checked against what the tools showed,
   flags cited notes whose text was not in the model's context. `[web N]`
   and "From the web" are ready for web results.
+- **Internet fallback** through Tavily, the same for every provider: each
+  search waits for the user's approval with its words editable, one approval
+  lets the model read up to 3 result pages as length-capped plain text
+  extracted in-house, web text is framed as untrusted, an optional
+  preferred-sites list is searched first, `[web N]` markers link the pages,
+  and Save to vault proposes a reviewed research note with its sources, the
+  date and `from-web: true`. Not yet run against the live Tavily API.
 
 ## Next
 
-1. **Internet fallback**: when the vault lacks an answer, search the web. Ask
-   before every search, showing the search words, which the user can edit.
-   Dragonglass runs the search itself through one web search service whose
-   key lives in settings, the same way for every provider including local
-   Ollama models, and treats results as untrusted content. One approval lets
-   the model read up to 3 of that search's result pages as length-capped
-   plain text extracted in-house (no runtime dependency). Claims from pages
-   carry `[web N]` markers and the pages appear under "From the web". A
-   "Save to vault" button proposes a reviewed research note with the sources,
-   the date and a from-the-web frontmatter marker. An optional preferred-sites
-   list is searched first, widening to the whole web only if nothing turns
-   up. The search service is Tavily.
-2. **Review outcome to the model**: tell the model on the next turn which of
+1. **Review outcome to the model**: tell the model on the next turn which of
    its proposals were approved, rejected or undone, so it does not assume a
    change it proposed was made. Today it learns only that the user must
    approve.
-3. **More write tools**: create folder, move/rename note, update frontmatter
+2. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-4. **Relationship tools**: "related notes" via shared links, tags and
+3. **Relationship tools**: "related notes" via shared links, tags and
    co-citation; propose wikilinks with reasons.
-5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-6. **Bases**: read and propose `.base` files once the format is stable.
-7. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+5. **Bases**: read and propose `.base` files once the format is stable.
+6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    fused with the keyword index, only if a measurement on a real vault shows
    they help; never required.
-8. **Cost estimates** for paid providers from a maintained price table,
+7. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
-9. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
    been exercised on desktop.
