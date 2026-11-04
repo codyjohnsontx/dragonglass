@@ -4,6 +4,10 @@ import { ActiveContext, InsertTarget, NoteLinks, NoteMetadata, VaultChange, Vaul
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
+/** How long an insert waits for an editor save already in flight to reach the vault, and how often it looks. */
+const SAVE_WAIT_MS = 2000;
+const SAVE_POLL_MS = 50;
+
 /** VaultPort backed by the live Obsidian App. Thin by design; logic lives in the port's callers. */
 export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	readonly configDir: string;
@@ -127,8 +131,11 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	/**
 	 * The editor's text and selection at the moment of an insert. Pending
 	 * edits are saved first so the vault holds what the editor shows and the
-	 * proposal's freshness check passes; a save that fails leaves the text as
-	 * it is and the proposal engine reports the mismatch.
+	 * proposal's freshness check passes. When the editor's own save is already
+	 * writing (the blur from clicking Insert starts one), `save()` returns
+	 * before that write lands, so this waits a short while for the vault to
+	 * catch up. A save that fails or never lands leaves the text as it is and
+	 * the proposal engine reports the mismatch.
 	 */
 	async getInsertTarget(): Promise<InsertTarget | null> {
 		const view = this.markdownView();
@@ -140,6 +147,9 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 			// Reported by the engine's unsaved-changes check.
 		}
 		const editor = view.editor;
+		for (let waited = 0; waited < SAVE_WAIT_MS && (await this.app.vault.cachedRead(file)) !== editor.getValue(); waited += SAVE_POLL_MS) {
+			await new Promise((resolve) => window.setTimeout(resolve, SAVE_POLL_MS));
+		}
 		return {
 			path: file.path,
 			content: editor.getValue(),
