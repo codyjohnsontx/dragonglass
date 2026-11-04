@@ -308,7 +308,7 @@ export function draftingRules(opts: DraftingOptions, toolsEnabled: boolean): str
 		lookup,
 		'- Put the scene text alone in a fenced block that opens with ```draft and closes with ```. Outside the block, in a sentence or two, say what shaped the scene and cite the notes [[Name]]. No [[links]], citations or commentary inside the block.',
 		'- After a draft, a change request ("make Kael colder") is a revision of the latest draft, unless the user names a note to change. Rewrite that draft in full in a ```draft block, starting from its text and keeping its setting, never a partial patch; Dragonglass keeps the earlier versions. Open the block with ```draft new only when the user asks for a different scene.',
-		'- The open note, attached or not, and its sample are context for format and continuity only. For a revision, do not read the open note, rewrite it or propose an edit to it. Do not propose an edit to put a draft in the script; the user inserts it from the chat.',
+		'- The open note, attached or not, and its sample are context for format and continuity only. For a revision, do not read the open note, rewrite it or propose an edit to it. Do not propose an edit or a new note to put a draft in the script; the user inserts it from the chat.',
 	];
 	const note = opts.scriptNote ? `[[${attr(baseName(opts.scriptNote))}]]` : null;
 	switch (opts.format) {

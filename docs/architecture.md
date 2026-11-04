@@ -198,7 +198,7 @@ tools first, put the scene text alone in a fenced block opened with
 notes that shaped it outside the block, treat a change request after a draft
 as a full rewrite of that draft unless the user names a note to change, keep
 the open note as context for format and continuity only, and never propose an
-edit to put a draft in the script. A send that follows a draft also carries
+edit or a new note to put a draft in the script. A send that follows a draft also carries
 the latest draft in full, right before the user's text (`revisionReminder`,
 built for each send and not stored), and a send right after a draft that
 names no note gets no write tools (`followsDraft`). The block

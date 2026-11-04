@@ -180,7 +180,7 @@ describe('drafting rules in the system prompt', () => {
 		expect(s).toContain('Rewrite that draft in full in a ```draft block');
 		expect(s).toContain('```draft new');
 		expect(s).toContain('No [[links]], citations or commentary inside the block');
-		expect(s).toContain('Do not propose an edit to put a draft in the script');
+		expect(s).toContain('Do not propose an edit or a new note to put a draft in the script; the user inserts it from the chat.');
 		expect(s).toContain('Format: Fountain, as no note is open');
 		expect(s).not.toContain('<<<sample');
 		const empty = buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, drafting: draftingFor('Script/Scene 13.md', '') });
