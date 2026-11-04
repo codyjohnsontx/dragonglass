@@ -86,7 +86,8 @@ src/
                           and its screen-reader "Copied" announcement.
     web-approval.ts       The in-chat card that approves a web search, with the
                           search words editable.
-    proposal-card.ts      Diff review card with approve/reject/revert, and the
+    proposal-card.ts      Review card with approve/reject/revert (a diff, or
+                          the property values, move or new folder), and the
                           grouped card for a turn with several proposals
                           (Approve all, Reject all, Undo all).
     note-picker.ts        Fuzzy picker for attaching notes.
@@ -245,8 +246,8 @@ a search excerpt, its properties or a selection), *unread* (not in the
 model's context for this answer: unverified) or *missing* (the link resolves
 to no note), counting tool results from earlier turns, which are replayed,
 and this turn's attached context. Only cited notes are listed, minus notes
-the same turn proposed creating or editing: a link to one names the change,
-not a source. A turn whose user message has no `sources` record was saved
+the same turn proposed changing: a link to one names the change, not a
+source. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always

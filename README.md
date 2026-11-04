@@ -248,7 +248,7 @@ Open the sidebar with the gem icon in the ribbon or the command
   one whose text was not in the model's context for that answer is marked
   unverified, one it saw only part of (a search excerpt, its properties or a
   selection) says so, and a link to a note that does not exist says "no such
-  note". Notes the same answer proposes creating or editing are not listed.
+  note". Notes the same answer proposes changing are not listed.
   Replies saved by an earlier version get no list, and in a conversation that
   has them, later answers leave such notes unflagged rather than guess.
 - When the vault lacks an answer and a Tavily key is set, the model may ask to

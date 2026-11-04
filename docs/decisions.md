@@ -258,8 +258,9 @@ next) rather than stored, so conversations saved before batches existed group
 the same way. The model gets one proposal per note per turn: a second
 `propose_edit_note` or `propose_create_note` for a note whose first proposal
 is still awaiting review is refused with a plain tool error telling it to put
-every change to that note in one call, so each card is one note built against
-what the user sees. Approve all and Undo all are all or nothing: every note in
+every change to that note in one call (decision 20 keeps that advice for
+changes one call can carry), so each card is one note built against what the
+user sees. Approve all and Undo all are all or nothing: every note in
 the batch is checked first, and one out-of-date note means nothing is written
 (or undone) and the error names it; the header also disables Approve all as
 soon as the live freshness tracking knows a note changed, and the click-time
@@ -466,4 +467,6 @@ contains `>` can still be named exactly.
 
 A new folder is never removed by Revert or Undo all, as a created note is
 never removed by Revert; the review says so. Rolling back a failed Approve
-all does remove a folder it just created while the folder is empty.
+all does remove a folder it just created while the folder is empty, and so
+does a move that fails after making its folder, so a refused move leaves the
+vault as it was.

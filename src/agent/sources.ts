@@ -12,7 +12,8 @@ import { ChangeProposal, touchedPaths } from '../vault/proposals';
  * no list: its links stay plain links, unchecked. After such a turn, a cited
  * note the record does not show as read is left unflagged, since the
  * unrecorded turn may have shown it. A link to a note the same turn proposed
- * creating or editing names the change, not a source, and is not listed.
+ * changing, at either path of a move, names the change, not a source, and is
+ * not listed.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
