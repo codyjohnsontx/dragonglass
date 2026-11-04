@@ -40,8 +40,8 @@ describe('relatedNotes', () => {
 		expect(total).toBe(6);
 		expect(notes.map((n) => [n.path, n.reasons])).toEqual([
 			['Characters/Mira.md', ['links both ways with [[Kael]]', 'both link to [[Fort Ashen]]', 'shares #character']],
-			['Places/Fort Ashen.md', ['[[Kael]] links to it', 'linked together with [[Kael]] from [[Mira]]']],
 			['Characters/Brann.md', ['linked together with [[Kael]] from 2 notes: [[Siege]], [[Treaty]]', 'shares #character']],
+			['Places/Fort Ashen.md', ['[[Kael]] links to it', 'linked together with [[Kael]] from [[Mira]]']],
 			['Events/Siege.md', ['links to [[Kael]]']],
 			['Events/Treaty.md', ['links to [[Kael]]']],
 			['Factions/Ember Order.md', ['both link to [[Fort Ashen]]', 'shares #faction/ember']],
@@ -72,6 +72,28 @@ describe('relatedNotes', () => {
 			['Index.md', ['links to [[A]]']],
 			['B.md', ['linked together with [[A]] from [[Index]]']],
 		]);
+	});
+
+	it('ranks every note a well-linked character page names above incidental co-citations and rare tags', () => {
+		const lore = Array.from({ length: 10 }, (_, i) => `L${i}`);
+		const notes: Record<string, string> = {
+			'Kael.md': lore.map((l) => `[[${l}]]`).join(' ') + ' #rare',
+			'Siege.md': '[[Kael]] [[Brann]]',
+			'Brann.md': 'Brann',
+			'Rare.md': 'Rare #rare',
+		};
+		for (const l of lore) notes[`${l}.md`] = l;
+		const ranked = related(notes, 'Kael.md', 25).notes.map((n) => n.path);
+		expect(ranked).toEqual(['Siege.md', ...lore.map((l) => `${l}.md`), 'Brann.md', 'Rare.md']);
+	});
+
+	it('ranks all 40 members a faction note lists above other faction notes sharing its tag', () => {
+		const members = Array.from({ length: 40 }, (_, i) => `M${String(i).padStart(2, '0')}`);
+		const notes: Record<string, string> = { 'Faction.md': members.map((m) => `[[${m}]]`).join(' ') + ' #faction' };
+		for (const m of members) notes[`${m}.md`] = m;
+		for (let i = 1; i <= 5; i++) notes[`F${i}.md`] = `F${i} #faction`;
+		const { notes: ranked } = related(notes, 'Faction.md', 50);
+		expect(ranked.map((n) => n.path)).toEqual([...members.map((m) => `${m}.md`), 'F1.md', 'F2.md', 'F3.md', 'F4.md', 'F5.md']);
 	});
 
 	it('compares tags case-insensitively and names them as the note spells them', () => {
