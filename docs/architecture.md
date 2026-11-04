@@ -136,17 +136,20 @@ Read tools report what they showed as `Source`s on their result: `read_note`
 and `get_active_note` the note they read, `search_notes` each listed note as an
 excerpt or, when its text was auto-read, in full. A web tool reports each page
 as `{ kind: 'web', n, url, title }`, numbered as the model saw it. The user
-message records the notes sent as context (attachments and the active note)
-the same way; they count as read in full for their own turn only, since the
-context block is sent with the latest user message and is not replayed later.
+message records the notes sent as context the same way: attachments and the
+active note in full, a selection as an excerpt of its note. They count for
+their own turn only, since the context block is sent with the latest user
+message and is not replayed later.
 
 `answerSources` (`agent/sources.ts`) walks the stored conversation per user
 turn and checks the answer's citations against that record, not against the
 model's word: a cited note is *read*, *excerpt* (only part of it was shown:
-a search excerpt or its properties), *unread* (not in the model's context for this answer: unverified) or
-*missing* (the link resolves to no note), counting tool results from earlier
-turns, which are replayed, and this turn's attached context. Only cited notes
-are listed. A turn whose user message has no `sources` record was saved
+a search excerpt, its properties or a selection), *unread* (not in the
+model's context for this answer: unverified) or *missing* (the link resolves
+to no note), counting tool results from earlier turns, which are replayed,
+and this turn's attached context. Only cited notes are listed, minus notes
+the same turn proposed creating or editing: a link to one names the change,
+not a source. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always

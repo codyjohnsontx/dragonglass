@@ -1,4 +1,5 @@
 import type { StoredMessage } from '../persistence/conversation';
+import type { ChangeProposal } from '../vault/proposals';
 
 /**
  * Source markers. The model cites a vault note as [[Note name]] and a web
@@ -10,7 +11,8 @@ import type { StoredMessage } from '../persistence/conversation';
  * does not exist as missing. A turn saved before sources were recorded has
  * no list: its links stay plain links, unchecked. After such a turn, a cited
  * note the record does not show as read is left unflagged, since the
- * unrecorded turn may have shown it.
+ * unrecorded turn may have shown it. A link to a note the same turn proposed
+ * creating or editing names the change, not a source, and is not listed.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
@@ -143,12 +145,17 @@ export function sanitizeSources(raw: unknown): Source[] {
  * A note counts as read when a tool result earlier in the conversation, up to
  * the end of this turn, showed its text (tool results are replayed every
  * turn), or when this turn's attached context did (attached context is sent
- * with its own turn only). Web numbers are per turn, as the tools number them.
+ * with its own turn only); a note sent only as a selection counts as an
+ * excerpt. Links to notes the turn proposed changes to are left out. Web numbers are per turn, as the tools number them.
  * A turn whose user message has no sources record predates source markers
  * and gets no list; after one, a cited note the record does not show as read
  * is unchecked rather than unread, since the unrecorded turn may have shown it.
  */
-export function answerSources(messages: StoredMessage[], resolve: LinkResolver): { lists: Map<string, AnswerSources>; web: Map<string, WebSource[]> } {
+export function answerSources(
+	messages: StoredMessage[],
+	proposals: Record<string, ChangeProposal>,
+	resolve: LinkResolver,
+): { lists: Map<string, AnswerSources>; web: Map<string, WebSource[]> } {
 	const lists = new Map<string, AnswerSources>();
 	const webByMessage = new Map<string, WebSource[]>();
 	const seenEver = new Map<string, 'full' | 'excerpt'>();
@@ -156,12 +163,15 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 
 	let i = 0;
 	while (i < messages.length) {
-		const turnContext = new Set<string>();
+		const turnContext = new Map<string, 'full' | 'excerpt'>();
+		const proposed = new Set<string>();
 		const web: WebSource[] = [];
 		const assistants: StoredMessage[] = [];
 		const user = messages[i]?.role === 'user' ? messages[i]! : null;
 		if (user) {
-			for (const s of sanitizeSources(user.sources)) if (s.kind === 'vault') turnContext.add(s.path);
+			for (const s of sanitizeSources(user.sources)) {
+				if (s.kind === 'vault' && turnContext.get(s.path) !== 'full') turnContext.set(s.path, s.seen);
+			}
 			i++;
 		}
 		const turnRecorded = Array.isArray(user?.sources);
@@ -170,6 +180,8 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 			const m = messages[i]!;
 			if (m.role === 'assistant') assistants.push(m);
 			if (m.role !== 'tool') continue;
+			const proposal = m.proposalId ? proposals[m.proposalId] : undefined;
+			if (proposal) proposed.add(proposal.path);
 			for (const s of sanitizeSources(m.sources)) {
 				if (s.kind === 'vault') {
 					if (s.seen === 'full' || !seenEver.has(s.path)) seenEver.set(s.path, s.seen);
@@ -183,8 +195,12 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 		if (assistants.length === 0) continue;
 		for (const a of assistants) webByMessage.set(a.id, web);
 		if (!turnRecorded) continue;
-		const seen = (path: string) => (turnContext.has(path) ? 'full' : seenEver.get(path));
-		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, historyRecorded, web, resolve);
+		const seen = (path: string) => {
+			const sent = turnContext.get(path);
+			const shown = seenEver.get(path);
+			return sent === 'full' || shown === 'full' ? 'full' : (sent ?? shown);
+		};
+		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, historyRecorded, proposed, web, resolve);
 		if (list.vault.length > 0 || list.web.length > 0) lists.set(assistants[assistants.length - 1]!.id, list);
 	}
 	return { lists, web: webByMessage };
@@ -194,6 +210,7 @@ function buildList(
 	answer: string,
 	seen: (path: string) => 'full' | 'excerpt' | undefined,
 	historyRecorded: boolean,
+	proposed: Set<string>,
 	web: WebSource[],
 	resolve: LinkResolver,
 ): AnswerSources {
@@ -202,6 +219,7 @@ function buildList(
 	const citedPaths = new Set<string>();
 	for (const link of cited.notes) {
 		const path = resolve(link);
+		if (isProposed(link, path, proposed)) continue;
 		if (path !== null && citedPaths.has(path)) continue;
 		if (path !== null) citedPaths.add(path);
 		const shown = path === null ? undefined : seen(path);
@@ -212,4 +230,15 @@ function buildList(
 	const byNumber = new Map(web.map((w) => [w.n, w]));
 	const webEntries = [...cited.web].sort((a, b) => a - b).map((n) => ({ n, source: byNumber.get(n) ?? null }));
 	return { vault, web: webEntries, webSources: web };
+}
+
+/** Whether a cited link names a note the turn proposed: by its resolved path, or for a note not created yet, by Obsidian's path-suffix rule. */
+function isProposed(link: string, path: string | null, proposed: Set<string>): boolean {
+	if (path !== null) return proposed.has(path);
+	const wanted = link.toLowerCase().replace(/\.md$/, '');
+	for (const p of proposed) {
+		const candidate = p.toLowerCase().replace(/\.md$/, '');
+		if (candidate === wanted || candidate.endsWith(`/${wanted}`)) return true;
+	}
+	return false;
 }

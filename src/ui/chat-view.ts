@@ -307,7 +307,7 @@ export class ChatView extends ItemView {
 		}
 		// One usage line per user turn, on its last reply, rather than one per tool round.
 		const usage = this.core.getSettings().showUsage ? usageByTurn(this.conv.messages) : new Map<string, TurnUsage>();
-		const sources = answerSources(this.conv.messages, (link) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null);
+		const sources = answerSources(this.conv.messages, this.conv.proposals, (link) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null);
 		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] });
 		this.renderUsage(el);
 		this.scrollToBottom();

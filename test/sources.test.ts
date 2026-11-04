@@ -5,7 +5,7 @@ import { ToolRegistry } from '../src/agent/tools';
 import { StoredMessage } from '../src/persistence/conversation';
 import { VaultSearchIndex } from '../src/search/vault-index';
 import { createVaultTools } from '../src/tools/vault-tools';
-import { ProposalEngine } from '../src/vault/proposals';
+import { ChangeProposal, ProposalEngine } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 
 const NOTES: Record<string, string> = {
@@ -28,6 +28,19 @@ function msg(role: StoredMessage['role'], content: string, extra: Partial<Stored
 const read = (path: string): Source => ({ kind: 'vault', path, seen: 'full' });
 const excerpt = (path: string): Source => ({ kind: 'vault', path, seen: 'excerpt' });
 const web = (n: number, url = `https://example.com/${n}`): WebSource => ({ kind: 'web', n, url, title: `Page ${n}` });
+
+const proposal = (id: string, kind: ChangeProposal['kind'], path: string): ChangeProposal => ({
+	id,
+	conversationId: 'c',
+	kind,
+	path,
+	before: null,
+	after: '',
+	baseHash: null,
+	summary: '',
+	status: 'pending',
+	createdAt: 0,
+});
 
 const note = (kind: ContextItem['kind'], path: string): ContextItem => ({ kind, path, label: path, content: NOTES[path] ?? '' });
 
@@ -66,7 +79,7 @@ describe('answerSources', () => {
 		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'search_notes', argumentsJson: '{}' }] });
 		const tool = msg('tool', 'results', { toolCallId: 't1', sources: [read('Characters/Kael.md'), excerpt('Places/Ashfall.md'), read('Characters/Mira.md')] });
 		const answer = msg('assistant', 'Gruff but loyal [[Kael]]. Grew up in [[Ashfall]]. Rivals [[Vorn]]. Distrusts the Council [[Characters/Kael]].');
-		const { lists } = answerSources([user, step, tool, answer], (l) => (l === 'Vorn' ? null : resolve(l)));
+		const { lists } = answerSources([user, step, tool, answer], {}, (l) => (l === 'Vorn' ? null : resolve(l)));
 		expect(lists.get(step.id)).toBeUndefined();
 		expect(lists.get(answer.id)).toEqual({
 			vault: [
@@ -86,7 +99,7 @@ describe('answerSources', () => {
 		const a1 = msg('assistant', 'She leads the scouts [[Mira]].');
 		const t2 = ask('And Kael?', null, ['Places/Ashfall.md']);
 		const a2 = msg('assistant', 'Mira [[Mira]] trusts him; he is from [[Ashfall]] and is loyal [[Kael]].');
-		const { lists } = answerSources([t1, s1, r1, a1, t2, a2], resolve);
+		const { lists } = answerSources([t1, s1, r1, a1, t2, a2], {}, resolve);
 		expect(lists.get(a1.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'read' }]);
 		expect(lists.get(a2.id)?.vault).toEqual([
 			{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' },
@@ -99,7 +112,7 @@ describe('answerSources', () => {
 		const user = ask('Tighten this scene', 'Characters/Kael.md');
 		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
 		const tool = msg('tool', 'Mira...', { toolCallId: 't1', sources: [read('Characters/Mira.md')] });
-		const { lists } = answerSources([user, step, tool, msg('assistant', 'I would cut the second line.')], resolve);
+		const { lists } = answerSources([user, step, tool, msg('assistant', 'I would cut the second line.')], {}, resolve);
 		expect(lists.size).toBe(0);
 	});
 
@@ -112,7 +125,7 @@ describe('answerSources', () => {
 		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'search_notes', argumentsJson: '{}' }] });
 		const tool = msg('tool', 'results', { toolCallId: 't1', sources: [read('Characters/Mira.md'), excerpt('Places/Ashfall.md')] });
 		const answer = msg('assistant', 'A spear [[Kael]], from [[Ashfall]], made by [[Mira]] or [[Vorn]].');
-		const { lists } = answerSources([old, oldStep, oldTool, oldAnswer, now, step, tool, answer], resolve);
+		const { lists } = answerSources([old, oldStep, oldTool, oldAnswer, now, step, tool, answer], {}, resolve);
 		expect(lists.has(oldAnswer.id)).toBe(false);
 		expect(lists.get(answer.id)?.vault).toEqual([
 			{ link: 'Kael', path: 'Characters/Kael.md', status: 'unchecked' },
@@ -122,17 +135,52 @@ describe('answerSources', () => {
 		]);
 	});
 
-	it('checks every turn the chat sends, recording the notes sent as context but not a selection', () => {
+	it('checks every turn the chat sends, recording the notes sent as context and a selection as an excerpt', () => {
 		const sent = userMessage('u1', 'Who leads the scouts?', [
 			note('active', 'Characters/Kael.md'),
 			{ kind: 'selection', path: 'Places/Ashfall.md', label: 'Selection', content: 'Ashfall' },
 			note('attachment', 'Characters/Mira.md'),
 		], 0);
-		expect(sent.sources).toEqual([read('Characters/Kael.md'), read('Characters/Mira.md')]);
+		expect(sent.sources).toEqual([read('Characters/Kael.md'), excerpt('Places/Ashfall.md'), read('Characters/Mira.md')]);
+		const sentAnswer = msg('assistant', 'Kael [[Kael]] grew up in [[Ashfall]].');
+		expect(answerSources([sent, sentAnswer], {}, resolve).lists.get(sentAnswer.id)?.vault).toEqual([
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read' },
+			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'excerpt' },
+		]);
+		const selectionOnly = userMessage('u3', 'Is this right?', [{ kind: 'selection', path: 'Characters/Kael.md', label: 'Selection', content: 'gruff' }], 0);
+		const selectionAnswer = msg('assistant', 'Yes, he is gruff [[Kael]].');
+		expect(answerSources([selectionOnly, selectionAnswer], {}, resolve).lists.get(selectionAnswer.id)?.vault).toEqual([
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'excerpt' },
+		]);
 		const bare = userMessage('u2', 'Who leads the scouts?', [], 0);
 		expect(bare.sources).toEqual([]);
 		const answer = msg('assistant', 'Mira does [[Mira]].');
-		expect(answerSources([bare, answer], resolve).lists.get(answer.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' }]);
+		expect(answerSources([bare, answer], {}, resolve).lists.get(answer.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' }]);
+	});
+
+	it('leaves out notes the turn proposed creating, before and after approval', () => {
+		const user = ask('Create a note for scene 12 where Kael returns');
+		const step = msg('assistant', '', { toolCalls: [{ id: 'p1', name: 'propose_create_note', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'Proposed creating Scenes/Scene 12.md', { toolCallId: 'p1', proposalId: 'pc', sources: [] });
+		const answer = msg('assistant', 'I proposed [[Scene 12]] for you to review; Kael is loyal [[Kael]].');
+		const proposals = { pc: proposal('pc', 'create', 'Scenes/Scene 12.md') };
+		const before = answerSources([user, step, tool, answer], proposals, resolve);
+		expect(before.lists.get(answer.id)?.vault).toEqual([{ link: 'Kael', path: 'Characters/Kael.md', status: 'unread' }]);
+		const afterApproval = (l: string) => (l === 'Scene 12' ? 'Scenes/Scene 12.md' : resolve(l));
+		const after = answerSources([user, step, tool, answer], proposals, afterApproval);
+		expect(after.lists.get(answer.id)?.vault).toEqual([{ link: 'Kael', path: 'Characters/Kael.md', status: 'unread' }]);
+	});
+
+	it('leaves out notes the turn proposed editing, but not in other turns', () => {
+		const user = ask('Make Kael warmer');
+		const step = msg('assistant', '', { toolCalls: [{ id: 'p1', name: 'propose_edit_note', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'Proposed edit to Characters/Kael.md', { toolCallId: 'p1', proposalId: 'pe' });
+		const answer = msg('assistant', 'I proposed an edit to [[Kael]]; he grew up in [[Ashfall]].');
+		const later = ask('Where is he from?');
+		const laterAnswer = msg('assistant', 'Ashfall, per [[Kael]].');
+		const { lists } = answerSources([user, step, tool, answer, later, laterAnswer], { pe: proposal('pe', 'edit', 'Characters/Kael.md') }, resolve);
+		expect(lists.get(answer.id)?.vault).toEqual([{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'unread' }]);
+		expect(lists.get(laterAnswer.id)?.vault).toEqual([{ link: 'Kael', path: 'Characters/Kael.md', status: 'unread' }]);
 	});
 
 	it('groups cited web pages by number and flags numbers no result gave', () => {
@@ -140,7 +188,7 @@ describe('answerSources', () => {
 		const step = msg('assistant', 'Searching the web.', { toolCalls: [{ id: 'w', name: 'web_search', argumentsJson: '{}' }] });
 		const tool = msg('tool', 'results', { toolCallId: 'w', sources: [web(1), web(2)] });
 		const answer = msg('assistant', 'In 2025 [web 2], per the studio [web 1]; a leak said 2024 [web 5].');
-		const { lists, web: byMessage } = answerSources([user, step, tool, answer], resolve);
+		const { lists, web: byMessage } = answerSources([user, step, tool, answer], {}, resolve);
 		expect(lists.get(answer.id)?.web).toEqual([
 			{ n: 1, source: web(1) },
 			{ n: 2, source: web(2) },

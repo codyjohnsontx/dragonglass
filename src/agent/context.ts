@@ -163,7 +163,8 @@ export function formatContextBlock(items: ContextItem[], maxCharsPerNote: number
 
 /**
  * The stored user message for a send: the context it carried, and as its
- * sources record the notes that context showed the model. The record is
+ * sources record the notes that context showed the model, a selection as an
+ * excerpt of its note. The record is
  * always present, empty when nothing is attached, so the answer's citations
  * are checked.
  */
@@ -178,7 +179,9 @@ export function userMessage(id: string, text: string, context: ContextItem[], cr
 			selection: context.find((c) => c.kind === 'selection')?.content ?? null,
 			attachments: context.filter((c) => c.kind === 'attachment' && c.path).map((c) => ({ path: c.path as string })),
 		},
-		sources: context.filter((c) => c.kind !== 'selection' && c.path).map((c) => ({ kind: 'vault', path: c.path as string, seen: 'full' })),
+		sources: context
+			.filter((c) => c.path)
+			.map((c) => ({ kind: 'vault', path: c.path as string, seen: c.kind === 'selection' ? 'excerpt' : 'full' })),
 	};
 }
 

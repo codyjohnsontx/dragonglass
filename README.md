@@ -223,9 +223,10 @@ Open the sidebar with the gem icon in the ribbon or the command
   each claim, and anything without a source is worded as the model's
   suggestion. Under the answer, **From your vault** lists the cited notes;
   one whose text was not in the model's context for that answer is marked
-  unverified, one it saw only part of (a search excerpt or its properties)
-  says so, and a link to a
-  note that does not exist says "no such note". Replies saved by an earlier
+  unverified, one it saw only part of (a search excerpt, its properties or a
+  selection) says so, and a link to a note that does not exist says "no such
+  note". Notes the same answer proposes creating or editing are not listed.
+  Replies saved by an earlier
   version get no list, and in a conversation that has them, later answers
   leave such notes unflagged rather than guess.
 - Send a message with **Cmd+Enter** (**Ctrl+Enter** on Windows and Linux).
