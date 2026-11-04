@@ -399,7 +399,7 @@ max(1, ln(out-degree)) of the related note, so an index that links to the
 character and to all of its lore collects little from "both link to" either,
 and such notes do not crowd out the connected lore. Path order breaks ties,
 so the result is deterministic; it shows 10 notes by default and at most 25,
-with a count of the rest. The tool lists connections, not text, so it reports no sources:
-the model reads the notes that matter before citing them, and a note it
-cites from the list alone shows as unverified. Embeddings stay out
-(roadmap: semantic retrieval only if measured to help).
+with a count of the rest. The tool lists connections, not text, so it
+reports no sources: the model reads the notes that matter before citing
+them, and a note it cites from the list alone shows as unverified.
+Embeddings stay out (roadmap: semantic retrieval only if measured to help).
