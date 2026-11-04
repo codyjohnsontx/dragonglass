@@ -1,5 +1,6 @@
 import { ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
+import { AnswerSources, answerSources, linkWebMarkers, WebSource } from '../agent/sources';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
 import { Conversation, StoredMessage, TurnUsage, usageByTurn } from '../persistence/conversation';
@@ -9,6 +10,7 @@ import { ActiveContext } from '../vault/port';
 import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
 import { renderProposalCard } from './proposal-card';
+import { markUnresolvedLinks, openInternalLink, renderSourcesList } from './sources-list';
 import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
 import { isSendKey, sendShortcutLabel } from './composer-keys';
@@ -109,6 +111,7 @@ export class ChatView extends ItemView {
 		root.addClass('dragonglass-view');
 		this.headerEl = root.createDiv({ cls: 'dg-header' });
 		this.messagesEl = root.createDiv({ cls: 'dg-messages' });
+		this.registerDomEvent(this.messagesEl, 'click', (evt) => openInternalLink(this.app, evt));
 		this.copyStatusEl = root.createDiv({ cls: 'dg-copy-status', attr: { role: 'status', 'aria-live': 'polite' } });
 		this.contextBarEl = root.createDiv({ cls: 'dg-context-bar' });
 		this.composerEl = root.createDiv({ cls: 'dg-composer' });
@@ -304,7 +307,8 @@ export class ChatView extends ItemView {
 		}
 		// One usage line per user turn, on its last reply, rather than one per tool round.
 		const usage = this.core.getSettings().showUsage ? usageByTurn(this.conv.messages) : new Map<string, TurnUsage>();
-		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id));
+		const sources = answerSources(this.conv.messages, (link) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null);
+		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] });
 		this.renderUsage(el);
 		this.scrollToBottom();
 	}
@@ -314,7 +318,7 @@ export class ChatView extends ItemView {
 	 * (the chip in the summary), so an assistant turn that only called tools
 	 * renders as a bare step: its thinking, if any, and nothing else.
 	 */
-	private renderMessage(m: StoredMessage, parent: HTMLElement, turnUsage?: TurnUsage): HTMLElement {
+	private renderMessage(m: StoredMessage, parent: HTMLElement, turnUsage?: TurnUsage, sources?: { list?: AnswerSources; web: WebSource[] }): HTMLElement {
 		const wrap = parent.createDiv({ cls: `dg-msg dg-msg-${m.role}` });
 		if (m.role === 'user') {
 			wrap.createDiv({ cls: 'dg-msg-body', text: m.content });
@@ -330,8 +334,11 @@ export class ChatView extends ItemView {
 			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
 			if (m.content) {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
-				void MarkdownRenderer.render(this.app, m.content, body, '', this);
+				void MarkdownRenderer.render(this.app, linkWebMarkers(m.content, sources?.web ?? []), body, '', this).then(() => markUnresolvedLinks(this.app, body));
+				if (sources?.list) renderSourcesList(wrap, sources.list);
 				this.addCopyButton(wrap, m.content);
+			} else if (sources?.list) {
+				renderSourcesList(wrap, sources.list);
 			}
 			// A call whose result never arrived (the run died first) has no result row to live on.
 			const unanswered = (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
@@ -633,7 +640,8 @@ export class ChatView extends ItemView {
 					this.liveEl.empty();
 					this.liveEl.addClass('markdown-rendered');
 					if (ev.content) {
-						void MarkdownRenderer.render(this.app, ev.content, this.liveEl, '', this);
+						const live = this.liveEl;
+						void MarkdownRenderer.render(this.app, ev.content, live, '', this).then(() => markUnresolvedLinks(this.app, live));
 						// The run may go on with tool rounds; the reply is copyable as soon as it is complete.
 						if (this.liveEl.parentElement) this.addCopyButton(this.liveEl.parentElement, ev.content);
 					} else if (ev.toolCalls.length > 0) {

@@ -33,6 +33,8 @@ src/
                           feed results back, cap iterations, handle cancel.
     tools.ts              Tool registry and JSON-schema argument validation.
     context.ts            System prompt and provider message construction.
+    sources.ts            Source markers: citations in an answer checked
+                          against what tool results and context showed.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
                           active note, propose create, propose edit).
@@ -55,6 +57,8 @@ src/
   ui/
     chat-view.ts          The sidebar ItemView.
     composer-keys.ts      Which composer keystroke sends (Mod+Enter) and its label.
+    sources-list.ts       The sources list under an answer, and opening
+                          [[links]] in replies.
     copy.ts               Clipboard write behind the per-reply Copy button,
                           and its screen-reader "Copied" announcement.
     proposal-card.ts      Diff review card with approve/reject/revert.
@@ -98,7 +102,35 @@ src/
    project), it lists the notes that result links to, each with an excerpt,
    and auto-reads them right after it within half the auto-read budget.
 6. Every message and proposal is written to the conversation store as it is
-   produced, so a crash mid-turn loses nothing already shown.
+   produced, so a crash mid-turn loses nothing already shown. A tool message
+   also stores the `sources` its result showed the model (see below).
+7. When the turn ends the view re-renders it with the answer's sources list.
+
+## Source markers
+
+The system prompt asks the model to put `[[Note name]]` after each claim
+taken from a note and `[web N]` after each claim taken from a web search
+result (the web rule is added only when web results can be in the
+conversation), to word anything unsourced as its own suggestion, and not to
+write its own sources list.
+
+Read tools report what they showed as `Source`s on their result: `read_note`
+and `get_active_note` the note they read, `search_notes` each listed note as an
+excerpt or, when its text was auto-read, in full. A web tool reports each page
+as `{ kind: 'web', n, url, title }`, numbered as the model saw it. Notes the
+user attached, and the active note sent as context, count as read in full.
+
+`answerSources` (`agent/sources.ts`) walks the stored conversation per user
+turn and checks the answer's citations against that record, not against the
+model's word: a cited note is *read*, *excerpt* (only a search excerpt was
+shown), *unread* (never shown: unverified) or *missing* (the link resolves to
+no note), counting anything shown earlier in the conversation. Notes read in
+full this turn but not cited are listed after the cited ones. Cited `[web N]`
+numbers map to that turn's web sources; a number no result gave is
+unverified. `ui/sources-list.ts` renders the list under the turn's last
+reply, "From your vault" then "From the web", and `[web N]` markers become
+links to their pages. Links to missing notes do nothing on click, so a reply
+cannot create an empty note.
 
 ## Trust boundaries
 

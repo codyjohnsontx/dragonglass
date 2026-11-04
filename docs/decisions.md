@@ -249,3 +249,29 @@ result of two or more words that lacks the other query words, the notes it
 links to are listed with an excerpt and read in full right after it. They get
 at most half the auto-read budget so the ranked results keep the rest; a
 one-word name is a topic, not a person, and does not trigger this.
+
+## 16. Source markers checked against tool results
+
+Answers about the vault are only useful if the user can see where each claim
+came from and tell a read note from a guess. The model cites `[[Note name]]`
+(a working link) or `[web N]` after each sourced claim and words anything
+else as its own suggestion; Dragonglass renders the sources list itself,
+grouped "From your vault" and "From the web".
+
+The list is grounded in what the model was actually shown. Options
+considered: trust the links the model typed; parse note paths back out of the
+stored tool result text; or have each tool report what it showed as
+structured `sources` on its result, stored on the tool message. Typed links
+alone would present a note the model never opened as a source. Parsing result
+text ties the list to output formats that change for the model's sake (search
+results gained auto-read and linked notes within a few releases). Structured
+sources cost one optional field on stored tool messages and let a cited note
+the conversation never showed be marked unverified, and one only seen as a
+search excerpt be marked as such. Conversations saved before this have no
+sources on their tool messages, so their citations show as unverified.
+
+The `[web N]` format, the "From the web" group and `WebSource` exist before any
+web tool so the internet fallback only has to report its pages; the prompt's
+web rule stays off until then so a local model is not told about results it
+cannot get.
+

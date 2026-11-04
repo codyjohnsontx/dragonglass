@@ -1,4 +1,5 @@
 import { ToolCall, Usage } from '../providers/types';
+import type { Source } from '../agent/sources';
 import { ChangeProposal } from '../vault/proposals';
 
 /**
@@ -29,6 +30,8 @@ export interface StoredMessage {
 	toolName?: string;
 	isError?: boolean;
 	proposalId?: string;
+	/** For tool results: the notes and web pages the result showed the model, for the answer's sources list. */
+	sources?: Source[];
 	usage?: Usage;
 	/** Reasoning a thinking model streamed before the answer. Shown collapsed; not replayed in later turns. */
 	thinking?: string;

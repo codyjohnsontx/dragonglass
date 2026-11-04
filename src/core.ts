@@ -207,6 +207,7 @@ export class DragonglassCore {
 						toolName: ev.call.name,
 						isError: ev.result.isError,
 					};
+					if (ev.result.sources?.length) toolMsg.sources = ev.result.sources;
 					if (ev.result.proposal) {
 						conv.proposals[ev.result.proposal.id] = ev.result.proposal;
 						toolMsg.proposalId = ev.result.proposal.id;

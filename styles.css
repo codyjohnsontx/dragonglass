@@ -195,6 +195,57 @@
 }
 
 .dg-msg-note,
+.dg-sources {
+	margin-top: var(--size-4-2);
+	padding-top: var(--size-2-3);
+	border-top: 1px solid var(--background-modifier-border);
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.dg-sources-heading {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+	margin-top: var(--size-2-2);
+}
+
+.dg-sources-heading:first-child {
+	margin-top: 0;
+}
+
+.dg-sources-list {
+	margin: var(--size-2-1) 0 0;
+	padding-inline-start: var(--size-4-5);
+}
+
+.dg-sources-uncited {
+	margin-top: var(--size-2-2);
+	color: var(--text-faint);
+}
+
+.dg-source-flag {
+	color: var(--text-faint);
+}
+
+.dg-source-unread .dg-source-flag,
+.dg-source-missing .dg-source-flag {
+	color: var(--text-warning);
+}
+
+.dragonglass-view a.internal-link.is-unresolved {
+	color: var(--link-unresolved-color);
+	opacity: var(--link-unresolved-opacity);
+	text-decoration-style: var(--link-unresolved-decoration-style);
+	text-decoration-color: var(--link-unresolved-decoration-color);
+	cursor: default;
+}
+
+.dg-cite-web {
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+	color: var(--text-faint);
+}
+
 .dg-msg-usage {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
