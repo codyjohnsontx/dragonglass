@@ -1,5 +1,5 @@
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { ActiveContext, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
+import { ActiveContext, InsertTarget, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
@@ -103,14 +103,43 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		await this.app.fileManager.trashFile(file);
 	}
 
-	getActiveContext(): ActiveContext {
+	/** The Markdown view the user was last in, while it is still open; else whatever Markdown view is active. */
+	private markdownView(): MarkdownView | null {
 		const leaf = this.lastMarkdownLeaf;
 		const tracked =
 			leaf?.view instanceof MarkdownView && this.app.workspace.getLeavesOfType('markdown').includes(leaf) ? leaf.view : null;
-		const view = tracked ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+		return tracked ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+	}
+
+	getActiveContext(): ActiveContext {
+		const view = this.markdownView();
 		const file = view?.file ?? this.app.workspace.getActiveFile();
 		const selection = view?.editor.getSelection() ?? '';
 		return { path: file instanceof TFile ? file.path : null, selection: selection.length > 0 ? selection : null };
+	}
+
+	/**
+	 * The editor's text and selection at the moment of an insert. Pending
+	 * edits are saved first so the vault holds what the editor shows and the
+	 * proposal's freshness check passes; a save that fails leaves the text as
+	 * it is and the proposal engine reports the mismatch.
+	 */
+	async getInsertTarget(): Promise<InsertTarget | null> {
+		const view = this.markdownView();
+		const file = view?.file;
+		if (!view || !file) return null;
+		try {
+			await view.save();
+		} catch {
+			// Reported by the engine's unsaved-changes check.
+		}
+		const editor = view.editor;
+		return {
+			path: file.path,
+			content: editor.getValue(),
+			from: editor.posToOffset(editor.getCursor('from')),
+			to: editor.posToOffset(editor.getCursor('to')),
+		};
 	}
 
 	/**

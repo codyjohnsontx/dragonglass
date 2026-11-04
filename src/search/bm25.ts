@@ -44,6 +44,8 @@ export interface RankedNote {
 export interface RankOptions {
 	/** Only notes under this folder (vault-relative, no trailing slash); "" for all. */
 	folder: string;
+	/** Leave out notes under this folder (the script folder); "" or unset for none. */
+	exclude?: string;
 	limit: number;
 	/** `all` keeps only notes that match every term. */
 	mode: 'any' | 'all';
@@ -422,10 +424,12 @@ export class Bm25Index {
 			}
 		}
 		const prefix = options.folder === '' ? '' : `${options.folder}/`;
+		const excluded = options.exclude ? `${options.exclude}/` : null;
 		const hits: RankedNote[] = [];
 		for (const row of touched) {
 			const path = this.paths[row];
 			if (path === null || path === undefined || !path.startsWith(prefix)) continue;
+			if (excluded !== null && path.startsWith(excluded)) continue;
 			if (options.mode === 'all' && matchCounts[row]! < terms.length) continue;
 			const matched = terms.map((_, i) => i).filter((i) => (masks[row]! & (1 << i)) !== 0);
 			hits.push({ path, score: scores[row]!, matched });

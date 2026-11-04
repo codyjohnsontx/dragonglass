@@ -243,6 +243,22 @@ export class DragonglassSettingTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
+				heading: 'Writing',
+				items: [
+					{
+						name: 'Script folder',
+						desc: 'Optional. The folder that holds your screenplay, for example Script. Notes in it are the script, not lore, so search leaves them out when the model looks things up for a draft. Drafts always go into the note you have open, and match its format.',
+						control: {
+							type: 'text',
+							key: 'scriptFolder',
+							placeholder: 'Script',
+							validate: (v) => (v.trim().startsWith('/') || v.includes('..') ? 'Enter a folder path relative to the vault, such as Script or Writing/Script' : undefined),
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
 				heading: 'Web search',
 				items: [
 					{
@@ -298,7 +314,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'What is sent',
-						desc: 'Only your message, the context you attach (highlighted in the sidebar), and the results of tools the model calls are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
+						desc: 'Only your message, the context you attach (highlighted in the sidebar), and the results of tools the model calls are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. For scene drafts, a short sample of the open note (its first 1,200 characters) goes with the message so the draft matches its format. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
 					},
 				],
 			},

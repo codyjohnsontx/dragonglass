@@ -8,6 +8,8 @@ export type SearchMode = 'any' | 'all';
 export interface SearchOptions {
 	/** Vault-relative folder to search under; "" for the whole vault. */
 	folder: string;
+	/** Vault-relative folder whose notes are left out, at any depth; unset or "" for none. */
+	exclude?: string;
 	limit: number;
 	mode: SearchMode;
 }

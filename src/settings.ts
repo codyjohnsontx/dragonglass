@@ -74,6 +74,12 @@ export interface DragonglassSettings {
 	gemini: GeminiSettings;
 	custom: CustomSettings;
 	webSearch: WebSearchSettings;
+	/**
+	 * Optional vault folder holding the screenplay. Its notes are the script,
+	 * not lore: search leaves them out when the model looks things up. Empty
+	 * when unset. The open note is the script being drafted into either way.
+	 */
+	scriptFolder: string;
 	/** Default toggles for new messages. */
 	includeActiveNote: boolean;
 	includeSelection: boolean;
@@ -107,6 +113,7 @@ export const DEFAULT_SETTINGS: DragonglassSettings = {
 	gemini: { apiKeySecretId: '', model: 'gemini-3.8-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta' },
 	custom: { baseUrl: '', model: '', apiKeySecretId: '', auth: 'bearer', authHeader: '', streaming: true, toolCalling: true },
 	webSearch: { apiKeySecretId: '', preferredSites: '', baseUrl: 'https://api.tavily.com' },
+	scriptFolder: '',
 	includeActiveNote: true,
 	includeSelection: true,
 	toolsEnabled: true,
@@ -159,6 +166,7 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 			if (typeof web[key] === 'string') out.webSearch[key] = web[key];
 		}
 	}
+	if (typeof r['scriptFolder'] === 'string') out.scriptFolder = r['scriptFolder'];
 	for (const key of ['includeActiveNote', 'includeSelection', 'toolsEnabled', 'showUsage'] as const) {
 		if (typeof r[key] === 'boolean') out[key] = r[key];
 	}
