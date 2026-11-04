@@ -39,7 +39,8 @@ function fakeWorkspace(initialActive: FakeLeaf | null) {
 		state.active = leaf;
 		for (const h of handlers) h(leaf);
 	};
-	const app = { vault: { configDir: '.obsidian' }, workspace } as unknown as App;
+	const metadataCache = { on: () => ({}) };
+	const app = { vault: { configDir: '.obsidian' }, workspace, metadataCache } as unknown as App;
 	const plugin = { registerEvent: () => undefined } as unknown as Plugin;
 	return { port: new ObsidianVaultPort(app, plugin), state, activate };
 }
