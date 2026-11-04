@@ -380,7 +380,11 @@ vault first. They join the turn's batch review and its one-proposal-per-note
 rule; a move claims both its old and its new path. Approve all writes new
 folders first, then note contents, then moves, so a note can go into a new
 folder and an edit to a note that links to a moved note is checked against
-the text it was proposed on before Obsidian rewrites that link. Undo all
+the text it was proposed on before Obsidian rewrites that link. Obsidian
+indexes a note's links some time after it is written, and `renameFile` only
+rewrites links it has indexed, so a move waits until the notes the plugin
+just wrote are indexed (at most five seconds); otherwise a link added in the
+same batch would be left pointing at the old name. Undo all
 goes newest first, so moves are undone before the notes whose links they
 rewrote, and those notes are checked when they are undone rather than up
 front.
@@ -400,7 +404,8 @@ writes the YAML. Because its output is not known before the write, the
 review shows each property's old and new value instead of a text diff, and
 the guard inside the write is per property: each changed property must
 still hold the value reviewed. A text value given for a number or checkbox
-property keeps that type when it spells one. Undo restores the snapshot
+property, in the note or, for a property new to the note, in another note of
+the vault, keeps that type when it spells one. Undo restores the snapshot
 when the note is exactly as written, and otherwise puts each property back
 through `processFrontMatter` while it still holds the written value, so an
 edit elsewhere in the note, including a link Obsidian rewrote, survives.

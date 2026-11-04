@@ -210,7 +210,7 @@ export class ProposalEngine {
 		if (this.vault.exists(newPath)) throw new ProposalError(`A file already exists at ${newPath}. Choose another name.`);
 		const proposal = this.base(conversationId, 'move', path, content, content, null, summary);
 		proposal.newPath = newPath;
-		proposal.linkUpdates = this.linkUpdates(path, newPath);
+		proposal.linkUpdates = await this.linkUpdates(path, newPath);
 		return proposal;
 	}
 
@@ -218,7 +218,8 @@ export class ProposalEngine {
 	 * Set or remove properties. The change is written by Obsidian's
 	 * `processFrontMatter` when approved; what is reviewed is each property's
 	 * value before and after. A value given as text for a property that is a
-	 * number or a checkbox keeps that type when the text says one.
+	 * number or a checkbox, in this note or else in the vault, keeps that type
+	 * when the text says one.
 	 */
 	async proposeFrontmatter(conversationId: string, rawPath: string, edits: PropertyEdit[], summary: string): Promise<ChangeProposal> {
 		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
@@ -234,7 +235,7 @@ export class ProposalEngine {
 			const had = Object.prototype.hasOwnProperty.call(current, key);
 			const change: PropertyChange = { key };
 			if (had) change.before = current[key];
-			if (!edit.remove) change.after = keepType(current[key], edit.value);
+			if (!edit.remove) change.after = keepType(current[key] ?? this.vault.propertyValue(key), edit.value);
 			if (had === (change.after !== undefined) && sameValue(change.before, change.after)) continue;
 			changes.push(change);
 		}
@@ -263,8 +264,8 @@ export class ProposalEngine {
 	 * with another note (the shortest link then needs a folder), else the
 	 * notes that link to it by path.
 	 */
-	private linkUpdates(from: string, to: string): string[] {
-		const refs = this.vault.linksTo(from);
+	private async linkUpdates(from: string, to: string): Promise<string[]> {
+		const refs = await this.vault.linksTo(from);
 		const name = baseName(to).toLowerCase();
 		const shared = this.vault.listMarkdownFiles().some((f) => f.path !== from && f.name.toLowerCase() === name);
 		const all = baseName(from) !== baseName(to) || shared;
@@ -367,7 +368,7 @@ export class ProposalEngine {
 				await this.vault.createFolder(p.path);
 			} else if (p.kind === 'move') {
 				const newPath = p.newPath ?? '';
-				p.linkUpdates = this.linkUpdates(p.path, newPath);
+				p.linkUpdates = await this.linkUpdates(p.path, newPath);
 				const created = this.missingFolder(newPath);
 				if (created) p.createdFolder = created;
 				else delete p.createdFolder;

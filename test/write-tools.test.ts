@@ -172,6 +172,28 @@ describe('propose_update_frontmatter', () => {
 		expect(vault.files.get('B.md')).toBe('---\nstatus: idea\n---\n# B\n');
 	});
 
+	it('gives a property new to the note the number or checkbox type other notes give it', async () => {
+		const { vault, engine, call } = setup({ 'Act One.md': NOTE, 'Act Two.md': '# Act Two\n' });
+		const p = (
+			await call('propose_update_frontmatter', {
+				path: 'Act Two.md',
+				summary: 's',
+				set: [
+					{ key: 'act', value: '2' },
+					{ key: 'published', value: 'true' },
+					{ key: 'status', value: 'true' },
+				],
+			})
+		).proposal!;
+		expect(p.properties).toEqual([
+			{ key: 'act', after: 2 },
+			{ key: 'published', after: true },
+			{ key: 'status', after: 'true' },
+		]);
+		await engine.apply(p);
+		expect(vault.getMetadata('Act Two.md')?.frontmatter).toEqual({ act: 2, published: true, status: 'true' });
+	});
+
 	it('refuses changes that change nothing, bad arguments, missing notes and placeholders', async () => {
 		const { call } = setup({ 'A.md': NOTE });
 		const same = await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'draft' }], remove: ['nope'] });

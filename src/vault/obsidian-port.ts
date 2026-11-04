@@ -3,12 +3,22 @@ import { ActiveContext, LinkRef, NoteMetadata, VaultChange, VaultFileInfo, Vault
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
+/** How long a rename or link lookup waits for Obsidian to index notes this port wrote before it goes ahead anyway. */
+const INDEX_WAIT_MS = 5000;
+
 /** VaultPort backed by the live Obsidian App. Thin by design; logic lives in the port's callers. */
 export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	readonly configDir: string;
 	private lastMarkdownLeaf: WorkspaceLeaf | null = null;
 	private readonly changeListeners = new Set<(change: VaultChange) => void>();
 	private listeningToVault = false;
+	/**
+	 * Notes this port wrote that Obsidian has not indexed yet. It parses a
+	 * note into `resolvedLinks` some time after the write, and both
+	 * `renameFile` and `linksTo` read links from there.
+	 */
+	private readonly unindexed = new Set<string>();
+	private readonly indexWaiters = new Set<() => void>();
 
 	constructor(
 		private readonly app: App,
@@ -18,6 +28,11 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		plugin.registerEvent(
 			app.workspace.on('active-leaf-change', (leaf) => {
 				if (leaf?.view instanceof MarkdownView) this.lastMarkdownLeaf = leaf;
+			}),
+		);
+		plugin.registerEvent(
+			app.metadataCache.on('resolve', (file) => {
+				if (this.unindexed.delete(file.path) && this.unindexed.size === 0) [...this.indexWaiters].forEach((done) => done());
 			}),
 		);
 		app.workspace.onLayoutReady(() => {
@@ -87,13 +102,13 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		if (folder && !this.app.vault.getFolderByPath(folder)) {
 			await this.app.vault.createFolder(folder);
 		}
-		await this.app.vault.create(path, content);
+		await this.writing(path, () => this.app.vault.create(path, content));
 	}
 
 	async processNote(path: string, fn: (current: string) => string): Promise<void> {
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) throw new Error(`No note at ${path}`);
-		await this.app.vault.process(file, fn);
+		await this.writing(path, () => this.app.vault.process(file, fn));
 	}
 
 	async createFolder(path: string): Promise<void> {
@@ -106,17 +121,55 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		if (this.app.vault.getAbstractFileByPath(to)) throw new Error(`A file already exists at ${to}`);
 		const folder = parentFolder(to);
 		if (folder && !this.app.vault.getFolderByPath(folder)) await this.app.vault.createFolder(folder);
+		await this.whenIndexed();
 		await this.app.fileManager.renameFile(file, to);
 	}
 
 	async processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string> {
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) throw new Error(`No note at ${path}`);
-		await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => fn(fm));
+		await this.writing(path, () => this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => fn(fm)));
 		return this.app.vault.read(file);
 	}
 
-	linksTo(path: string): LinkRef[] {
+	/** Track `path` as waiting to be indexed while `write` changes it; a write that fails leaves the index as it was. */
+	private async writing<T>(path: string, write: () => Promise<T>): Promise<T> {
+		this.unindexed.add(path);
+		try {
+			return await write();
+		} catch (e) {
+			this.unindexed.delete(path);
+			throw e;
+		}
+	}
+
+	/** Resolves once Obsidian has indexed every note this port wrote, or after `INDEX_WAIT_MS` if it never reports one. */
+	private whenIndexed(): Promise<void> {
+		if (this.unindexed.size === 0) return Promise.resolve();
+		return new Promise((resolve) => {
+			const done = () => {
+				window.clearTimeout(timer);
+				this.indexWaiters.delete(done);
+				resolve();
+			};
+			const timer = window.setTimeout(() => {
+				this.unindexed.clear();
+				done();
+			}, INDEX_WAIT_MS);
+			this.indexWaiters.add(done);
+		});
+	}
+
+	propertyValue(key: string): unknown {
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const value: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter?.[key];
+			if (value !== undefined && value !== null) return value;
+		}
+		return undefined;
+	}
+
+	async linksTo(path: string): Promise<LinkRef[]> {
+		await this.whenIndexed();
 		const refs: LinkRef[] = [];
 		for (const [source, targets] of Object.entries(this.app.metadataCache.resolvedLinks)) {
 			if (source === path || !targets[path]) continue;

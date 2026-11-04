@@ -66,7 +66,9 @@ export interface VaultPort {
 	createFolder(path: string): Promise<void>;
 	/**
 	 * Move or rename a note through Obsidian's `FileManager.renameFile`, which
-	 * updates links to it following the user's preferences. Creates the
+	 * updates links to it following the user's preferences, once every note
+	 * written through this port has been indexed so links just written are
+	 * among those updated. Creates the
 	 * destination folder when it is missing. Throws if there is no such note
 	 * or the destination exists.
 	 */
@@ -78,8 +80,13 @@ export interface VaultPort {
 	 * content after the write.
 	 */
 	processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string>;
-	/** Links in other notes (body, embeds and properties) that resolve to `path`. */
-	linksTo(path: string): LinkRef[];
+	/**
+	 * Links in other notes (body, embeds and properties) that resolve to
+	 * `path`, once every note written through this port has been indexed.
+	 */
+	linksTo(path: string): Promise<LinkRef[]>;
+	/** A value some note in the vault gives the property `key`, or undefined when none has it. */
+	propertyValue(key: string): unknown;
 	/** Move a folder to the trash like `trashNote`. Throws if there is no such folder. */
 	trashFolder(path: string): Promise<void>;
 	/** Move a note to the trash, following the user's "Deleted files" setting; never `Vault.delete` directly. Throws if there is no such note. */

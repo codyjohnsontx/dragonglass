@@ -127,7 +127,7 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		const content = this.files.get(from);
 		if (content === undefined) return Promise.reject(new Error(`No note at ${from}`));
 		if (this.exists(to)) return Promise.reject(new Error(`A file already exists at ${to}`));
-		const refs = this.linksTo(from);
+		const refs = this.links(from);
 		this.rename(from, to);
 		const oldName = baseName(from);
 		const unique = [...this.files.keys()].filter((p) => baseName(p) === baseName(to)).length === 1;
@@ -166,7 +166,19 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 		return Promise.resolve(next);
 	}
 
-	linksTo(path: string): LinkRef[] {
+	linksTo(path: string): Promise<LinkRef[]> {
+		return Promise.resolve(this.links(path));
+	}
+
+	propertyValue(key: string): unknown {
+		for (const content of this.files.values()) {
+			const value = parseFrontmatter(content)?.[key];
+			if (value !== undefined && value !== null) return value;
+		}
+		return undefined;
+	}
+
+	private links(path: string): LinkRef[] {
 		const refs: LinkRef[] = [];
 		for (const [source, text] of this.files) {
 			if (source === path) continue;
