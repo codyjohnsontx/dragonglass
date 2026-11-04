@@ -228,6 +228,8 @@ export interface DraftingOptions {
 	scriptNote: string | null;
 	/** A sample of the note's format (`formatSample`), or null with nothing to match. */
 	sample: string | null;
+	/** A note is open but not shared: outside the script folder and not attached. */
+	withheld?: true;
 }
 
 /** Work out the drafting options for a send from the open note's text. */
@@ -242,12 +244,13 @@ export function draftingFor(scriptNote: string | null, content: string | null): 
  * The drafting options for a send. The open note is the script, but its
  * sample and format go to the model only when it is inside the script
  * folder or attached to this message (`attachedNote`); otherwise the rules
- * fall back to Fountain and name no note, and the model can still read the
- * note with the read tools.
+ * fall back to Fountain, name no note, and tell the model no script note is
+ * shared so it asks which note the scene is for when it should match one.
  */
 export async function draftingForSend(vault: VaultPort, attachedNote: string | null, scriptFolder: string): Promise<DraftingOptions> {
 	const open = vault.getActiveContext().path;
-	if (!open || (open !== attachedNote && !isScriptNote(open, scriptFolder))) return draftingFor(null, null);
+	if (!open) return draftingFor(null, null);
+	if (open !== attachedNote && !isScriptNote(open, scriptFolder)) return { ...draftingFor(null, null), withheld: true };
 	return draftingFor(open, await vault.readNote(open));
 }
 
@@ -268,9 +271,7 @@ export function draftingRules(opts: DraftingOptions, toolsEnabled: boolean): str
 	switch (opts.format) {
 		case 'fountain':
 			lines.push(
-				note && opts.sample
-					? `- Format: Fountain, matching the open script note ${note}: scene headings such as INT. PLACE - DAY, action in plain paragraphs, a character name in capitals on its own line with the dialogue beneath, parentheticals in (parentheses), no Markdown.`
-					: '- Format: Fountain, as nothing in the open note sets a format: scene headings such as INT. PLACE - DAY, action in plain paragraphs, a character name in capitals on its own line with the dialogue beneath, parentheticals in (parentheses), no Markdown.',
+				`- Format: Fountain, ${note && opts.sample ? `matching the open script note ${note}` : opts.withheld ? 'as no script note is shared (ask which note the scene is for if it should match one)' : 'as nothing in the open note sets a format'}: scene headings such as INT. PLACE - DAY, action in plain paragraphs, a character name in capitals on its own line with the dialogue beneath, parentheticals in (parentheses), no Markdown.`,
 			);
 			break;
 		case 'markdown':
