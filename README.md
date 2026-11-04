@@ -16,8 +16,9 @@ written.
   names), and only to the provider you configured. A web search goes out only
   when you approve it. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
-  inspect properties, links and backlinks, and propose creating or editing
-  notes. Edits are shown as a diff; you approve, reject, or revert. Nothing is
+  inspect properties, links and backlinks, and propose creating, editing,
+  moving or renaming notes, changing their properties and creating folders.
+  Every change is shown for review; you approve, reject, or revert. Nothing is
   written otherwise.
 - **Web fallback, on your say-so.** With a Tavily key, the model can search
   the web when the vault lacks an answer. You approve every search and can
@@ -270,6 +271,11 @@ Open the sidebar with the gem icon in the ribbon or the command
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
   The model reads the note, proposes a change, and a card with the diff
   appears. Select **Approve** to apply or **Reject** to discard.
+- Beyond text edits, the model can propose rewriting one section by its
+  heading, setting or removing properties (reviewed as each property's old
+  and new value), moving or renaming a note (the card lists the notes whose
+  links change; links follow Obsidian's "Automatically update internal links"
+  setting) and creating a folder.
 - When one request changes several notes, the proposals appear as one card
   ("3 changes across 3 notes") with **Approve all** and **Reject all**; each
   note's diff is a collapsible section with its own Approve and Reject.
@@ -283,7 +289,9 @@ Open the sidebar with the gem icon in the ribbon or the command
   approvable again. Otherwise ask again.
 - **Revert** on an applied edit restores the snapshot taken before it was
   applied. It is refused if the note changed after the edit was applied, so
-  later edits are never overwritten. Snapshots are kept under the plugin
+  later edits are never overwritten. Reverting a property change puts the
+  properties back, and reverting a move moves the note back; a created note
+  or folder is not removed. Snapshots are kept under the plugin
   folder (last 50).
 - **Stop** cancels generation. Partial text is kept.
 - Conversations persist in the vault's plugin folder and survive switching
@@ -357,8 +365,7 @@ in its documented shape. To verify live:
   connection test even if chat works.
 - The model is not told whether a proposal was approved or rejected; it only
   knows the user must approve.
-- No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
-  yet.
+- No Canvas or Bases support yet.
 - No semantic search or stemming; search matches any query word at the start
   of a word in note names and content, ranking rarer words and notes that
   contain more of the words first. A paraphrase that shares no word with the

@@ -109,8 +109,10 @@ src/
    Write tools return a `ChangeProposal` and *do not write* (see "Write
    proposals" below for the kinds). A tool registry
    lives for one send, and a second proposal for a note whose first proposal
-   of that turn is still awaiting review is refused with a tool error telling
-   the model to put every change to the note in one call.
+   of that turn is still awaiting review is refused with a tool error. It
+   tells the model to put both changes in one call when the earlier proposal
+   is the same kind (two text edits, or two property changes), and otherwise
+   to ask the user to review the first card (decision 19).
 5. Tool results are appended as `tool` messages and the loop continues until
    the model answers without tools. A call repeated with the same arguments in
    one turn is answered with an error instead of being run again. After a
