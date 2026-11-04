@@ -272,6 +272,7 @@ snapshots and a note the batch created is moved to Obsidian's trash through
 (the plugin never calls `Vault.delete` directly), and only while the note
 still holds exactly what the batch wrote; a note the user has since changed
 is left as it is. Undo all follows the same rule for created notes, while
-per-note undo still never removes a created note. A partial apply was rejected because the user approved the set
-as a whole, and a batch left half applied is the state they can least reason
-about. Telling the model which proposals were approved is a separate item.
+per-note undo still never removes a created note. A partial apply was
+rejected because the user approved the set as a whole, and a batch left half
+applied is the state they can least reason about. Telling the model which
+proposals were approved is a separate item.
