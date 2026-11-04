@@ -702,7 +702,7 @@ export class ChatView extends ItemView {
 		if (this.core.activeProviderIsRemote()) {
 			bar.createDiv({
 				cls: 'dg-privacy-note',
-				text: 'Highlighted context and your message are sent to the cloud provider you configured.',
+				text: 'Highlighted context and your message are sent to the cloud provider you configured, with the opening of the open note while it is in the script folder.',
 			});
 		}
 		// The note an Insert would go into follows the active note.

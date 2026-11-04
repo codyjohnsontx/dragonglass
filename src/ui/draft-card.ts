@@ -1,5 +1,5 @@
 import { App, setIcon } from 'obsidian';
-import { DraftVersion } from '../agent/drafting';
+import { DraftVersion, latestInsert } from '../agent/drafting';
 import { DragonglassCore } from '../core';
 import { Conversation } from '../persistence/conversation';
 import { baseName } from '../vault/paths';
@@ -84,10 +84,8 @@ export function renderDraftCard(container: HTMLElement, opts: DraftCardOptions):
 	later?.addEventListener('click', () => step(1));
 	show();
 
-	// The newest insert of the thread is the one under review; a rejected one (superseded or declined) is not shown.
-	const inserts = versions.flatMap((v) => v.inserts);
-	const proposal = inserts.length > 0 ? opts.conv.proposals[inserts[inserts.length - 1]!] : undefined;
-	if (proposal && proposal.status !== 'rejected') {
+	const proposal = latestInsert(versions, opts.conv.proposals);
+	if (proposal) {
 		const review = container.createDiv({ cls: 'dg-draft-review' });
 		review.dataset['proposalId'] = proposal.id;
 		renderProposalCard(opts.app, opts.core, opts.conv, proposal, review, opts.onChange);

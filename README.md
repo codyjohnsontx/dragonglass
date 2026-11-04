@@ -458,10 +458,10 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
   search words (which you see and can edit) and your preferred sites. Reading
   a result page fetches that page with no key or cookie. Search results and
   page text then go to your provider like any tool result.
-- For scene drafts, a short sample of the note you have open (its first 1,200
-  characters) goes with your message so the draft can match its format, but
-  only when that note is in the script folder or attached to the message.
-  Otherwise no part of it is sent, and drafts default to Fountain.
+- With every message, while the note you have open is in the script folder or
+  attached, a short sample of it (its first 1,200 characters) goes along so
+  drafts can match its format, whether or not you are drafting. Otherwise no
+  part of it is sent, and drafts default to Fountain.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content and web content are treated as data: the model is told not to

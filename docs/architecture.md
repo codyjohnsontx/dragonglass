@@ -207,10 +207,10 @@ short sample goes out; otherwise nothing of it does and drafts default to
 Fountain), `inferFormat` counts a few line patterns (scene headings, forced
 headings, transitions, character cues with dialogue under them for Fountain;
 two or more bold cues, helped by headings, for a Markdown screenplay;
-otherwise prose; a note too
-short to tell gets Fountain) and the rules name the format and show
-`formatSample`, the note's first 1,200 characters, as data. The optional
-script folder setting goes into the vault map and into the search tools as
+otherwise prose; a note too short to tell gets Fountain) and the rules name
+the format and show `formatSample`, the note's first 1,200 characters, as
+data, defused so the note cannot close its delimiter. The optional script
+folder setting goes into the vault map and into the search tools as
 `excludeFolder`: `search_notes` leaves its notes out of results, linked notes
 and better-elsewhere hints, while `read_note` still reads them on request.
 

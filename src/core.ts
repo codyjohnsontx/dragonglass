@@ -181,7 +181,7 @@ export class DragonglassCore {
 		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
-		const drafting = await draftingForSend(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
+		const drafting = await draftingForSend(this.vault, opts.context, this.scriptFolder());
 		const webReady = this.webSearchKey() !== null && opts.approveWebSearch !== undefined;
 		const webSearch = webReady ? 'available' : 'needs-key';
 		const pastSources = conv.messages.map((m) => m.sources);

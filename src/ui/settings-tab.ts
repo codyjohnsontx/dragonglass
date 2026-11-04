@@ -314,7 +314,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'What is sent',
-						desc: 'Only your message, the context you attach (highlighted in the sidebar), and the results of tools the model calls are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. For scene drafts, a short sample of the open note (its first 1,200 characters) goes with the message so the draft matches its format, but only when that note is in the script folder or attached; otherwise no part of it is sent. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
+						desc: 'Only your message, the context you attach (highlighted in the sidebar), the results of tools the model calls and the script sample below are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. With every message, while the open note is in the script folder or attached, a short sample of it (its first 1,200 characters) goes along so drafts can match its format; otherwise no part of it is sent. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
 					},
 				],
 			},
