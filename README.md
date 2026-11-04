@@ -16,9 +16,9 @@ written.
   names), and only to the provider you configured. A web search goes out only
   when you approve it. No telemetry.
 - **Agentic, with oversight.** The model can list, search and read notes,
-  inspect properties, links and backlinks, and propose creating or editing
-  notes. Edits are shown as a diff; you approve, reject, or revert. Nothing is
-  written otherwise.
+  inspect properties, links and backlinks, find the notes most related to one
+  and say why, and propose creating or editing notes. Edits are shown as a
+  diff; you approve, reject, or revert. Nothing is written otherwise.
 - **Web fallback, on your say-so.** With a Tavily key, the model can search
   the web when the vault lacks an answer. You approve every search and can
   change its words first; the answer cites web pages as `[web N]`, and
@@ -310,8 +310,8 @@ vault:
   authentication, a server that rejects tools, and streaming turned off.
 - Switching providers mid-conversation, including replaying tool calls made
   by one provider to another.
-- Read tools: list, read, search, metadata with links and backlinks, active
-  note and selection.
+- Read tools: list, read, search, metadata with links and backlinks, related
+  notes with reasons, active note and selection.
 - Edit flow end to end: ask for a change, model reads the note, proposes a
   find/replace, diff is shown, approve applies it through the Vault API, the
   open editor shows the new content, a snapshot is written, revert restores it.

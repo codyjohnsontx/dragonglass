@@ -51,6 +51,12 @@ without redesigning the provider or tool architecture.
   preferred-sites list is searched first, `[web N]` markers link the pages,
   and Save to vault proposes a reviewed research note with its sources, the
   date and `from-web: true`. Not yet run against the live Tavily API.
+- **Related notes**: a `related_notes` read tool ranks the notes connected to
+  one note by direct links, co-citation, shared outgoing links and shared
+  tags, read from the metadata cache, each with short reasons the model can
+  explain ("both link to [[Fort Ashen]]", "shares #faction/ember"); the
+  system prompt points the model at it for questions about a character,
+  place, faction or what else connects to something.
 
 ## Next
 
@@ -60,8 +66,8 @@ without redesigning the provider or tool architecture.
    approve.
 2. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-3. **Relationship tools**: "related notes" via shared links, tags and
-   co-citation; propose wikilinks with reasons.
+3. **Propose wikilinks**: suggest links between related notes, each with its
+   reason, as reviewed edits.
 4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
 5. **Bases**: read and propose `.base` files once the format is stable.
