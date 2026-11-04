@@ -235,14 +235,72 @@ describe('ProposalEngine.revertAll', () => {
 	it('puts back what it already undid when a later undo fails', async () => {
 		const { vault, e, a, n, b } = await appliedBatch();
 		const original = vault.processNote.bind(vault);
-		vault.processNote = (path, fn) => (path === 'B.md' ? Promise.reject(new Error('disk full')) : original(path, fn));
-		await expect(e.revertAll([a, n, b])).rejects.toThrow(/Undid 2 of 3 changes, then B\.md failed: disk full\. The changes to A\.md and New\/N\.md were put back/);
+		vault.processNote = (path, fn) => (path === 'A.md' ? Promise.reject(new Error('disk full')) : original(path, fn));
+		await expect(e.revertAll([a, n, b])).rejects.toThrow(/Undid 2 of 3 changes, then A\.md failed: disk full\. The changes to New\/N\.md and B\.md were put back/);
 		expect(vault.files.get('A.md')).toBe('a2\n');
 		expect(vault.files.get('New/N.md')).toBe('# N\n');
 		expect(vault.files.get('B.md')).toBe('b2\n');
 		expect([a.status, n.status, b.status]).toEqual(['applied', 'applied', 'applied']);
 		// The created note is back in place; the copy the undo trashed stays in the trash.
 		expect(vault.trashed.get('New/N.md')).toBe('# N\n');
+	});
+});
+
+describe('a note changed twice in one turn', () => {
+	it('undoes both changes newest first when the first was approved before the second was proposed', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'a1\n', 'B.md': 'b1\n' });
+		const e = engine(vault);
+		const first = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a2\n' }], 'first');
+		await e.apply(first);
+		const second = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a3\n' }], 'second');
+		const b = await e.proposeEdit('c1', 'B.md', [{ type: 'replace_all', content: 'b2\n' }], 'b');
+		await e.applyAll([first, second, b]);
+		expect(vault.files.get('A.md')).toBe('a3\n');
+		const undone = await e.revertAll([first, second, b]);
+		expect(undone.map((p) => p.id)).toEqual([first.id, second.id, b.id]);
+		expect(vault.files.get('A.md')).toBe('a1\n');
+		expect(vault.files.get('B.md')).toBe('b1\n');
+		expect([first.status, second.status, b.status]).toEqual(['reverted', 'reverted', 'reverted']);
+	});
+
+	it('still refuses Undo all when the note changed after its latest change', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'a1\n' });
+		const e = engine(vault);
+		const first = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a2\n' }], 'first');
+		await e.apply(first);
+		const second = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a3\n' }], 'second');
+		await e.applyAll([first, second]);
+		vault.files.set('A.md', 'mine\n');
+		await expect(e.revertAll([first, second])).rejects.toThrow(/Nothing was undone: A\.md changed after this batch was applied/);
+		expect(vault.files.get('A.md')).toBe('mine\n');
+		expect([first.status, second.status]).toEqual(['applied', 'applied']);
+	});
+});
+
+describe('a proposal held by a running batch', () => {
+	it('ignores Reject and refuses a per-note Approve until Approve all finishes', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'a1\n', 'B.md': 'b1\n' });
+		const e = engine(vault);
+		const a = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a2\n' }], 'a');
+		const b = await e.proposeEdit('c1', 'B.md', [{ type: 'replace_all', content: 'b2\n' }], 'b');
+		const running = e.applyAll([a, b]);
+		e.reject(b);
+		await expect(e.apply(b)).rejects.toThrow(/B\.md is already being changed/);
+		await expect(e.applyAll([a, b])).rejects.toThrow(/A\.md is already being changed/);
+		expect(await running).toEqual([a, b]);
+		expect([a.status, b.status]).toEqual(['applied', 'applied']);
+		expect(vault.files.get('B.md')).toBe('b2\n');
+	});
+
+	it('refuses a per-note Revert while Undo all runs', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'a1\n' });
+		const e = engine(vault);
+		const a = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a2\n' }], 'a');
+		await e.applyAll([a]);
+		const running = e.revertAll([a]);
+		await expect(e.revert(a)).rejects.toThrow(/A\.md is already being changed/);
+		expect(await running).toEqual([a]);
+		expect(vault.files.get('A.md')).toBe('a1\n');
 	});
 });
 

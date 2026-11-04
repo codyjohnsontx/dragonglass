@@ -60,7 +60,7 @@ export function renderBatchCard(
 		const approveAll = actions.createEl('button', { cls: 'mod-cta', text: 'Approve all' });
 		approveAll.disabled = blocker !== null;
 		approveAll.addEventListener('click', () => {
-			approveAll.disabled = true;
+			disableControls(container);
 			void core
 				.approveAll(conv, batch)
 				.then((applied) => new Notice(`Applied ${plural(applied.length, 'change')} to ${plural(new Set(applied.map((p) => p.path)).size, 'note')}`))
@@ -75,7 +75,7 @@ export function renderBatchCard(
 	} else if (summary.applied.length > 0) {
 		const undoAll = actions.createEl('button', { text: 'Undo all' });
 		undoAll.addEventListener('click', () => {
-			undoAll.disabled = true;
+			disableControls(container);
 			void core
 				.revertAll(conv, batch)
 				.then((undone) => new Notice(`Undid ${plural(undone.length, 'change')}`))
@@ -95,6 +95,13 @@ export function renderBatchCard(
 		title.createSpan({ cls: `dg-proposal-status dg-status-${proposal.status}`, text: statusLabel(proposal.status) });
 		renderDetails(app, core, conv, proposal, item, onChange, false);
 	}
+}
+
+/** Disable every button of a batch card while Approve all or Undo all runs; the re-render after it finishes restores them. */
+function disableControls(container: HTMLElement): void {
+	container.querySelectorAll('button').forEach((button) => {
+		button.disabled = true;
+	});
 }
 
 /** Open the section for `proposalId` and scroll it into view. */

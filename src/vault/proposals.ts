@@ -71,7 +71,7 @@ const SNAPSHOT_DIR = 'snapshots';
 const MAX_SNAPSHOTS = 50;
 
 export class ProposalEngine {
-	private readonly applying = new Set<ChangeProposal>();
+	private readonly busy = new Set<ChangeProposal>();
 
 	constructor(
 		private readonly vault: VaultPort,
@@ -161,7 +161,7 @@ export class ProposalEngine {
 	}
 
 	private refreshable(p: ChangeProposal): boolean {
-		return !this.applying.has(p) && (p.status === 'pending' || p.status === 'stale');
+		return !this.busy.has(p) && (p.status === 'pending' || p.status === 'stale');
 	}
 
 	/**
@@ -173,12 +173,23 @@ export class ProposalEngine {
 		if (p.status !== 'pending' && p.status !== 'stale') {
 			throw new ProposalError(`Proposal is already ${p.status}.`);
 		}
-		this.applying.add(p);
+		this.claim([p]);
 		try {
 			return await this.write(p);
 		} finally {
-			this.applying.delete(p);
+			this.release([p]);
 		}
+	}
+
+	/** Hold proposals while one operation writes them, refusing any another operation already holds. */
+	private claim(proposals: readonly ChangeProposal[]): void {
+		const held = proposals.find((p) => this.busy.has(p));
+		if (held) throw new ProposalError(`${held.path} is already being changed. Wait for that to finish.`);
+		for (const p of proposals) this.busy.add(p);
+	}
+
+	private release(proposals: readonly ChangeProposal[]): void {
+		for (const p of proposals) this.busy.delete(p);
 	}
 
 	private async write(p: ChangeProposal): Promise<ApplyResult> {
@@ -239,7 +250,7 @@ export class ProposalEngine {
 	async applyAll(batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
 		const pending = batch.filter((p) => p.status === 'pending' || p.status === 'stale');
 		if (pending.length === 0) return [];
-		for (const p of pending) this.applying.add(p);
+		this.claim(pending);
 		try {
 			for (const p of pending) {
 				const freshness = await this.checkFreshness(p);
@@ -255,57 +266,64 @@ export class ProposalEngine {
 					const outcome = await this.rollBack(written);
 					throw new ProposalError(
 						`Applied ${written.length} of ${pending.length} changes, then ${p.path} failed: ${trimDot(errorMessage(e))}.` +
-							describeRollback(outcome, 'rolled back', 'written'),
+							describeRollback(pending, outcome, 'rolled back', 'written'),
 					);
 				}
 				written.push(p);
 			}
 			return written;
 		} finally {
-			for (const p of pending) this.applying.delete(p);
+			this.release(pending);
 		}
 	}
 
 	/**
 	 * Undo all: revert every applied proposal of a batch, all or nothing.
 	 * Every note is checked first; if any changed since the batch applied,
-	 * nothing is undone and the error names it. Edits are restored from their
-	 * snapshots as `revert` does. A note the batch created is moved to the
-	 * trash, never deleted outright, and only while it still holds exactly
-	 * what the batch wrote. Should an undo fail partway, the changes already
-	 * undone are put back. Per-note `revert` is unchanged and never removes a
-	 * created note.
+	 * nothing is undone and the error names it. Changes are undone newest
+	 * first, so a note the batch changed twice is checked against its latest
+	 * change and walked back one change at a time. Edits are restored from
+	 * their snapshots as `revert` does. A note the batch created is moved to
+	 * the trash with `trashFile`, only while it still holds exactly what the
+	 * batch wrote. Should an undo fail partway, the changes already undone
+	 * are put back. Per-note `revert` is unchanged and never removes a
+	 * created note. Returns the proposals undone, in batch order.
 	 */
 	async revertAll(batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
 		const applied = batch.filter((p) => p.status === 'applied');
 		if (applied.length === 0) return [];
-		for (const p of applied) {
-			const current = await this.vault.readNote(p.path);
-			if (current === null) throw new ProposalError(`Nothing was undone: ${p.path} no longer exists.`);
-			if (current !== p.after) {
-				throw new ProposalError(`Nothing was undone: ${p.path} changed after this batch was applied. Undoing would overwrite those changes.`);
-			}
-		}
-		const undone: ChangeProposal[] = [];
-		for (const p of applied) {
-			try {
-				if (p.kind === 'create') {
-					await this.trashCreated(p);
-					p.status = 'reverted';
-					p.resolvedAt = this.now();
-				} else {
-					await this.revert(p);
+		const newestFirst = [...applied].reverse();
+		this.claim(applied);
+		try {
+			const expected = new Map<string, string | null>();
+			for (const p of newestFirst) {
+				const current = expected.has(p.path) ? (expected.get(p.path) ?? null) : await this.vault.readNote(p.path);
+				if (current === null) throw new ProposalError(`Nothing was undone: ${p.path} no longer exists.`);
+				if (current !== p.after) {
+					throw new ProposalError(`Nothing was undone: ${p.path} changed after this batch was applied. Undoing would overwrite those changes.`);
 				}
-			} catch (e) {
-				const outcome = await this.redo(undone);
-				throw new ProposalError(
-					`Undid ${undone.length} of ${applied.length} changes, then ${p.path} failed: ${trimDot(errorMessage(e))}.` +
-						describeRollback(outcome, 'put back', 'undone'),
-				);
+				expected.set(p.path, p.kind === 'create' ? null : await this.restoreContent(p));
 			}
-			undone.push(p);
+			const undone: ChangeProposal[] = [];
+			for (const p of newestFirst) {
+				try {
+					if (p.kind === 'create') await this.trashCreated(p);
+					else await this.undoEdit(p);
+				} catch (e) {
+					const outcome = await this.redo(undone);
+					throw new ProposalError(
+						`Undid ${undone.length} of ${applied.length} changes, then ${p.path} failed: ${trimDot(errorMessage(e))}.` +
+							describeRollback(applied, outcome, 'put back', 'undone'),
+					);
+				}
+				p.status = 'reverted';
+				p.resolvedAt = this.now();
+				undone.push(p);
+			}
+			return undone.reverse();
+		} finally {
+			this.release(applied);
 		}
-		return undone;
 	}
 
 	/** Trash a note the batch created while it still holds exactly what was written; otherwise refuse. */
@@ -341,7 +359,7 @@ export class ProposalEngine {
 		return outcome;
 	}
 
-	/** Re-apply the changes a failed Undo all already undid, newest first. */
+	/** Re-apply the changes a failed Undo all already undid, in the reverse of the order they were undone. */
 	private async redo(undone: readonly ChangeProposal[]): Promise<RollbackOutcome> {
 		const outcome: RollbackOutcome = { done: [], left: [], failed: [] };
 		for (const p of [...undone].reverse()) {
@@ -374,7 +392,7 @@ export class ProposalEngine {
 	}
 
 	reject(p: ChangeProposal): ChangeProposal {
-		if (p.status === 'pending' || p.status === 'stale') {
+		if (this.refreshable(p)) {
 			p.status = 'rejected';
 			p.resolvedAt = this.now();
 		}
@@ -387,6 +405,17 @@ export class ProposalEngine {
 		if (p.kind === 'create') {
 			throw new ProposalError('Created notes are not deleted automatically. Delete the note yourself if you do not want it.');
 		}
+		this.claim([p]);
+		try {
+			await this.undoEdit(p);
+		} finally {
+			this.release([p]);
+		}
+		p.status = 'reverted';
+		p.resolvedAt = this.now();
+	}
+
+	private async undoEdit(p: ChangeProposal): Promise<void> {
 		const restore = await this.restoreContent(p);
 		await this.vault.processNote(p.path, (current) => {
 			if (current !== p.after) {
@@ -394,8 +423,6 @@ export class ProposalEngine {
 			}
 			return restore;
 		});
-		p.status = 'reverted';
-		p.resolvedAt = this.now();
 	}
 
 	private async writeSnapshot(p: ChangeProposal): Promise<string> {
@@ -435,8 +462,13 @@ function freshnessProblem(p: ChangeProposal, freshness: 'stale' | 'missing' | 'e
 }
 
 /** The sentences after a batch failure, in batch order: "The changes to A and B were rolled back. C was changed after it was written and was left as it is." */
-function describeRollback(outcome: RollbackOutcome, verb: 'rolled back' | 'put back', step: 'written' | 'undone'): string {
-	const order = (list: ChangeProposal[]) => [...list].reverse();
+function describeRollback(
+	batch: readonly ChangeProposal[],
+	outcome: RollbackOutcome,
+	verb: 'rolled back' | 'put back',
+	step: 'written' | 'undone',
+): string {
+	const order = (list: ChangeProposal[]) => batch.filter((p) => list.includes(p));
 	let text = '';
 	if (outcome.done.length > 0) {
 		const done = order(outcome.done);
@@ -447,7 +479,7 @@ function describeRollback(outcome: RollbackOutcome, verb: 'rolled back' | 'put b
 		const plural = left.length > 1;
 		text += ` ${listPaths(left)} ${plural ? 'were' : 'was'} changed after ${plural ? 'they were' : 'it was'} ${step} and ${plural ? 'were' : 'was'} left as ${plural ? 'they are' : 'it is'}.`;
 	}
-	for (const f of [...outcome.failed].reverse()) text += ` ${f.proposal.path} could not be ${verb}: ${trimDot(f.error)}.`;
+	for (const f of [...outcome.failed].sort((x, y) => batch.indexOf(x.proposal) - batch.indexOf(y.proposal))) text += ` ${f.proposal.path} could not be ${verb}: ${trimDot(f.error)}.`;
 	return text;
 }
 

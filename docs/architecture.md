@@ -44,7 +44,7 @@ src/
                           vault events, serializes builds and searches.
   vault/
     port.ts               Narrow VaultPort interface over Obsidian's vault,
-                          including trashing a note (never a hard delete).
+                          including trashing a note (never `Vault.delete`).
     obsidian-port.ts      VaultPort + StoreBackend implemented on App.
     paths.ts              Path validation at the trust boundary.
     proposals.ts          ChangeProposal model and ProposalEngine
@@ -136,10 +136,12 @@ src/
   out-of-date note means nothing is written and the error names it. If a write
   fails partway, the notes already written are restored from their snapshots
   and a note the batch created is moved to Obsidian's trash through
-  `VaultPort.trashNote` (`FileManager.trashFile`, never a hard delete), each
-  only while the note still holds exactly what the batch wrote. Undo all
-  checks every applied note the same way before undoing any, and trashes
-  created notes under the same rule; per-note revert never removes a note.
+  `VaultPort.trashNote` (`FileManager.trashFile`, which follows the user's
+  "Deleted files" setting; never `Vault.delete` directly), each only while the
+  note still holds exactly what the batch wrote. Undo all checks every applied
+  note the same way before undoing any, newest change first so a note changed
+  twice in one turn is checked against its latest change, and trashes created
+  notes under the same rule; per-note revert never removes a note.
 - **Secrets** live in Obsidian's `SecretStorage`; settings persist only the
   secret id. Each cloud adapter reads its own key through a closure at
   request time and never stores it; `registry.ts` wires each provider to its
