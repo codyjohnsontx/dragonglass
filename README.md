@@ -223,7 +223,8 @@ Open the sidebar with the gem icon in the ribbon or the command
   each claim, and anything without a source is worded as the model's
   suggestion. Under the answer, **From your vault** lists the cited notes;
   one whose text was not in the model's context for that answer is marked
-  unverified, one it saw only as a search excerpt says so, and a link to a
+  unverified, one it saw only part of (a search excerpt or its properties)
+  says so, and a link to a
   note that does not exist says "no such note". Replies saved by an earlier
   version get no list, and in a conversation that has them, later answers
   leave such notes unflagged rather than guess.

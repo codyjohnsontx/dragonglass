@@ -180,6 +180,12 @@ describe('tools report what they showed', () => {
 		expect(withText.sources).toEqual([read('Characters/Kael.md'), read('Places/Ashfall.md')]);
 	});
 
+	it('get_note_metadata reports the note it showed properties of as partly seen', async () => {
+		const r = await tools(0).registry.get('get_note_metadata')!.execute({ path: 'Kael' }, ctx);
+		expect(r.sources).toEqual([excerpt('Characters/Kael.md')]);
+		expect((await tools(0).registry.get('get_note_metadata')!.execute({ path: 'Nobody' }, ctx)).sources).toBeUndefined();
+	});
+
 	it('get_active_note reports the open note', async () => {
 		const { vault, registry } = tools(0);
 		vault.active = { path: 'Characters/Mira.md', selection: null };

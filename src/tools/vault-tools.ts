@@ -497,7 +497,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 				const meta = vault.getMetadata(found.path);
 				if (!meta) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
 				const shown = { ...meta, outgoingLinks: meta.outgoingLinks.map(linkLabel), backlinks: meta.backlinks.map(linkLabel) };
-				return Promise.resolve(ok(`${found.notice}${JSON.stringify(shown, null, 2)}`));
+				return Promise.resolve(ok(`${found.notice}${JSON.stringify(shown, null, 2)}`, [{ kind: 'vault', path: found.path, seen: 'excerpt' }]));
 			} catch (e) {
 				return Promise.resolve(wrapError(e));
 			}

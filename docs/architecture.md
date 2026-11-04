@@ -142,8 +142,8 @@ context block is sent with the latest user message and is not replayed later.
 
 `answerSources` (`agent/sources.ts`) walks the stored conversation per user
 turn and checks the answer's citations against that record, not against the
-model's word: a cited note is *read*, *excerpt* (only a search excerpt was
-shown), *unread* (not in the model's context for this answer: unverified) or
+model's word: a cited note is *read*, *excerpt* (only part of it was shown:
+a search excerpt or its properties), *unread* (not in the model's context for this answer: unverified) or
 *missing* (the link resolves to no note), counting tool results from earlier
 turns, which are replayed, and this turn's attached context. Only cited notes
 are listed. A turn whose user message has no `sources` record was saved

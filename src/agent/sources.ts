@@ -22,7 +22,7 @@ export type Source = VaultSource | WebSource;
 export interface VaultSource {
 	kind: 'vault';
 	path: string;
-	/** `full`: the note's text (possibly cut to the cap); `excerpt`: only a search excerpt. */
+	/** `full`: the note's text (possibly cut to the cap); `excerpt`: only part of it, such as a search excerpt or its properties. */
 	seen: 'full' | 'excerpt';
 }
 
@@ -38,7 +38,7 @@ export interface WebSource {
 export type VaultCitationStatus =
 	/** Its text was in a tool result or attached context. */
 	| 'read'
-	/** Only a search excerpt of it was shown. */
+	/** Only part of it was shown, such as a search excerpt or its properties. */
 	| 'excerpt'
 	/** The note exists but its text was not in the model's context for this answer: unverified. */
 	| 'unread'

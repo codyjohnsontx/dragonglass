@@ -294,7 +294,7 @@ text ties the list to output formats that change for the model's sake (search
 results gained auto-read and linked notes within a few releases). Structured
 sources cost one optional field on stored tool and user messages and let a
 cited note whose text was not in the model's context be marked unverified,
-and one only seen as a search excerpt be marked as such. A user message saved
+and one only partly seen (a search excerpt, or its properties) be marked as such. A user message saved
 before this has no sources record, so its turn gets no list and its links
 stay plain links rather than all showing as unverified; in later turns of
 that conversation a cited note the record does not show as read is left
