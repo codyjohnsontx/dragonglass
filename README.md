@@ -333,9 +333,17 @@ vault:
   search words, declining, Stop while it waits, preferred sites widening to
   the whole web, page reads, `[web N]` links, Save to vault through review,
   and no web tool without a key.
+- Folder, move, property and section changes with a scripted model: Approve
+  all then Undo all across a new folder, a move that updates links (including
+  Obsidian's update-links prompt when automatic updates are off), a move into
+  a new folder reverted with the folder removed, a property change applied and
+  reverted exactly, a stale property change refused, and `replace_section`
+  refusing a missing or ambiguous heading.
 - Conversation history persists across plugin reload.
 
-Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
+Verified live against Ollama with qwen3:8b on a laptop (every scenario above
+except the folder, move, property and section changes, which have run only
+with the scripted model).
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
