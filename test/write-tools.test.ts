@@ -67,6 +67,39 @@ describe('replace_section', () => {
 		expect(() => replaceSection('---\n# fake: 1\n---\n# Real\n', 'fake: 1', 'x')).toThrow(/No heading/);
 	});
 
+	it('keeps later sections when a line only looks like a code fence', () => {
+		const rest = '\n\n# Act Two\n\nkeep me\n';
+		expect(replaceSection(`# Act One\n\nold\n\n\`\`\`x\`\`\` is the password${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
+		expect(replaceSection(`# Act One\n\n\`\`\`\n\`\`\`js\n# not a heading\n\`\`\`${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
+		expect(replaceSection(`# Act One\n\n~~~ \`x\`\n# not a heading\n~~~~${rest}`, 'Act One', 'new')).toBe(`# Act One\n\nnew${rest}`);
+		expect(replaceSection(`# Act One\r\n\r\nold\r\n\r\n\`\`\`x\`\`\` y\r\n\r\n# Act Two\r\n\r\nkeep me\r\n`, 'Act One', 'new')).toContain('# Act Two\r\n\r\nkeep me\r\n');
+		expect(() => replaceSection('# A\n\n```\n```js\n# not a heading\n```\n', 'not a heading', 'x')).toThrow(/No heading/);
+	});
+
+	it('ends a section at indented, empty and underlined headings', () => {
+		for (const next of ['   # B', '## ', '##', '## ##', 'B\n===', 'B\n---', 'Two lines\nof title\n---', 'Two lines\n    run on\n---']) {
+			expect(replaceSection(`## A\n\nold\n\n${next}\n\nkeep me\n`, 'A', 'new')).toBe(`## A\n\nnew\n\n${next}\n\nkeep me\n`);
+		}
+		expect(replaceSection('# A\n\nold\n\n## B\n---\n\nC\n---\n\nsub\n\nD\n=\n\nkeep me\n', 'A', 'new')).toBe('# A\n\nnew\n\nD\n=\n\nkeep me\n');
+	});
+
+	it('does not end a section at text that is not a heading', () => {
+		for (const body of ['old\n\n---\n\nmore', '- item\n---\n\nmore', '> quote\n---\n\nmore', '    # indented code\n\nmore', '    code\n---\n\nmore', '#hashtag\n\n####### seven']) {
+			expect(replaceSection(`## A\n\n${body}\n`, 'A', 'new')).toBe('## A\n\nnew\n');
+		}
+	});
+
+	it('rewrites under an underlined heading, keeping its underline', () => {
+		expect(replaceSection('Act One\n===\n\nold\n\nAct Two\n===\n', 'Act One', 'new')).toBe('Act One\n===\n\nnew\n\nAct Two\n===\n');
+		expect(replaceSection('Two lines\nof title\n---\nold\n', 'Two lines of title', 'new')).toBe('Two lines\nof title\n---\nnew\n');
+	});
+
+	it('cannot name an empty heading, and leaves it out of the headings it lists', () => {
+		expect(() => replaceSection('## \n\nold\n', '', 'x')).toThrow(/needs the text of a heading/);
+		expect(() => replaceSection('# A\n\n## \n\n### B\n', 'Nope', 'x')).toThrow(/Its headings are: # A; ### B\./);
+		expect(() => replaceSection('# A\n\n## \n\n### B\n\n# C\n\n### B\n', 'B', 'x')).toThrow(/### B under "A"; ### B under "C"/);
+	});
+
 	it('replaces the last section to the end of the note and keeps its final newline', () => {
 		expect(replaceSection('# A\nold\n', 'A', 'new')).toBe('# A\nnew\n');
 		expect(replaceSection('# A\nold', 'A', 'new')).toBe('# A\nnew');
@@ -313,6 +346,8 @@ describe('propose_move_note', () => {
 		const result = await call('propose_move_note', { path: 'Lore/Ashen Gate.md', new_path: 'Lore/The Ashen Gate.md', summary: 'Full name' });
 		const p = result.proposal!;
 		expect(p.kind).toBe('move');
+		expect(p.before).toBeNull();
+		expect(p.after).toBe('');
 		expect(p.linkUpdates).toEqual(['Script/Act One.md', 'Script/Act Two.md']);
 		expect(result.content).toMatch(/Obsidian updates the links to it in 2 other notes/);
 		expect(vault.exists('Lore/Ashen Gate.md')).toBe(true);

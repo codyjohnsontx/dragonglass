@@ -453,7 +453,10 @@ edit elsewhere in the note, including a link Obsidian rewrote, survives.
 Section replace is an operation of `propose_edit_note` (`replace_section`)
 rather than its own tool, so every text change to one note stays one
 proposal and one diff. A section runs from its heading to the next heading
-of the same or a higher level; headings in frontmatter and fenced code do
+of the same or a higher level. Boundaries follow Markdown, since a heading
+the parser missed would put the sections after it inside the rewrite:
+indented and underlined (setext) headings count, an empty heading ends a
+section but cannot be named, and headings in frontmatter and fenced code do
 not count. The heading is named by its text exactly as the note has it
 (trimmed, case-sensitive, without `#`s), and `content` is the section body
 only: the heading line stays and is never taken from `content`, so content

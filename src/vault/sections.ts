@@ -1,15 +1,19 @@
 /**
  * Sections of a note by heading, for `replace_section` edits. A section is a
- * heading line and everything after it up to the next heading of the same or
- * a higher level (fewer `#`), or the end of the note. Headings inside the
+ * heading and everything after it up to the next heading of the same or a
+ * higher level, or the end of the note. Boundaries follow Markdown: `#`
+ * headings and underlined (setext) headings count, including an empty `#`
+ * heading, which ends a section but cannot be named. Headings inside the
  * frontmatter and inside fenced code blocks do not count.
  */
 
 export interface Heading {
 	level: number;
 	text: string;
-	/** Line index of the heading. */
+	/** Line index where the heading starts. */
 	line: number;
+	/** Line index just after the heading: past the underline of a setext heading. */
+	body: number;
 	/** Texts of the headings it sits under, outermost first. */
 	parents: string[];
 }
@@ -21,34 +25,53 @@ export class SectionError extends Error {
 	}
 }
 
-const HEADING = /^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*\r?$/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))??(?:[ \t]+#+)?[ \t]*$/;
+const FENCE_OPEN = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const SETEXT_UNDERLINE = /^ {0,3}(=+|-+)[ \t]*$/;
+const QUOTE_OR_LIST = /^ {0,3}(?:>|[-+*][ \t]|\d{1,9}[.)][ \t])/;
+const INDENTED = /^(?: {4}|\t)/;
 
-/** The note's ATX headings in order, with the headings each one sits under. */
+/** The note's headings in order, with the headings each one sits under. */
 export function listHeadings(lines: readonly string[]): Heading[] {
 	const out: Heading[] = [];
 	const stack: Heading[] = [];
-	let i = frontmatterEnd(lines);
+	const add = (level: number, text: string, line: number, body: number) => {
+		while (stack.length > 0 && (stack[stack.length - 1]?.level ?? 0) >= level) stack.pop();
+		const heading = { level, text, line, body, parents: stack.map((h) => h.text) };
+		out.push(heading);
+		if (text !== '') stack.push(heading);
+	};
 	let fence: string | null = null;
-	for (; i < lines.length; i++) {
-		const line = lines[i] ?? '';
-		const f = FENCE.exec(line);
-		if (f) {
-			const marker = f[1] ?? '';
-			if (fence === null) fence = marker;
-			else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+	/** First line of the paragraph being read, which an underline turns into a heading. */
+	let paragraph: number | null = null;
+	for (let i = frontmatterEnd(lines); i < lines.length; i++) {
+		const line = (lines[i] ?? '').replace(/\r$/, '');
+		if (fence !== null) {
+			const close = FENCE_CLOSE.exec(line)?.[1] ?? '';
+			if (close[0] === fence[0] && close.length >= fence.length) fence = null;
 			continue;
 		}
-		if (fence !== null) continue;
-		const m = HEADING.exec(line);
-		if (!m) continue;
-		const level = (m[1] ?? '').length;
-		const text = (m[2] ?? '').trim();
-		if (text === '') continue;
-		while (stack.length > 0 && (stack[stack.length - 1]?.level ?? 0) >= level) stack.pop();
-		const heading = { level, text, line: i, parents: stack.map((h) => h.text) };
-		out.push(heading);
-		stack.push(heading);
+		const open = FENCE_OPEN.exec(line)?.[1];
+		const atx = ATX_HEADING.exec(line);
+		const underline = SETEXT_UNDERLINE.exec(line)?.[1];
+		if (open) {
+			fence = open;
+			paragraph = null;
+		} else if (atx) {
+			add((atx[1] ?? '').length, (atx[2] ?? '').trim(), i, i + 1);
+			paragraph = null;
+		} else if (underline) {
+			if (paragraph !== null) {
+				const text = lines.slice(paragraph, i).map((l) => l.trim()).join(' ');
+				add(underline[0] === '=' ? 1 : 2, text, paragraph, i + 1);
+			}
+			paragraph = null;
+		} else if (line.trim() === '' || QUOTE_OR_LIST.test(line)) {
+			paragraph = null;
+		} else if (paragraph === null && !INDENTED.test(line)) {
+			paragraph = i;
+		}
 	}
 	return out;
 }
@@ -93,7 +116,7 @@ function headingsAt(headings: readonly Heading[], path: readonly string[]): Head
  * several.
  */
 export function findHeading(lines: readonly string[], raw: string): Heading {
-	const headings = listHeadings(lines);
+	const headings = listHeadings(lines).filter((h) => h.text !== '');
 	const exact = headings.filter((h) => h.text === raw.trim());
 	const matches = exact.length > 0 ? exact : headingsAt(headings, parseTarget(raw));
 	if (matches.length === 1) return matches[0] as Heading;
@@ -112,7 +135,7 @@ export function findHeading(lines: readonly string[], raw: string): Heading {
 
 /**
  * Replace the body of the section `heading` names with `content`, keeping
- * the heading line itself. A blank line after the heading and before the
+ * the heading itself. A blank line after the heading and before the
  * next heading is kept as the note had it.
  */
 export function replaceSection(text: string, heading: string, content: string): string {
@@ -120,7 +143,7 @@ export function replaceSection(text: string, heading: string, content: string): 
 	const target = findHeading(lines, heading);
 	const next = listHeadings(lines).find((h) => h.line > target.line && h.level <= target.level);
 	const end = next ? next.line : lines.length;
-	const body = lines.slice(target.line + 1, end);
+	const body = lines.slice(target.body, end);
 	const blankAfterHeading = body.length > 0 && (body[0] ?? '').trim() === '';
 
 	const replacement = content.replace(/\r\n/g, '\n').split('\n');
@@ -134,5 +157,5 @@ export function replaceSection(text: string, heading: string, content: string): 
 	}
 	if (next && (body.length === 0 || (body[body.length - 1] ?? '').trim() === '')) section.push('');
 	else if (end === lines.length && text.endsWith('\n')) section.push('');
-	return [...lines.slice(0, target.line + 1), ...section, ...lines.slice(end)].join('\n');
+	return [...lines.slice(0, target.body), ...section, ...lines.slice(end)].join('\n');
 }

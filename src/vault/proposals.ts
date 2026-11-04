@@ -35,13 +35,12 @@ export interface ChangeProposal {
 	kind: ProposalKind;
 	/** The note (or, for `folder`, the folder) the proposal is about; for `move`, where the note is now. */
 	path: string;
-	/** Content when the proposal was computed; null for create and folder. */
+	/** Content when the proposal was computed; null for create, folder and move. */
 	before: string | null;
 	/**
-	 * Content after the change: the new note for create and edit, the note
-	 * unchanged for move, empty for folder. For frontmatter it is empty
-	 * while pending, since Obsidian writes the YAML, and set to the note as
-	 * written once applied.
+	 * Content after the change: the new note for create and edit, empty for
+	 * folder and move. For frontmatter it is empty while pending, since
+	 * Obsidian writes the YAML, and set to the note as written once applied.
 	 */
 	after: string;
 	/** SHA-256 of `before` for edit and frontmatter; null otherwise. */
@@ -204,11 +203,10 @@ export class ProposalEngine {
 	async proposeMove(conversationId: string, rawPath: string, rawNewPath: string, summary: string): Promise<ChangeProposal> {
 		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
 		const newPath = validateVaultPath(rawNewPath, { configDir: this.vault.configDir });
-		const content = await this.vault.readNote(path);
-		if (content === null) throw new ProposalError(`No note found at ${path}.`);
+		if ((await this.vault.readNote(path)) === null) throw new ProposalError(`No note found at ${path}.`);
 		if (newPath === path) throw new ProposalError('The new path is the same as the current one.');
 		if (this.vault.exists(newPath)) throw new ProposalError(`A file already exists at ${newPath}. Choose another name.`);
-		const proposal = this.base(conversationId, 'move', path, content, content, null, summary);
+		const proposal = this.base(conversationId, 'move', path, null, '', null, summary);
 		proposal.newPath = newPath;
 		proposal.linkUpdates = await this.linkUpdates(path, newPath);
 		return proposal;
