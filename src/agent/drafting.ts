@@ -110,14 +110,17 @@ export function draftVersions(messages: readonly StoredMessage[], thread: string
 	return out;
 }
 
-/** The insert a thread's card reviews: its newest, whichever version it came from, that was not rejected (superseded or declined). */
+/**
+ * The insert a thread's card reviews, whichever version it came from: the
+ * newest that can still be acted on (approved, or reverted once applied),
+ * else the newest that was not rejected (superseded or declined).
+ */
 export function latestInsert(versions: readonly DraftVersion[], proposals: Readonly<Record<string, ChangeProposal>>): ChangeProposal | null {
-	let latest: ChangeProposal | null = null;
-	for (const id of versions.flatMap((v) => v.inserts)) {
-		const proposal = proposals[id];
-		if (proposal && proposal.status !== 'rejected' && (!latest || proposal.createdAt > latest.createdAt)) latest = proposal;
-	}
-	return latest;
+	const inserts = versions
+		.flatMap((v) => v.inserts.flatMap((id) => proposals[id] ?? []))
+		.filter((p) => p.status !== 'rejected')
+		.sort((a, b) => b.createdAt - a.createdAt);
+	return inserts.find((p) => p.status === 'pending' || p.status === 'stale' || p.status === 'applied') ?? inserts[0] ?? null;
 }
 
 /**

@@ -247,7 +247,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Script folder',
-						desc: 'Optional. The folder that holds your screenplay, for example Script. Notes in it are the script, not lore, so search leaves them out when the model looks things up for a draft. Drafts always go into the note you have open; they match its format when it is in this folder or attached to your message, and are Fountain otherwise.',
+						desc: 'Optional. The folder that holds your screenplay, for example Script. Notes in it are the script, not lore, so search and related notes leave them out when the model looks things up for a draft. Drafts always go into the note you have open; they match its format when it is in this folder or attached to your message, and are Fountain otherwise.',
 						control: {
 							type: 'text',
 							key: 'scriptFolder',

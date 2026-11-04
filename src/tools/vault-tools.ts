@@ -1,3 +1,4 @@
+import { isScriptNote } from '../agent/drafting';
 import type { Source } from '../agent/sources';
 import { AgentTool, ToolResult } from '../agent/tools';
 import { estimateTokens, prefixWithinTokens } from '../providers/types';
@@ -23,7 +24,7 @@ export interface VaultToolOptions {
 	maxSearchResults: number;
 	/** Estimated tokens of full note text search_notes appends after its results; 0 or unset for excerpts only. */
 	autoReadTokens?: number;
-	/** The script folder, normalized: search_notes leaves its notes out, as they are the screenplay, not lore. Unset or "" for none. */
+	/** The script folder, normalized: search_notes and related_notes leave its notes out, as they are the screenplay, not lore. Unset or "" for none. */
 	excludeFolder?: string;
 }
 
@@ -47,7 +48,7 @@ export function createVaultTools(
 		readNoteTool(vault, opts),
 		searchNotesTool(vault, index, opts),
 		getNoteMetadataTool(vault),
-		relatedNotesTool(vault),
+		relatedNotesTool(vault, opts),
 		getActiveNoteTool(vault, opts),
 		proposeCreateNoteTool(proposals, turn),
 		proposeEditNoteTool(proposals, turn),
@@ -516,7 +517,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 const DEFAULT_RELATED = 10;
 const MAX_RELATED = 25;
 
-function relatedNotesTool(vault: VaultPort): AgentTool {
+function relatedNotesTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
 	return {
 		name: 'related_notes',
 		description:
@@ -539,7 +540,9 @@ function relatedNotesTool(vault: VaultPort): AgentTool {
 				if (!vault.getMetadata(found.path)) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
 				const asked = typeof args['limit'] === 'number' ? Math.floor(args['limit']) : DEFAULT_RELATED;
 				const limit = Math.min(Math.max(asked, 1), MAX_RELATED);
-				const { notes, total } = relatedNotes(vault.linkGraph(), found.path, limit);
+				const script = options().excludeFolder ?? '';
+				const graph = vault.linkGraph();
+				const { notes, total } = relatedNotes(isScriptNote(found.path, script) ? graph : graph.filter((n) => !isScriptNote(n.path, script)), found.path, limit);
 				const name = `[[${baseName(found.path)}]]`;
 				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes share links or tags with ${name} (${found.path}).`));
 				const lines = notes.map((n, i) => `${i + 1}. ${linkLabel(n.path)}\n${n.reasons.map((r) => `   - ${r}`).join('\n')}`);

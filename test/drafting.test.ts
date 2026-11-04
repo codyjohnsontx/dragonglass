@@ -253,7 +253,7 @@ describe('drafting rules in the system prompt', () => {
 		const vault = new MemoryVaultPort({ 'Script/Scene 12.md': '', 'Characters/Kael.md': '' });
 		const map = vaultMap(vault, 'Script/Scene 12.md', 'Script');
 		expect(map.scriptFolder).toBe('Script');
-		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: map })).toMatch(/\nScript folder: Script\/ holds the screenplay, not lore; search_notes leaves it out\.$/);
+		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: map })).toMatch(/\nScript folder: Script\/ holds the screenplay, not lore; search_notes and related_notes leave it out\.$/);
 		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: vaultMap(vault, null) })).not.toContain('Script folder');
 	});
 });
@@ -387,6 +387,38 @@ describe('the insert under review', () => {
 		expect(latest()).toBe(declined);
 		proposals.reject(declined);
 		expect(latest()).toBe(applied);
+	});
+
+	it('goes past a reverted insert to the applied one under it, so its Revert stays', async () => {
+		const { proposals, v1, v2, insert, latest } = setup();
+		const under = await insert(v2, 'SECOND');
+		await proposals.apply(under);
+		const over = await insert(v1, 'FIRST');
+		await proposals.apply(over);
+		expect(latest()).toBe(over);
+		await proposals.revert(over);
+		expect(over.status).toBe('reverted');
+		expect(latest()).toBe(under);
+	});
+
+	it('goes past a failed insert to the applied one', async () => {
+		const { proposals, v1, v2, insert, latest } = setup();
+		const applied = await insert(v2, 'SECOND');
+		await proposals.apply(applied);
+		const failed = await insert(v1, 'FIRST');
+		failed.status = 'failed';
+		expect(latest()).toBe(applied);
+	});
+
+	it('falls back to the newest finished insert when none can be acted on', async () => {
+		const { proposals, v1, v2, insert, latest } = setup();
+		const first = await insert(v2, 'SECOND');
+		await proposals.apply(first);
+		await proposals.revert(first);
+		const second = await insert(v1, 'FIRST');
+		await proposals.apply(second);
+		await proposals.revert(second);
+		expect(latest()).toBe(second);
 	});
 
 	it('is nothing before an insert, or when every insert was rejected', async () => {

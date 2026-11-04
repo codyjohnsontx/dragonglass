@@ -127,7 +127,7 @@ function describeVaultMap(map: VaultMap): string[] {
 	const more = map.folders.length > shown.length ? `, and ${map.folders.length - shown.length} more` : '';
 	const lines = [`Vault: ${notes}. Top-level folders: ${shown.length ? shown.join(', ') + more : 'none'}.`];
 	if (map.activeNotePath) lines.push(`Active note: ${map.activeNotePath} ([[${baseName(map.activeNotePath)}]]).`);
-	if (map.scriptFolder) lines.push(`Script folder: ${map.scriptFolder}/ holds the screenplay, not lore; search_notes leaves it out.`);
+	if (map.scriptFolder) lines.push(`Script folder: ${map.scriptFolder}/ holds the screenplay, not lore; search_notes and related_notes leave it out.`);
 	return lines;
 }
 

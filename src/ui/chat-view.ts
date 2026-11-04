@@ -516,21 +516,19 @@ export class ChatView extends ItemView {
 			const el = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`);
 			if (!el) continue;
 			const review = el.closest<HTMLElement>('[data-review-turn]');
-			const draft = el.closest<HTMLElement>('[data-draft-thread]');
-			const card = review ?? draft ?? el;
-			if (redrawn.has(card)) continue;
-			redrawn.add(card);
 			if (review) {
+				if (redrawn.has(review)) continue;
+				redrawn.add(review);
 				const turn = turns.find((t) => t.proposals.includes(p));
 				if (turn) this.drawReview(conv, turn, review);
-			} else if (draft) {
+				continue;
+			}
+			const draft = el.closest<HTMLElement>('[data-draft-thread]');
+			if (draft) {
 				// Only the review: redrawing the whole card would replace its Insert button mid-click, as the
 				// editor's save on blur fires this between the mousedown and mouseup of a click on Insert.
 				const thread = draft.dataset['draftThread'] ?? '';
 				renderProposalCard(this.app, this.core, conv, p, el, () => this.redrawDraft(conv, thread));
-			} else {
-				// A card of its own, such as the research note under a web answer.
-				renderProposalCard(this.app, this.core, conv, p, el, () => this.renderMessages());
 			}
 		}
 	}

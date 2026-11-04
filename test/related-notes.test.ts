@@ -27,10 +27,10 @@ function related(notes: Record<string, string>, target: string, limit = 10) {
 	return relatedNotes(new MemoryVaultPort(notes).linkGraph(), target, limit);
 }
 
-function tool(notes: Record<string, string>) {
+function tool(notes: Record<string, string>, excludeFolder?: string) {
 	const vault = new MemoryVaultPort(notes);
 	const registry = new ToolRegistry();
-	for (const t of createVaultTools(vault, new ProposalEngine(vault), DEFAULT_TOOL_OPTIONS, new VaultSearchIndex(vault, () => Promise.resolve()))) registry.register(t);
+	for (const t of createVaultTools(vault, new ProposalEngine(vault), { ...DEFAULT_TOOL_OPTIONS, excludeFolder }, new VaultSearchIndex(vault, () => Promise.resolve()))) registry.register(t);
 	return registry.get('related_notes')!;
 }
 
@@ -163,6 +163,34 @@ describe('related_notes tool', () => {
 		expect(r.content).toContain('read_note the ones that matter before citing them as [[Name]]');
 		expect(r.content).not.toContain('more related notes not shown');
 		expect(r.sources).toBeUndefined();
+	});
+
+	it('leaves script pages out of a lore note\'s related notes, as results and as evidence', async () => {
+		const notes = {
+			'Characters/Kael.md': '# Kael\n\nSee [[Mira]].\n',
+			'Characters/Mira.md': '# Mira\n',
+			'Characters/Brann.md': '# Brann\n',
+			'Script/Scene 12.md': '# Scene 12\n\n[[Kael]] and [[Brann]] argue.\n',
+		};
+		const unset = await tool(notes).execute({ path: 'Kael' }, ctx);
+		expect(unset.content).toContain('Scene 12 (Script/Scene 12.md)');
+		expect(unset.content).toContain('Brann (Characters/Brann.md)');
+
+		const lore = await tool(notes, 'Script').execute({ path: 'Kael' }, ctx);
+		expect(lore.content).toContain('Mira (Characters/Mira.md)');
+		expect(lore.content).not.toContain('Scene 12');
+		expect(lore.content).not.toContain('Brann');
+	});
+
+	it('keeps script pages when the queried note is itself in the script folder', async () => {
+		const notes = {
+			'Characters/Kael.md': '# Kael\n',
+			'Script/Scene 12.md': '# Scene 12\n\n[[Kael]] waits. Next: [[Scene 13]].\n',
+			'Script/Scene 13.md': '# Scene 13\n\n[[Kael]] leaves.\n',
+		};
+		const r = await tool(notes, 'Script').execute({ path: 'Script/Scene 12.md' }, ctx);
+		expect(r.content).toContain('Scene 13 (Script/Scene 13.md)');
+		expect(r.content).toContain('Kael (Characters/Kael.md)');
 	});
 
 	it('leaves a related note cited without being read unverified in the sources list', async () => {
