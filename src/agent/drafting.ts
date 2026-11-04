@@ -171,7 +171,7 @@ const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 const SCENE_HEADING = /^(?:INT|EXT|EST|INT\.?\/EXT|I\/E)[. ]/i;
 /** A line Fountain forces into a scene heading, with a leading dot. */
 const FORCED_HEADING = /^\.[A-Za-z]/;
-const TRANSITION = /^[A-Z][A-Z .]*TO:$|^> /;
+const TRANSITION = /^[A-Z][A-Z .]*TO:$|^> ?[A-Z][A-Z .]*[.:]$/;
 /** A character cue: a few capitalized words, optionally with an extension such as (V.O.). */
 const CHARACTER_CUE = /^(?:[A-Z][A-Z0-9'.-]*)(?: [A-Z][A-Z0-9'.-]*){0,3}(?: \([A-Z.' ]+\))?$/;
 const MD_HEADING = /^#{1,6}\s+\S/;
@@ -181,8 +181,8 @@ const MD_BOLD_CUE = /^\*\*[^*\n]{1,40}\*\*:?\s*$|^\*\*[^*\n]{1,40}:\*\*\s/;
 /**
  * Which conventions a script note follows, from counting its tells: scene
  * headings, forced headings, transitions and character cues with dialogue
- * under them say Fountain; bold cues and headings say a Markdown screenplay;
- * anything else is prose. A note too short to tell gets the default,
+ * under them say Fountain; bold character cues, helped by headings, say a
+ * Markdown screenplay; anything else is prose. A note too short to tell gets the default,
  * Fountain. Deliberately simple: a few line patterns, no parser.
  */
 export function inferFormat(content: string): DraftFormat {
@@ -191,16 +191,19 @@ export function inferFormat(content: string): DraftFormat {
 	if (filled.length < MIN_LINES_TO_MATCH) return 'fountain';
 	let fountain = 0;
 	let markdown = 0;
+	let boldCues = 0;
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]!;
 		if (SCENE_HEADING.test(line) || FORCED_HEADING.test(line)) fountain += 2;
 		else if (TRANSITION.test(line)) fountain += 1;
 		else if (CHARACTER_CUE.test(line) && hasDialogueUnder(lines, i)) fountain += 1;
-		if (MD_BOLD_CUE.test(line)) markdown += 2;
-		else if (MD_HEADING.test(line)) markdown += 1;
+		if (MD_BOLD_CUE.test(line)) {
+			markdown += 2;
+			boldCues++;
+		} else if (MD_HEADING.test(line)) markdown += 1;
 	}
 	if (fountain >= 2 && fountain >= markdown) return 'fountain';
-	if (markdown >= 2) return 'markdown';
+	if (boldCues > 0) return 'markdown';
 	return 'prose';
 }
 
