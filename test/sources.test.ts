@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { citationRules } from '../src/agent/context';
+import { buildSystemPrompt } from '../src/agent/context';
 import { answerSources, extractCitations, linkWebMarkers, sanitizeSources, Source, WebSource } from '../src/agent/sources';
 import { ToolRegistry } from '../src/agent/tools';
 import { StoredMessage } from '../src/persistence/conversation';
@@ -72,17 +72,22 @@ describe('answerSources', () => {
 		});
 	});
 
-	it('shows a cited note the conversation never showed as unread, and counts notes read in earlier turns and attached context', () => {
+	it('counts tool reads from earlier turns but attached context only in its own turn', () => {
 		const t1 = msg('user', 'Tell me about Mira', { context: { activeNotePath: 'Characters/Mira.md', selection: null, attachments: [] } });
+		const s1 = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
+		const r1 = msg('tool', 'Kael...', { toolCallId: 't1', sources: [read('Characters/Kael.md')] });
 		const a1 = msg('assistant', 'She leads the scouts [[Mira]].');
 		const t2 = msg('user', 'And Kael?', { context: { activeNotePath: null, selection: null, attachments: [{ path: 'Places/Ashfall.md' }] } });
 		const a2 = msg('assistant', 'Mira [[Mira]] trusts him; he is from [[Ashfall]] and is loyal [[Kael]].');
-		const { lists } = answerSources([t1, a1, t2, a2], resolve);
-		expect(lists.get(a1.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'read', cited: true }]);
-		expect(lists.get(a2.id)?.vault).toEqual([
+		const { lists } = answerSources([t1, s1, r1, a1, t2, a2], resolve);
+		expect(lists.get(a1.id)?.vault).toEqual([
 			{ link: 'Mira', path: 'Characters/Mira.md', status: 'read', cited: true },
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read', cited: false },
+		]);
+		expect(lists.get(a2.id)?.vault).toEqual([
+			{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread', cited: true },
 			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'read', cited: true },
-			{ link: 'Kael', path: 'Characters/Kael.md', status: 'unread', cited: true },
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read', cited: true },
 		]);
 	});
 
@@ -143,13 +148,11 @@ describe('tools report what they showed', () => {
 	});
 });
 
-describe('citationRules', () => {
-	it('asks for note markers and own-suggestion phrasing, and adds the web marker only with web sources', () => {
-		const vaultOnly = citationRules(false).join('\n');
-		expect(vaultOnly).toContain('[[Kael]]');
-		expect(vaultOnly).toMatch(/suggestion, not as fact/);
-		expect(vaultOnly).toMatch(/Do not write a sources list/);
-		expect(vaultOnly).not.toContain('[web');
-		expect(citationRules(true).join('\n')).toContain('[web 2]');
+describe('system prompt', () => {
+	it('adds the [web N] marker rule only when web sources can be in the conversation', () => {
+		for (const toolsEnabled of [true, false]) {
+			expect(buildSystemPrompt({ toolsEnabled, maxCharsPerNote: 100 })).not.toContain('[web');
+			expect(buildSystemPrompt({ toolsEnabled, maxCharsPerNote: 100, webSources: true })).toContain('[web');
+		}
 	});
 });

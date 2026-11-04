@@ -118,13 +118,16 @@ Read tools report what they showed as `Source`s on their result: `read_note`
 and `get_active_note` the note they read, `search_notes` each listed note as an
 excerpt or, when its text was auto-read, in full. A web tool reports each page
 as `{ kind: 'web', n, url, title }`, numbered as the model saw it. Notes the
-user attached, and the active note sent as context, count as read in full.
+user attached, and the active note sent as context, count as read in full for
+their own turn only: the context block is sent with the latest user message
+and is not replayed later.
 
 `answerSources` (`agent/sources.ts`) walks the stored conversation per user
 turn and checks the answer's citations against that record, not against the
 model's word: a cited note is *read*, *excerpt* (only a search excerpt was
 shown), *unread* (never shown: unverified) or *missing* (the link resolves to
-no note), counting anything shown earlier in the conversation. Notes read in
+no note), counting tool results from earlier turns, which are replayed, and
+this turn's attached context. Notes read in
 full this turn but not cited are listed after the cited ones. Cited `[web N]`
 numbers map to that turn's web sources; a number no result gave is
 unverified. `ui/sources-list.ts` renders the list under the turn's last

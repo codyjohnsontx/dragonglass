@@ -76,7 +76,7 @@ export function buildSystemPrompt(opts: PromptOptions): string {
  * cited sources under the answer itself, so the model must not write its own
  * list, and it checks the citations against what the model was shown.
  */
-export function citationRules(web: boolean): string[] {
+function citationRules(web: boolean): string[] {
 	const lines = [
 		'- Cite sources: put a note\'s link right after each claim taken from it, e.g. "Kael distrusts the Council [[Kael]]." Cite only notes whose text you were shown.',
 	];

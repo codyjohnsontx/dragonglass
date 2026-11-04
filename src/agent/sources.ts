@@ -132,11 +132,10 @@ export function sanitizeSources(raw: unknown): Source[] {
 }
 
 /** What a user message's attached context showed the model. */
-function contextSources(m: StoredMessage): VaultSource[] {
+function contextPaths(m: StoredMessage): string[] {
 	const ctx = m.context;
 	if (!ctx) return [];
-	const paths = [ctx.activeNotePath, ...ctx.attachments.map((a) => a.path)].filter((p): p is string => typeof p === 'string' && p !== '');
-	return paths.map((path) => ({ kind: 'vault', path, seen: 'full' }));
+	return [ctx.activeNotePath, ...ctx.attachments.map((a) => a.path)].filter((p): p is string => typeof p === 'string' && p !== '');
 }
 
 /**
@@ -144,9 +143,10 @@ function contextSources(m: StoredMessage): VaultSource[] {
  * message (where the list is shown), plus the turn's web sources keyed by
  * every assistant message of the turn so each can link its markers.
  *
- * A note counts as read when anything earlier in the conversation, up to the
- * end of this turn, showed its text: the model still has it in context. Web
- * numbers are per turn, as the tools number them.
+ * A note counts as read when a tool result earlier in the conversation, up to
+ * the end of this turn, showed its text (tool results are replayed every
+ * turn), or when this turn's attached context did (attached context is sent
+ * with its own turn only). Web numbers are per turn, as the tools number them.
  */
 export function answerSources(messages: StoredMessage[], resolve: LinkResolver): { lists: Map<string, AnswerSources>; web: Map<string, WebSource[]> } {
 	const lists = new Map<string, AnswerSources>();
@@ -162,10 +162,14 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 	let i = 0;
 	while (i < messages.length) {
 		const turnRead = new Set<string>();
+		const turnContext = new Set<string>();
 		const web: WebSource[] = [];
 		const assistants: StoredMessage[] = [];
 		if (messages[i]?.role === 'user') {
-			for (const s of contextSources(messages[i]!)) note(s, turnRead);
+			for (const path of contextPaths(messages[i]!)) {
+				turnContext.add(path);
+				turnRead.add(path);
+			}
 			i++;
 		}
 		for (; i < messages.length && messages[i]!.role !== 'user'; i++) {
@@ -183,7 +187,8 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 		}
 		if (assistants.length === 0) continue;
 		for (const a of assistants) webByMessage.set(a.id, web);
-		const list = buildList(assistants.map((a) => a.content).join('\n\n'), turnRead, seenEver, web, resolve);
+		const seen = (path: string) => (turnContext.has(path) ? 'full' : seenEver.get(path));
+		const list = buildList(assistants.map((a) => a.content).join('\n\n'), turnRead, seen, web, resolve);
 		if (list.vault.length > 0 || list.web.length > 0) lists.set(assistants[assistants.length - 1]!.id, list);
 	}
 	return { lists, web: webByMessage };
@@ -192,7 +197,7 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 function buildList(
 	answer: string,
 	turnRead: Set<string>,
-	seenEver: Map<string, 'full' | 'excerpt'>,
+	seen: (path: string) => 'full' | 'excerpt' | undefined,
 	web: WebSource[],
 	resolve: LinkResolver,
 ): AnswerSources {
@@ -203,8 +208,8 @@ function buildList(
 		const path = resolve(link);
 		if (path !== null && citedPaths.has(path)) continue;
 		if (path !== null) citedPaths.add(path);
-		const seen = path === null ? undefined : seenEver.get(path);
-		const status: VaultCitationStatus = path === null ? 'missing' : seen === 'full' ? 'read' : seen === 'excerpt' ? 'excerpt' : 'unread';
+		const shown = path === null ? undefined : seen(path);
+		const status: VaultCitationStatus = path === null ? 'missing' : shown === 'full' ? 'read' : shown === 'excerpt' ? 'excerpt' : 'unread';
 		vault.push({ link, path, status, cited: true });
 	}
 	for (const path of turnRead) {
