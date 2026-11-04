@@ -50,7 +50,8 @@
  * Tavily search (web_search) under /tavily: POST /tavily/search with `Bearer tvly-fake`
  * (else 401). The query scripts it: `ratelimit` -> 429 with Retry-After, `credits` ->
  * 432, `nothing` -> no results, `widen` -> no results while `include_domains` is set.
- * Otherwise five results pointing at this server's /pages: lore.html (navigation,
+ * Otherwise five results under PAGES_ORIGIN (http://pages.example, since page reads refuse
+ * loopback addresses; map it to this server's /pages to read them): lore.html (navigation,
  * script, entities and an injected instruction around the article), long.html (far
  * over any length cap), plain.txt, doc.pdf (not text) and missing.html (404). Pages
  * also include script.html, whose text only JavaScript would build.
@@ -69,6 +70,7 @@ const ANTHROPIC_KEY = 'sk-ant-fake';
 const GEMINI_KEY = 'gemini-fake';
 const CUSTOM_KEY = 'custom-fake';
 const TAVILY_KEY = 'tvly-fake';
+export const PAGES_ORIGIN = 'http://pages.example';
 
 export function startFakeServer(port = 0) {
 	const requests = [];
@@ -222,7 +224,7 @@ function tavilySearch(req, res, body) {
 	if (/credits/i.test(query)) return json(res, 432, { detail: { error: 'This request exceeds your plan\'s set usage limit.' } });
 	const restricted = Array.isArray(body.include_domains) && body.include_domains.length > 0;
 	if (/nothing/i.test(query) || (/widen/i.test(query) && restricted)) return json(res, 200, { query, results: [], response_time: 0.1 });
-	const base = `http://${req.headers.host}/pages`;
+	const base = `${PAGES_ORIGIN}/pages`;
 	const pages = [
 		['lore.html', 'Kael - Lore Wiki', 'Kael is the exiled captain of the Ember Guard, known for his distrust of the Council.'],
 		['long.html', 'The Long History of Ashfall', 'A very long chronicle of the city of Ashfall.'],

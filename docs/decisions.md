@@ -342,6 +342,15 @@ main or article element. It cannot read pages that build their text with
 JavaScript; the snippet remains. Text is cut to 6,000 characters, and to a
 third of the note token budget when the context window is known.
 
+A page read refuses result URLs whose host is on this computer or the
+local network: loopback, unspecified, link-local, RFC 1918 and IPv6 ULA
+addresses, and localhost and `.local` names. Results are untrusted, and a
+local endpoint's reply would otherwise reach the model, which may be a cloud
+provider. The check is on the URL alone. A public page that redirects to a
+private address, or a public name that resolves to one, is a known residual:
+`requestUrl` follows redirects without showing them, so catching that needs
+a redirect-aware transport, which is left for the owner to decide on.
+
 Web text is framed the way note text is, with stronger delimiters: every
 result and page sits in a `<<<web …>>>` block under a line saying it is
 untrusted, delimiters inside it are defused, and the system prompt says

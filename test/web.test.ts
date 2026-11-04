@@ -4,16 +4,16 @@ import { runAgent, RunEvent } from '../src/agent/runtime';
 import { answerSources, WebSource } from '../src/agent/sources';
 import { ToolRegistry } from '../src/agent/tools';
 import { StoredMessage } from '../src/persistence/conversation';
-import { FetchHttpClient } from '../src/providers/http';
+import { FetchHttpClient, HttpClient, HttpRequest } from '../src/providers/http';
 import { OllamaProvider } from '../src/providers/ollama';
 import { mergeSettings } from '../src/settings';
 import { createWebTools, nextWebNumber, PAGES_PER_SEARCH, WebSearchApprover, WebSearchRequest, WebToolOptions } from '../src/tools/web-tools';
 import { extractPageText } from '../src/web/extract';
-import { fetchPageText, PageFetchError } from '../src/web/pages';
+import { fetchPageText, isLocalHost, PageFetchError } from '../src/web/pages';
 import { buildResearchNote, noteTitle, researchNoteFor } from '../src/web/research-note';
 import { parsePreferredSites, TavilySearch, WebSearchError } from '../src/web/search';
 // @ts-expect-error plain JS module
-import { startFakeServer } from './fake-server/server.mjs';
+import { PAGES_ORIGIN, startFakeServer } from './fake-server/server.mjs';
 
 interface Fake {
 	baseUrl: string;
@@ -31,6 +31,10 @@ beforeEach(() => {
 });
 
 const http = new FetchHttpClient();
+const PAGES = PAGES_ORIGIN as string;
+/** Page reads go to the fake server's /pages, standing in for the public site its Tavily results name. */
+const toFake = (req: HttpRequest): HttpRequest => ({ ...req, url: req.url.replace(PAGES, fake.baseUrl) });
+const web: HttpClient = { supportsStreaming: true, request: (req) => http.request(toFake(req)), stream: (req) => http.stream(toFake(req)) };
 const tavily = (key: string | null = 'tvly-fake') => new TavilySearch(http, () => ({ baseUrl: `${fake.baseUrl}/tavily`, apiKey: () => key }));
 const searches = () => fake.requests.filter((r) => r.url === '/tavily/search');
 const pageRequests = () => fake.requests.filter((r) => r.url.startsWith('/pages/'));
@@ -51,7 +55,7 @@ function tools(overrides: Partial<WebToolOptions> = {}) {
 	const registry = new ToolRegistry();
 	for (const t of createWebTools({
 		search: tavily(),
-		http,
+		http: web,
 		approve: approver().approve,
 		preferredSites: () => [],
 		maxPageChars: 6000,
@@ -103,15 +107,38 @@ describe('extractPageText', () => {
 
 describe('fetchPageText', () => {
 	it('reads HTML and plain text and refuses other content types', async () => {
-		const lore = await fetchPageText(http, `${fake.baseUrl}/pages/lore.html`);
+		const lore = await fetchPageText(web, `${PAGES}/pages/lore.html`);
 		expect(lore.title).toBe('Kael & the Ember Guard - Lore Wiki');
 		expect(lore.text).toContain('Kael is the exiled captain of the Ember Guard.');
 		expect(lore.text).not.toContain('window.track');
-		expect((await fetchPageText(http, `${fake.baseUrl}/pages/plain.txt`)).text).toBe('Year 1: Ashfall founded.\nYear 90: Ashfall falls.');
-		await expect(fetchPageText(http, `${fake.baseUrl}/pages/doc.pdf`)).rejects.toThrow(/application\/pdf/);
-		await expect(fetchPageText(http, `${fake.baseUrl}/pages/missing.html`)).rejects.toThrow(/HTTP 404/);
-		expect((await fetchPageText(http, `${fake.baseUrl}/pages/script.html`)).text).toBe('');
-		await expect(fetchPageText(http, 'file:///etc/passwd')).rejects.toBeInstanceOf(PageFetchError);
+		expect((await fetchPageText(web, `${PAGES}/pages/plain.txt`)).text).toBe('Year 1: Ashfall founded.\nYear 90: Ashfall falls.');
+		await expect(fetchPageText(web, `${PAGES}/pages/doc.pdf`)).rejects.toThrow(/application\/pdf/);
+		await expect(fetchPageText(web, `${PAGES}/pages/missing.html`)).rejects.toThrow(/HTTP 404/);
+		expect((await fetchPageText(web, `${PAGES}/pages/script.html`)).text).toBe('');
+		await expect(fetchPageText(web, 'file:///etc/passwd')).rejects.toBeInstanceOf(PageFetchError);
+	});
+
+	it('refuses addresses on this computer or the local network without requesting them', async () => {
+		for (const url of [
+			`${fake.baseUrl}/pages/lore.html`,
+			'http://localhost:11434/api/tags',
+			'http://router.local/',
+			'http://LOCALHOST./',
+			'http://10.0.0.1/',
+			'http://172.20.1.1/',
+			'http://192.168.1.1/admin',
+			'http://169.254.169.254/latest/meta-data',
+			'http://0.0.0.0:8080/',
+			'http://2130706433/',
+			'http://[::1]/',
+			'http://[::ffff:127.0.0.1]/',
+			'http://[fd12:3456::1]/',
+			'http://[fe80::1]/',
+		]) {
+			await expect(fetchPageText(http, url), url).rejects.toThrow(/local network cannot be read/);
+		}
+		expect(pageRequests()).toHaveLength(0);
+		for (const host of ['lore.example', '172.32.0.1', '192.169.0.1', '8.8.8.8', '[2001:db8::1]', '[fc::1]', 'localhost.example']) expect(isLocalHost(host), host).toBe(false);
 	});
 });
 
@@ -119,7 +146,7 @@ describe('TavilySearch', () => {
 	it('sends the key as a bearer token and the preferred sites only when there are some', async () => {
 		const hits = await tavily().search({ query: 'kael', includeDomains: [], maxResults: 5 });
 		expect(hits).toHaveLength(5);
-		expect(hits[0]).toEqual({ title: 'Kael - Lore Wiki', url: `${fake.baseUrl}/pages/lore.html`, snippet: expect.stringContaining('exiled captain') });
+		expect(hits[0]).toEqual({ title: 'Kael - Lore Wiki', url: `${PAGES}/pages/lore.html`, snippet: expect.stringContaining('exiled captain') });
 		await tavily().search({ query: 'kael', includeDomains: ['lore.example'], maxResults: 3 });
 		const [plain, restricted] = searches();
 		expect(plain?.headers['authorization']).toBe('Bearer tvly-fake');
@@ -171,7 +198,7 @@ describe('web_search', () => {
 		const { search } = tools({ firstNumber: 4 });
 		const result = await search.execute({ query: 'kael' }, ctx());
 		expect(result.content).toContain('untrusted');
-		expect(result.content).toContain(`<<<web result n="4" url="${fake.baseUrl}/pages/lore.html" title="Kael - Lore Wiki">>>`);
+		expect(result.content).toContain(`<<<web result n="4" url="${PAGES}/pages/lore.html" title="Kael - Lore Wiki">>>`);
 		expect(result.sources?.map((s) => (s.kind === 'web' ? s.n : 0))).toEqual([4, 5, 6, 7, 8]);
 	});
 
@@ -221,7 +248,7 @@ describe('read_web_page', () => {
 		expect((await read.execute({ n: 9 }, ctx())).content).toMatch(/no result \[web 9\]/);
 		const page = await read.execute({ n: 1 }, ctx());
 		expect(page.isError).toBeUndefined();
-		expect(page.sources).toEqual([{ kind: 'web', n: 1, url: `${fake.baseUrl}/pages/lore.html`, title: 'Kael - Lore Wiki' }]);
+		expect(page.sources).toEqual([{ kind: 'web', n: 1, url: `${PAGES}/pages/lore.html`, title: 'Kael - Lore Wiki' }]);
 		expect(page.content).toContain('untrusted');
 		expect(page.content).toContain('Kael is the exiled captain of the Ember Guard.');
 		expect((await read.execute({ n: 1 }, ctx())).content).toMatch(/already read/);
@@ -273,7 +300,7 @@ describe('web search in a turn', () => {
 	it('runs search, page read and a cited answer through the agent loop against Ollama', async () => {
 		const { asked, approve } = approver();
 		const registry = new ToolRegistry();
-		for (const t of createWebTools({ search: tavily(), http, approve, preferredSites: () => [], maxPageChars: 6000, firstNumber: 1 })) registry.register(t);
+		for (const t of createWebTools({ search: tavily(), http: web, approve, preferredSites: () => [], maxPageChars: 6000, firstNumber: 1 })) registry.register(t);
 		const provider = new OllamaProvider(http, () => ({ baseUrl: fake.baseUrl, model: 'fake-tools', numCtx: 16384, think: false }));
 		const events: RunEvent[] = [];
 		for await (const ev of runAgent({
