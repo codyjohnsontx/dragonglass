@@ -209,13 +209,19 @@ describe('drafting rules in the system prompt', () => {
 		expect(attached).toContain('<<<sample path="Journal/Today.md">>>');
 		expect(attached).toContain('Format: match the open note [[Today]], which is prose');
 
-		for (const s of [await prompt('Journal/Today.md', null), await prompt('Journal/Today.md', 'Script/Scene 12.md'), await prompt(null, null)]) {
-			expect(s).toContain('Format: Fountain, as nothing in the open note sets a format');
+		const none = await prompt(null, null);
+		expect(none).toContain('Format: Fountain, as nothing in the open note sets a format');
+		expect(none).not.toContain('no script note is shared');
+		for (const s of [await prompt('Journal/Today.md', null), await prompt('Journal/Today.md', 'Script/Scene 12.md')]) {
+			expect(s).toContain('Format: Fountain, as no script note is shared (ask which note the scene is for if it should match one)');
+			expect(s).not.toContain('nothing in the open note sets a format');
+		}
+		for (const s of [await prompt('Journal/Today.md', null), await prompt('Journal/Today.md', 'Script/Scene 12.md'), none]) {
 			expect(s).not.toContain('<<<sample');
 			expect(s).not.toContain('Today');
 			expect(s).not.toContain('Dear diary');
 		}
-		expect(await draftingForSend(vault, null, '')).toEqual(draftingFor(null, null));
+		expect(await draftingForSend(vault, null, '')).toEqual({ ...draftingFor(null, null), withheld: true });
 	});
 
 	it('maps the script folder in the vault outline', () => {

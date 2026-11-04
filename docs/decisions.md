@@ -450,8 +450,9 @@ sample and the format go only when the open note is inside the script
 folder or attached to the message: the open note is the script by the
 owner's choice, but a public plugin should not send an unrelated private
 note (a journal, say) with every message. Otherwise neither is sent, drafts
-default to Fountain, and the model can still read the note with the read
-tools.
+default to Fountain, and the rules tell the model that no script note is
+shared, so it asks which note the scene is for when it should match one and
+can read a note the user names with the read tools.
 
 How Insert writes: a direct editor replace, or a proposal. Writes still never
 write (decision 5). The insert reads the editor at the click (selection or
