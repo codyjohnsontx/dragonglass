@@ -36,6 +36,7 @@ const FLAGS: Record<VaultCitationStatus, string | null> = {
 	excerpt: 'only a search excerpt was read',
 	unread: 'not in the model\'s context for this answer: unverified',
 	missing: 'no such note',
+	unchecked: null,
 };
 
 function vaultItem(list: HTMLElement, entry: VaultEntry): void {

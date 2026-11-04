@@ -269,7 +269,9 @@ sources cost one optional field on stored tool and user messages and let a
 cited note whose text was not in the model's context be marked unverified,
 and one only seen as a search excerpt be marked as such. A user message saved
 before this has no sources record, so its turn gets no list and its links
-stay plain links rather than all showing as unverified. The list holds only
+stay plain links rather than all showing as unverified; in later turns of
+that conversation a cited note the record does not show as read is left
+unflagged, since the old turn's replayed tool results may have shown it. The list holds only
 cited notes: listing notes read but not cited put a box under nearly every
 reply, since the active note is sent by default.
 

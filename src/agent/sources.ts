@@ -41,7 +41,9 @@ export type VaultCitationStatus =
 	/** The note exists but its text was not in the model's context for this answer: unverified. */
 	| 'unread'
 	/** The link does not resolve to a note. */
-	| 'missing';
+	| 'missing'
+	/** Not in this answer's context as far as the record shows, but an earlier turn has no record: not flagged. */
+	| 'unchecked';
 
 export interface VaultEntry {
 	/** The link text as cited, without alias or heading. */
@@ -141,12 +143,14 @@ export function sanitizeSources(raw: unknown): Source[] {
  * turn), or when this turn's attached context did (attached context is sent
  * with its own turn only). Web numbers are per turn, as the tools number them.
  * A turn whose user message has no sources record predates source markers
- * and gets no list.
+ * and gets no list; after one, a cited note the record does not show as read
+ * is unchecked rather than unread, since the unrecorded turn may have shown it.
  */
 export function answerSources(messages: StoredMessage[], resolve: LinkResolver): { lists: Map<string, AnswerSources>; web: Map<string, WebSource[]> } {
 	const lists = new Map<string, AnswerSources>();
 	const webByMessage = new Map<string, WebSource[]>();
 	const seenEver = new Map<string, 'full' | 'excerpt'>();
+	let historyRecorded = true;
 
 	let i = 0;
 	while (i < messages.length) {
@@ -158,6 +162,8 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 			for (const s of sanitizeSources(user.sources)) if (s.kind === 'vault') turnContext.add(s.path);
 			i++;
 		}
+		const turnRecorded = Array.isArray(user?.sources);
+		if (!turnRecorded) historyRecorded = false;
 		for (; i < messages.length && messages[i]!.role !== 'user'; i++) {
 			const m = messages[i]!;
 			if (m.role === 'assistant') assistants.push(m);
@@ -174,9 +180,9 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 		}
 		if (assistants.length === 0) continue;
 		for (const a of assistants) webByMessage.set(a.id, web);
-		if (!Array.isArray(user?.sources)) continue;
+		if (!turnRecorded) continue;
 		const seen = (path: string) => (turnContext.has(path) ? 'full' : seenEver.get(path));
-		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, web, resolve);
+		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, historyRecorded, web, resolve);
 		if (list.vault.length > 0 || list.web.length > 0) lists.set(assistants[assistants.length - 1]!.id, list);
 	}
 	return { lists, web: webByMessage };
@@ -185,6 +191,7 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 function buildList(
 	answer: string,
 	seen: (path: string) => 'full' | 'excerpt' | undefined,
+	historyRecorded: boolean,
 	web: WebSource[],
 	resolve: LinkResolver,
 ): AnswerSources {
@@ -196,7 +203,8 @@ function buildList(
 		if (path !== null && citedPaths.has(path)) continue;
 		if (path !== null) citedPaths.add(path);
 		const shown = path === null ? undefined : seen(path);
-		const status: VaultCitationStatus = path === null ? 'missing' : shown === 'full' ? 'read' : shown === 'excerpt' ? 'excerpt' : 'unread';
+		const status: VaultCitationStatus =
+			path === null ? 'missing' : shown === 'full' ? 'read' : !historyRecorded ? 'unchecked' : shown === 'excerpt' ? 'excerpt' : 'unread';
 		vault.push({ link, path, status });
 	}
 	const byNumber = new Map(web.map((w) => [w.n, w]));

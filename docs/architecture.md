@@ -129,8 +129,11 @@ shown), *unread* (not in the model's context for this answer: unverified) or
 *missing* (the link resolves to no note), counting tool results from earlier
 turns, which are replayed, and this turn's attached context. Only cited notes
 are listed. A turn whose user message has no `sources` record was saved
-before source markers and gets no list. Cited `[web N]` numbers map to that turn's web sources; a number no result gave is
-unverified. `ui/sources-list.ts` renders the list under the turn's last
+before source markers and gets no list; later turns of that conversation mark
+a cited note not shown as read since then *unchecked*, with no flag, as the
+unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always
+writes the record. Cited `[web N]` numbers map to that turn's web sources; a
+number no result gave is unverified. `ui/sources-list.ts` renders the list under the turn's last
 reply, "From your vault" then "From the web", and `[web N]` markers become
 links to their pages. Links to missing notes do nothing on click, so a reply
 cannot create an empty note.

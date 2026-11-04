@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt } from '../src/agent/context';
+import { buildSystemPrompt, ContextItem, userMessage } from '../src/agent/context';
 import { answerSources, extractCitations, linkWebMarkers, sanitizeSources, Source, WebSource } from '../src/agent/sources';
 import { ToolRegistry } from '../src/agent/tools';
 import { StoredMessage } from '../src/persistence/conversation';
@@ -29,10 +29,12 @@ const read = (path: string): Source => ({ kind: 'vault', path, seen: 'full' });
 const excerpt = (path: string): Source => ({ kind: 'vault', path, seen: 'excerpt' });
 const web = (n: number, url = `https://example.com/${n}`): WebSource => ({ kind: 'web', n, url, title: `Page ${n}` });
 
-/** A user message as sent now: it records the notes it sent as context. */
+const note = (kind: ContextItem['kind'], path: string): ContextItem => ({ kind, path, label: path, content: NOTES[path] ?? '' });
+
+/** A user message as the chat sends it now. */
 function ask(text: string, activeNotePath: string | null = null, attachments: string[] = []): StoredMessage {
-	const sources = [activeNotePath, ...attachments].filter((p): p is string => p !== null).map(read);
-	return msg('user', text, { context: { activeNotePath, selection: null, attachments: attachments.map((path) => ({ path })) }, sources });
+	const context = [...(activeNotePath ? [note('active', activeNotePath)] : []), ...attachments.map((p) => note('attachment', p))];
+	return userMessage(`m${++seq}`, text, context, 0);
 }
 
 describe('extractCitations', () => {
@@ -101,14 +103,36 @@ describe('answerSources', () => {
 		expect(lists.size).toBe(0);
 	});
 
-	it('has no list for a turn saved before sources were recorded, and checks later turns', () => {
-		const old = msg('user', 'What is Kael like?', { context: { activeNotePath: 'Characters/Kael.md', selection: null, attachments: [] } });
+	it('has no list for a turn saved before sources were recorded, and flags nothing it may have shown later', () => {
+		const old = msg('user', 'What is Kael like?', { context: { activeNotePath: null, selection: null, attachments: [] } });
+		const oldStep = msg('assistant', '', { toolCalls: [{ id: 'o1', name: 'read_note', argumentsJson: '{}' }] });
+		const oldTool = msg('tool', 'Kael is gruff but loyal.', { toolCallId: 'o1' });
 		const oldAnswer = msg('assistant', 'Gruff but loyal [[Kael]].');
-		const now = ask('And Mira?');
-		const answer = msg('assistant', 'She leads the scouts [[Mira]].');
-		const { lists } = answerSources([old, oldAnswer, now, answer], resolve);
+		const now = ask('What weapon does he carry?');
+		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'search_notes', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'results', { toolCallId: 't1', sources: [read('Characters/Mira.md'), excerpt('Places/Ashfall.md')] });
+		const answer = msg('assistant', 'A spear [[Kael]], from [[Ashfall]], made by [[Mira]] or [[Vorn]].');
+		const { lists } = answerSources([old, oldStep, oldTool, oldAnswer, now, step, tool, answer], resolve);
 		expect(lists.has(oldAnswer.id)).toBe(false);
-		expect(lists.get(answer.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' }]);
+		expect(lists.get(answer.id)?.vault).toEqual([
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'unchecked' },
+			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'unchecked' },
+			{ link: 'Mira', path: 'Characters/Mira.md', status: 'read' },
+			{ link: 'Vorn', path: null, status: 'missing' },
+		]);
+	});
+
+	it('checks every turn the chat sends, recording the notes sent as context but not a selection', () => {
+		const sent = userMessage('u1', 'Who leads the scouts?', [
+			note('active', 'Characters/Kael.md'),
+			{ kind: 'selection', path: 'Places/Ashfall.md', label: 'Selection', content: 'Ashfall' },
+			note('attachment', 'Characters/Mira.md'),
+		], 0);
+		expect(sent.sources).toEqual([read('Characters/Kael.md'), read('Characters/Mira.md')]);
+		const bare = userMessage('u2', 'Who leads the scouts?', [], 0);
+		expect(bare.sources).toEqual([]);
+		const answer = msg('assistant', 'Mira does [[Mira]].');
+		expect(answerSources([bare, answer], resolve).lists.get(answer.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' }]);
 	});
 
 	it('groups cited web pages by number and flags numbers no result gave', () => {

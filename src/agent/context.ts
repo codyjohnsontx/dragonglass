@@ -161,6 +161,27 @@ export function formatContextBlock(items: ContextItem[], maxCharsPerNote: number
 	return parts.join('\n\n');
 }
 
+/**
+ * The stored user message for a send: the context it carried, and as its
+ * sources record the notes that context showed the model. The record is
+ * always present, empty when nothing is attached, so the answer's citations
+ * are checked.
+ */
+export function userMessage(id: string, text: string, context: ContextItem[], createdAt: number): StoredMessage {
+	return {
+		id,
+		role: 'user',
+		content: text,
+		createdAt,
+		context: {
+			activeNotePath: context.find((c) => c.kind === 'active')?.path ?? null,
+			selection: context.find((c) => c.kind === 'selection')?.content ?? null,
+			attachments: context.filter((c) => c.kind === 'attachment' && c.path).map((c) => ({ path: c.path as string })),
+		},
+		sources: context.filter((c) => c.kind !== 'selection' && c.path).map((c) => ({ kind: 'vault', path: c.path as string, seen: 'full' })),
+	};
+}
+
 /** Convert stored messages into provider messages, dropping UI-only fields. */
 export function toProviderMessages(stored: StoredMessage[], contextBlockForLast: string): ChatMessage[] {
 	const out: ChatMessage[] = [];
