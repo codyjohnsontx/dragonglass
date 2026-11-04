@@ -42,9 +42,9 @@ describe('relatedNotes', () => {
 			['Characters/Mira.md', ['links both ways with [[Kael]]', 'both link to [[Fort Ashen]]', 'shares #character']],
 			['Characters/Brann.md', ['linked together with [[Kael]] from 2 notes: [[Siege]], [[Treaty]]', 'shares #character']],
 			['Places/Fort Ashen.md', ['[[Kael]] links to it', 'linked together with [[Kael]] from [[Mira]]']],
+			['Factions/Ember Order.md', ['both link to [[Fort Ashen]]', 'shares #faction/ember']],
 			['Events/Siege.md', ['links to [[Kael]]']],
 			['Events/Treaty.md', ['links to [[Kael]]']],
-			['Factions/Ember Order.md', ['both link to [[Fort Ashen]]', 'shares #faction/ember']],
 		]);
 		expect(notes.map((n) => n.path)).not.toContain('Unrelated.md');
 	});
@@ -53,7 +53,7 @@ describe('relatedNotes', () => {
 		const forward = related(LORE, 'Characters/Kael.md');
 		const reversed = relatedNotes(new MemoryVaultPort(LORE).linkGraph().reverse(), 'Characters/Kael.md', 10);
 		expect(reversed).toEqual(forward);
-		const [siege, treaty] = forward.notes.slice(3, 5);
+		const [siege, treaty] = forward.notes.slice(-2);
 		expect(siege!.score).toBe(treaty!.score);
 		expect([siege!.path, treaty!.path]).toEqual(['Events/Siege.md', 'Events/Treaty.md']);
 	});
@@ -74,17 +74,26 @@ describe('relatedNotes', () => {
 		]);
 	});
 
-	it('ranks every note a well-linked character page names above incidental co-citations and rare tags', () => {
+	it('never weighs a link to a character page above the notes the page names', () => {
 		const lore = Array.from({ length: 10 }, (_, i) => `L${i}`);
+		const fillers = Array.from({ length: 199 }, (_, i) => `Filler ${String(i).padStart(3, '0')}`);
 		const notes: Record<string, string> = {
 			'Kael.md': lore.map((l) => `[[${l}]]`).join(' ') + ' #rare',
+			'Mention.md': '[[Kael]]',
 			'Siege.md': '[[Kael]] [[Brann]]',
 			'Brann.md': 'Brann',
 			'Rare.md': 'Rare #rare',
+			'Index.md': ['Kael', ...fillers].map((f) => `[[${f}]]`).join(' '),
 		};
-		for (const l of lore) notes[`${l}.md`] = l;
-		const ranked = related(notes, 'Kael.md', 25).notes.map((n) => n.path);
-		expect(ranked).toEqual(['Siege.md', ...lore.map((l) => `${l}.md`), 'Brann.md', 'Rare.md']);
+		for (const n of [...lore, ...fillers]) notes[`${n}.md`] = n;
+		const ranked = related(notes, 'Kael.md', 25).notes;
+		const score = (path: string) => ranked.find((n) => n.path === path)!.score;
+		expect(ranked.slice(0, 15).map((n) => n.path)).toEqual([...lore.map((l) => `${l}.md`), 'Mention.md', 'Siege.md', 'Brann.md', 'Rare.md', 'Index.md']);
+		for (const l of lore) {
+			expect(score(`${l}.md`)).toBeGreaterThanOrEqual(score('Mention.md'));
+			expect(score(`${l}.md`)).toBeGreaterThanOrEqual(score('Siege.md'));
+			expect(score(`${l}.md`)).toBeGreaterThan(score('Index.md') * 5);
+		}
 	});
 
 	it('ranks all 40 members a faction note lists above other faction notes sharing its tag', () => {

@@ -15,8 +15,8 @@ import { baseName } from '../vault/paths';
  * cited by two notes says much more than a tag on half the vault or an index
  * note that links to everything. A link from the target scores `DIRECT_LINK`,
  * so the notes it names rank highest; a link to the target scores
- * `DIRECT_LINK` times the same weight of the linking note's out-degree, so a
- * link from an index or list note counts little. The order is deterministic:
+ * `DIRECT_LINK` / max(1, ln(the linking note's out-degree)), never more than
+ * a link from the target, so a link from an index or list note counts little. The order is deterministic:
  * score, then path.
  */
 
@@ -27,7 +27,7 @@ export interface RelatedNote {
 	reasons: string[];
 }
 
-/** Score of a direct link from the target, and of a link to it before damping by the linking note's out-degree. */
+/** Score of a direct link from the target, and the most a link to it can score. */
 const DIRECT_LINK = 2;
 /** Notes or tags named in one reason before "and N more". */
 const NAMED_PER_REASON = 3;
@@ -74,7 +74,7 @@ export function relatedNotes(graph: NoteLinks[], target: string, limit: number):
 	const linked = out.get(target) ?? [];
 	const linking = inbound.get(target) ?? [];
 	for (const p of linked) evidence(p).linkedFrom = DIRECT_LINK;
-	for (const p of linking) evidence(p).linksTo = DIRECT_LINK * weight(out.get(p)?.length ?? 1);
+	for (const p of linking) evidence(p).linksTo = DIRECT_LINK / Math.max(1, Math.log(out.get(p)?.length ?? 1));
 	for (const citing of linking) {
 		const cited = out.get(citing) ?? [];
 		for (const p of cited) if (p !== target) evidence(p).citedBy.set(citing, weight(cited.length));
