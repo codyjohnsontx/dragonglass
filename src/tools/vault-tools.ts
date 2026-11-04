@@ -483,7 +483,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 		name: 'get_note_metadata',
 		description:
 			'Which notes link to this note (backlinks), which notes it links to, its tags, properties and headings. ' +
-			'Use this for questions like "what links to X" or "what is related to X", without reading full content.',
+			'Use this for questions like "what links to X", without reading full content. For "what is related to X", use related_notes.',
 		readOnly: true,
 		parameters: {
 			type: 'object',
