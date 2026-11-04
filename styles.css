@@ -217,11 +217,6 @@
 	padding-inline-start: var(--size-4-5);
 }
 
-.dg-sources-uncited {
-	margin-top: var(--size-2-2);
-	color: var(--text-faint);
-}
-
 .dg-source-flag {
 	color: var(--text-faint);
 }

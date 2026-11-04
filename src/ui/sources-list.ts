@@ -3,28 +3,16 @@ import { AnswerSources, VaultCitationStatus, VaultEntry } from '../agent/sources
 
 /**
  * The sources list under an answer: "From your vault" with each cited note
- * as a working link and a tag when the conversation never showed the model
- * its text, then the notes read but not cited; "From the web" with each cited
- * [web N] page, once web search results exist.
+ * as a working link and a tag when its text was not in the model's context
+ * for this answer; "From the web" with each cited [web N] page, once web
+ * search results exist.
  */
 export function renderSourcesList(parent: HTMLElement, sources: AnswerSources): HTMLElement {
 	const box = parent.createDiv({ cls: 'dg-sources' });
-	const cited = sources.vault.filter((e) => e.cited);
-	const uncited = sources.vault.filter((e) => !e.cited);
 	if (sources.vault.length > 0) {
 		box.createDiv({ cls: 'dg-sources-heading', text: 'From your vault' });
-		if (cited.length > 0) {
-			const list = box.createEl('ul', { cls: 'dg-sources-list' });
-			for (const entry of cited) vaultItem(list, entry);
-		}
-		if (uncited.length > 0) {
-			const line = box.createDiv({ cls: 'dg-sources-uncited' });
-			line.appendText(cited.length > 0 ? 'Also read, not cited: ' : 'Read, not cited: ');
-			uncited.forEach((entry, i) => {
-				if (i > 0) line.appendText(', ');
-				noteLink(line, entry);
-			});
-		}
+		const list = box.createEl('ul', { cls: 'dg-sources-list' });
+		for (const entry of sources.vault) vaultItem(list, entry);
 	}
 	if (sources.web.length > 0) {
 		box.createDiv({ cls: 'dg-sources-heading', text: 'From the web' });
@@ -52,18 +40,14 @@ const FLAGS: Record<VaultCitationStatus, string | null> = {
 
 function vaultItem(list: HTMLElement, entry: VaultEntry): void {
 	const item = list.createEl('li', { cls: `dg-source-${entry.status}` });
-	noteLink(item, entry);
-	const flag = FLAGS[entry.status];
-	if (flag) item.createSpan({ cls: 'dg-source-flag', text: ` (${flag})` });
-}
-
-function noteLink(parent: HTMLElement, entry: VaultEntry): void {
-	parent.createEl('a', {
+	item.createEl('a', {
 		cls: `internal-link${entry.path === null ? ' is-unresolved' : ''}`,
 		text: entry.link,
 		href: entry.path ?? entry.link,
 		attr: { 'data-href': entry.path ?? entry.link },
 	});
+	const flag = FLAGS[entry.status];
+	if (flag) item.createSpan({ cls: 'dg-source-flag', text: ` (${flag})` });
 }
 
 function linkTarget(a: Element): string | null {

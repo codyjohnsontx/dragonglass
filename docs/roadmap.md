@@ -39,8 +39,8 @@ without redesigning the provider or tool architecture.
 - **Source markers**: answers cite `[[Note name]]` after each claim taken
   from a note, unsourced text is worded as the model's suggestion, and a
   sources list under the answer, checked against what the tools showed,
-  flags cited notes whose text was not in the model's context. `[web N]` and "From the web" are
-  ready for web results.
+  flags cited notes whose text was not in the model's context. `[web N]`
+  and "From the web" are ready for web results.
 
 ## Next
 

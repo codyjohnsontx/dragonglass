@@ -1,5 +1,4 @@
 import type { StoredMessage } from '../persistence/conversation';
-import { baseName } from '../vault/paths';
 
 /**
  * Source markers. The model cites a vault note as [[Note name]] and a web
@@ -8,7 +7,8 @@ import { baseName } from '../vault/paths';
  * the conversation's tool results and attached context actually showed the
  * model, not only in what it typed: a cited note whose text was not in the
  * model's context for the answer is shown as unverified, a cited note that
- * does not exist as missing.
+ * does not exist as missing. A turn saved before sources were recorded has
+ * no list: its links stay plain links, unchecked.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
@@ -44,12 +44,11 @@ export type VaultCitationStatus =
 	| 'missing';
 
 export interface VaultEntry {
-	/** The link text as cited, without alias or heading; for an uncited note, its basename. */
+	/** The link text as cited, without alias or heading. */
 	link: string;
 	/** Resolved vault path, or null when the link resolves to nothing. */
 	path: string | null;
 	status: VaultCitationStatus;
-	cited: boolean;
 }
 
 export interface WebEntry {
@@ -59,7 +58,7 @@ export interface WebEntry {
 }
 
 export interface AnswerSources {
-	/** Cited notes in citation order, then notes read in full this turn that the answer does not cite. */
+	/** Cited notes in citation order. */
 	vault: VaultEntry[];
 	/** Cited web pages in number order. */
 	web: WebEntry[];
@@ -132,13 +131,6 @@ export function sanitizeSources(raw: unknown): Source[] {
 	});
 }
 
-/** What a user message's attached context showed the model. */
-function contextPaths(m: StoredMessage): string[] {
-	const ctx = m.context;
-	if (!ctx) return [];
-	return [ctx.activeNotePath, ...ctx.attachments.map((a) => a.path)].filter((p): p is string => typeof p === 'string' && p !== '');
-}
-
 /**
  * The sources list for each answer, keyed by the turn's last assistant
  * message (where the list is shown), plus the turn's web sources keyed by
@@ -148,29 +140,22 @@ function contextPaths(m: StoredMessage): string[] {
  * the end of this turn, showed its text (tool results are replayed every
  * turn), or when this turn's attached context did (attached context is sent
  * with its own turn only). Web numbers are per turn, as the tools number them.
+ * A turn whose user message has no sources record predates source markers
+ * and gets no list.
  */
 export function answerSources(messages: StoredMessage[], resolve: LinkResolver): { lists: Map<string, AnswerSources>; web: Map<string, WebSource[]> } {
 	const lists = new Map<string, AnswerSources>();
 	const webByMessage = new Map<string, WebSource[]>();
 	const seenEver = new Map<string, 'full' | 'excerpt'>();
-	const note = (s: VaultSource, turnRead: Set<string>) => {
-		if (s.seen === 'full') {
-			seenEver.set(s.path, 'full');
-			turnRead.add(s.path);
-		} else if (!seenEver.has(s.path)) seenEver.set(s.path, 'excerpt');
-	};
 
 	let i = 0;
 	while (i < messages.length) {
-		const turnRead = new Set<string>();
 		const turnContext = new Set<string>();
 		const web: WebSource[] = [];
 		const assistants: StoredMessage[] = [];
-		if (messages[i]?.role === 'user') {
-			for (const path of contextPaths(messages[i]!)) {
-				turnContext.add(path);
-				turnRead.add(path);
-			}
+		const user = messages[i]?.role === 'user' ? messages[i]! : null;
+		if (user) {
+			for (const s of sanitizeSources(user.sources)) if (s.kind === 'vault') turnContext.add(s.path);
 			i++;
 		}
 		for (; i < messages.length && messages[i]!.role !== 'user'; i++) {
@@ -178,8 +163,9 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 			if (m.role === 'assistant') assistants.push(m);
 			if (m.role !== 'tool') continue;
 			for (const s of sanitizeSources(m.sources)) {
-				if (s.kind === 'vault') note(s, turnRead);
-				else {
+				if (s.kind === 'vault') {
+					if (s.seen === 'full' || !seenEver.has(s.path)) seenEver.set(s.path, s.seen);
+				} else {
 					const at = web.findIndex((w) => w.n === s.n);
 					if (at >= 0) web[at] = s;
 					else web.push(s);
@@ -188,8 +174,9 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 		}
 		if (assistants.length === 0) continue;
 		for (const a of assistants) webByMessage.set(a.id, web);
+		if (!Array.isArray(user?.sources)) continue;
 		const seen = (path: string) => (turnContext.has(path) ? 'full' : seenEver.get(path));
-		const list = buildList(assistants.map((a) => a.content).join('\n\n'), turnRead, seen, web, resolve);
+		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, web, resolve);
 		if (list.vault.length > 0 || list.web.length > 0) lists.set(assistants[assistants.length - 1]!.id, list);
 	}
 	return { lists, web: webByMessage };
@@ -197,7 +184,6 @@ export function answerSources(messages: StoredMessage[], resolve: LinkResolver):
 
 function buildList(
 	answer: string,
-	turnRead: Set<string>,
 	seen: (path: string) => 'full' | 'excerpt' | undefined,
 	web: WebSource[],
 	resolve: LinkResolver,
@@ -211,10 +197,7 @@ function buildList(
 		if (path !== null) citedPaths.add(path);
 		const shown = path === null ? undefined : seen(path);
 		const status: VaultCitationStatus = path === null ? 'missing' : shown === 'full' ? 'read' : shown === 'excerpt' ? 'excerpt' : 'unread';
-		vault.push({ link, path, status, cited: true });
-	}
-	for (const path of turnRead) {
-		if (!citedPaths.has(path)) vault.push({ link: baseName(path), path, status: 'read', cited: false });
+		vault.push({ link, path, status });
 	}
 	const byNumber = new Map(web.map((w) => [w.n, w]));
 	const webEntries = [...cited.web].sort((a, b) => a - b).map((n) => ({ n, source: byNumber.get(n) ?? null }));

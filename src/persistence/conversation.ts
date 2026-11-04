@@ -30,7 +30,12 @@ export interface StoredMessage {
 	toolName?: string;
 	isError?: boolean;
 	proposalId?: string;
-	/** For tool results: the notes and web pages the result showed the model, for the answer's sources list. */
+	/**
+	 * What the message showed the model, for the answer's sources list: for a
+	 * tool result the notes and web pages it returned, for a user message the
+	 * notes sent as context. Absent on user messages saved before sources were
+	 * recorded; their turns get no list.
+	 */
 	sources?: Source[];
 	usage?: Usage;
 	/** Reasoning a thinking model streamed before the answer. Shown collapsed; not replayed in later turns. */

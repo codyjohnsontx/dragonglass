@@ -265,10 +265,13 @@ structured `sources` on its result, stored on the tool message. Typed links
 alone would present a note the model never opened as a source. Parsing result
 text ties the list to output formats that change for the model's sake (search
 results gained auto-read and linked notes within a few releases). Structured
-sources cost one optional field on stored tool messages and let a cited note
-whose text was not in the model's context be marked unverified, and one only seen as a
-search excerpt be marked as such. Conversations saved before this have no
-sources on their tool messages, so their citations show as unverified.
+sources cost one optional field on stored tool and user messages and let a
+cited note whose text was not in the model's context be marked unverified,
+and one only seen as a search excerpt be marked as such. A user message saved
+before this has no sources record, so its turn gets no list and its links
+stay plain links rather than all showing as unverified. The list holds only
+cited notes: listing notes read but not cited put a box under nearly every
+reply, since the active note is sent by default.
 
 The `[web N]` format, the "From the web" group and `WebSource` exist before any
 web tool so the internet fallback only has to report its pages; the prompt's

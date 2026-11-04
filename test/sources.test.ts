@@ -29,6 +29,12 @@ const read = (path: string): Source => ({ kind: 'vault', path, seen: 'full' });
 const excerpt = (path: string): Source => ({ kind: 'vault', path, seen: 'excerpt' });
 const web = (n: number, url = `https://example.com/${n}`): WebSource => ({ kind: 'web', n, url, title: `Page ${n}` });
 
+/** A user message as sent now: it records the notes it sent as context. */
+function ask(text: string, activeNotePath: string | null = null, attachments: string[] = []): StoredMessage {
+	const sources = [activeNotePath, ...attachments].filter((p): p is string => p !== null).map(read);
+	return msg('user', text, { context: { activeNotePath, selection: null, attachments: attachments.map((path) => ({ path })) }, sources });
+}
+
 describe('extractCitations', () => {
 	it('finds each wikilink target once, without alias or heading, and skips embeds and code', () => {
 		const text = [
@@ -53,8 +59,8 @@ describe('linkWebMarkers', () => {
 });
 
 describe('answerSources', () => {
-	it('marks each cited note by what the model was shown and lists notes read but not cited', () => {
-		const user = msg('user', 'What is Kael like?');
+	it('marks each cited note by what the model was shown and lists only cited notes', () => {
+		const user = ask('What is Kael like?');
 		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'search_notes', argumentsJson: '{}' }] });
 		const tool = msg('tool', 'results', { toolCallId: 't1', sources: [read('Characters/Kael.md'), excerpt('Places/Ashfall.md'), read('Characters/Mira.md')] });
 		const answer = msg('assistant', 'Gruff but loyal [[Kael]]. Grew up in [[Ashfall]]. Rivals [[Vorn]]. Distrusts the Council [[Characters/Kael]].');
@@ -62,10 +68,9 @@ describe('answerSources', () => {
 		expect(lists.get(step.id)).toBeUndefined();
 		expect(lists.get(answer.id)).toEqual({
 			vault: [
-				{ link: 'Kael', path: 'Characters/Kael.md', status: 'read', cited: true },
-				{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'excerpt', cited: true },
-				{ link: 'Vorn', path: null, status: 'missing', cited: true },
-				{ link: 'Mira', path: 'Characters/Mira.md', status: 'read', cited: false },
+				{ link: 'Kael', path: 'Characters/Kael.md', status: 'read' },
+				{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'excerpt' },
+				{ link: 'Vorn', path: null, status: 'missing' },
 			],
 			web: [],
 			webSources: [],
@@ -73,31 +78,41 @@ describe('answerSources', () => {
 	});
 
 	it('counts tool reads from earlier turns but attached context only in its own turn', () => {
-		const t1 = msg('user', 'Tell me about Mira', { context: { activeNotePath: 'Characters/Mira.md', selection: null, attachments: [] } });
+		const t1 = ask('Tell me about Mira', 'Characters/Mira.md');
 		const s1 = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
 		const r1 = msg('tool', 'Kael...', { toolCallId: 't1', sources: [read('Characters/Kael.md')] });
 		const a1 = msg('assistant', 'She leads the scouts [[Mira]].');
-		const t2 = msg('user', 'And Kael?', { context: { activeNotePath: null, selection: null, attachments: [{ path: 'Places/Ashfall.md' }] } });
+		const t2 = ask('And Kael?', null, ['Places/Ashfall.md']);
 		const a2 = msg('assistant', 'Mira [[Mira]] trusts him; he is from [[Ashfall]] and is loyal [[Kael]].');
 		const { lists } = answerSources([t1, s1, r1, a1, t2, a2], resolve);
-		expect(lists.get(a1.id)?.vault).toEqual([
-			{ link: 'Mira', path: 'Characters/Mira.md', status: 'read', cited: true },
-			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read', cited: false },
-		]);
+		expect(lists.get(a1.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'read' }]);
 		expect(lists.get(a2.id)?.vault).toEqual([
-			{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread', cited: true },
-			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'read', cited: true },
-			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read', cited: true },
+			{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' },
+			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'read' },
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read' },
 		]);
 	});
 
-	it('has no list for an answer that cites nothing and read nothing', () => {
-		const { lists } = answerSources([msg('user', 'hi'), msg('assistant', 'Hello!')], resolve);
+	it('has no list for an answer that cites nothing, even with notes sent and read', () => {
+		const user = ask('Tighten this scene', 'Characters/Kael.md');
+		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'Mira...', { toolCallId: 't1', sources: [read('Characters/Mira.md')] });
+		const { lists } = answerSources([user, step, tool, msg('assistant', 'I would cut the second line.')], resolve);
 		expect(lists.size).toBe(0);
 	});
 
+	it('has no list for a turn saved before sources were recorded, and checks later turns', () => {
+		const old = msg('user', 'What is Kael like?', { context: { activeNotePath: 'Characters/Kael.md', selection: null, attachments: [] } });
+		const oldAnswer = msg('assistant', 'Gruff but loyal [[Kael]].');
+		const now = ask('And Mira?');
+		const answer = msg('assistant', 'She leads the scouts [[Mira]].');
+		const { lists } = answerSources([old, oldAnswer, now, answer], resolve);
+		expect(lists.has(oldAnswer.id)).toBe(false);
+		expect(lists.get(answer.id)?.vault).toEqual([{ link: 'Mira', path: 'Characters/Mira.md', status: 'unread' }]);
+	});
+
 	it('groups cited web pages by number and flags numbers no result gave', () => {
-		const user = msg('user', 'When was the sequel announced?');
+		const user = ask('When was the sequel announced?');
 		const step = msg('assistant', 'Searching the web.', { toolCalls: [{ id: 'w', name: 'web_search', argumentsJson: '{}' }] });
 		const tool = msg('tool', 'results', { toolCallId: 'w', sources: [web(1), web(2)] });
 		const answer = msg('assistant', 'In 2025 [web 2], per the studio [web 1]; a leak said 2024 [web 5].');

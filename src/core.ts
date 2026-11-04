@@ -148,6 +148,7 @@ export class DragonglassCore {
 				selection: opts.context.find((c) => c.kind === 'selection')?.content ?? null,
 				attachments: opts.context.filter((c) => c.kind === 'attachment' && c.path).map((c) => ({ path: c.path as string })),
 			},
+			sources: opts.context.filter((c) => c.kind !== 'selection' && c.path).map((c) => ({ kind: 'vault', path: c.path as string, seen: 'full' })),
 		};
 		if (conv.messages.length === 0) conv.title = deriveTitle(opts.text);
 		conv.messages.push(userMsg);
