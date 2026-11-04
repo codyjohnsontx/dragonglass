@@ -41,12 +41,18 @@ describe('parseDraft', () => {
 		expect(parseDraft(reply)).toEqual({ text: SCENE, fresh: false, commentary: "Shaped by Kael's distrust [[Kael]].\n\nSay how to change it." });
 	});
 
-	it('reads the new keyword, tilde and longer fences, and trims blank lines at the edges of the block', () => {
-		expect(parseDraft('````draft new\n\n\nKAEL\nHi.\n\n\n````')).toEqual({ text: 'KAEL\nHi.', fresh: true, commentary: '' });
-		expect(parseDraft('~~~ Draft\nx\n~~~~')).toMatchObject({ text: 'x', fresh: false });
-		// A closing fence must be the same character, at least as long, alone on its line.
-		expect(parseDraft('````draft\nx\n```\ny\n````')).toMatchObject({ text: 'x\n```\ny' });
-		expect(parseDraft('```draft\nx\r\n```\r\n')).toMatchObject({ text: 'x' });
+	it('reads the new keyword and trims blank lines at the edges of the block', () => {
+		expect(parseDraft('```draft new\n\n\nKAEL\nHi.\n\n\n```')).toEqual({ text: 'KAEL\nHi.', fresh: true, commentary: '' });
+		expect(parseDraft('```draft\nx\r\n```\r\n')).toMatchObject({ text: 'x', fresh: false });
+	});
+
+	it('takes only the fence the drafting rules ask for', () => {
+		for (const open of ['~~~draft', '````draft', '```Draft', '``` draft', '```draft  new']) {
+			expect(parseDraft(`${open}\nx\n\`\`\`\n`)).toBeNull();
+		}
+		// Only a bare fence closes the block.
+		expect(parseDraft('```draft\nx\n~~~\n````\ny\n```')).toMatchObject({ text: 'x\n~~~\n````\ny' });
+		expect(parseDraft('```draft\nx\n~~~')).toBeNull();
 	});
 
 	it('is not a draft without a block, without a closing fence, or for other code blocks', () => {
@@ -253,7 +259,7 @@ describe('drafting rules in the system prompt', () => {
 		const vault = new MemoryVaultPort({ 'Script/Scene 12.md': '', 'Characters/Kael.md': '' });
 		const map = vaultMap(vault, 'Script/Scene 12.md', 'Script');
 		expect(map.scriptFolder).toBe('Script');
-		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: map })).toMatch(/\nScript folder: Script\/ holds the screenplay, not lore; search_notes and related_notes leave it out\.$/);
+		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: map })).toMatch(/\nScript folder: Script\/ holds the screenplay, not lore; search_notes and related_notes leave it out unless the folder or note you give them is in it\.$/);
 		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, vault: vaultMap(vault, null) })).not.toContain('Script folder');
 	});
 });
@@ -297,6 +303,66 @@ describe('script folder setting', () => {
 		expect(restricted.content).not.toContain('match better');
 		// The script is still readable on request: the model may want the previous scene.
 		expect((await registry.get('read_note')!.execute({ path: 'Script/Scene 12.md' }, ctx)).isError).toBeFalsy();
+	});
+
+	describe('search_notes scoped to the script', () => {
+		const ctx = { conversationId: 'c', signal: new AbortController().signal };
+		const search = () => {
+			const vault = new MemoryVaultPort({
+				'Lore/Ember Guard.md': '# Ember Guard\n\nThe Ember Guard held the ramparts through the siege of Ashfall.\n',
+				'Lore/Marshal.md': '# Marshal\n\nThe marshal commands from the keep.\n',
+				'Script/Scene 12.md': 'INT. WATCHTOWER\n\nThe Ember Guard waits.\n\nKAEL\nThe marshal lied.\n',
+				'Script/Act 2/Scene 30.md': 'EXT. RAMPARTS\n\nThe ramparts burn.\n\nMIRA\nThe quartermaster ran.\n',
+			});
+			const registry = new ToolRegistry();
+			for (const t of createVaultTools(vault, new ProposalEngine(vault), () => ({ maxReadChars: 10_000, maxSearchResults: 20, excludeFolder: 'Script' }), new VaultSearchIndex(vault, () => Promise.resolve()))) {
+				registry.register(t);
+			}
+			return (args: Record<string, unknown>) => registry.get('search_notes')!.execute(args, ctx);
+		};
+
+		it('finds script notes in the script folder and in folders under it', async () => {
+			const run = search();
+			const scene = await run({ query: 'Ember Guard', folder: 'Script' });
+			expect(scene.content).toContain('Script/Scene 12.md');
+			expect(scene.content).not.toContain('No notes in Script/');
+			expect((await run({ query: 'quartermaster', folder: 'Script/Act 2' })).content).toContain('Script/Act 2/Scene 30.md');
+		});
+
+		it('leaves them out of whole-vault and other-folder searches, saying so when nothing else matches', async () => {
+			const run = search();
+			expect((await run({ query: 'Ember Guard' })).content).not.toContain('Script/');
+			expect((await run({ query: 'Ember Guard', folder: 'Lore' })).content).not.toContain('Script/');
+			expect((await run({ query: 'quartermaster' })).content).toBe('No notes outside Script/ matched "quartermaster".');
+			expect((await run({ query: 'quartermaster', folder: 'Lore' })).content).toBe('No notes outside Script/ matched "quartermaster".');
+			expect((await run({ query: 'zzzz', folder: 'Script' })).content).toBe('No notes in Script/ or outside Script/ matched "zzzz".');
+		});
+
+		it('keeps them out of the whole vault a scoped search falls back to, and says what was searched', async () => {
+			const run = search();
+			const fallback = await run({ query: 'keep', folder: 'Script' });
+			expect(fallback.content).toContain('No notes in Script/ matched "keep"; these results are from the whole vault outside Script/.');
+			expect(fallback.content).toContain('Lore/Marshal.md');
+
+			const other = await run({ query: 'marshal', folder: 'Script/Act 2' });
+			expect(other.content).toContain('No notes in Script/Act 2/ matched "marshal"; these results are from the whole vault outside Script/.');
+			expect(other.content).toContain('Lore/Marshal.md');
+			expect(other.content).not.toContain('Script/Scene 12.md');
+
+			const backfill = await run({ query: 'keep marshal', folder: 'Script/Act 2', mode: 'all' });
+			expect(backfill.content).toContain('these results are from the whole vault outside Script/.');
+			expect(backfill.content).not.toContain('Script/Scene 12.md');
+
+			const every = await run({ query: 'ember marshal', folder: 'Script', mode: 'all' });
+			expect(every.content).toContain('Script/Scene 12.md');
+			expect(every.content).not.toContain('No notes in Script/');
+		});
+
+		it('adds no script note when a scoped search widens and backfills', async () => {
+			const out = await search()({ query: 'ember ashfall', folder: 'Script/Act 2', mode: 'all' });
+			expect(out.content).toContain('Lore/Ember Guard.md');
+			expect(out.content).not.toContain('Script/Scene 12.md');
+		});
 	});
 });
 

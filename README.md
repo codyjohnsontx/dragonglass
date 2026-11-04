@@ -327,8 +327,9 @@ under the card, and nothing is written until you approve it.
 
 An optional **Script folder** setting (Settings → Dragonglass AI → Writing)
 names the folder that holds your screenplay. Notes in it are the script, not
-lore, so the model's searches and related-note lookups leave them out, and the
-open note's format is matched when the note is in this folder. Drafts go into the open note either
+lore, so the model's searches and related-note lookups leave them out unless
+it asks about the script itself, and the open note's format is matched when the
+note is in this folder. Drafts go into the open note either
 way: inserting into a note outside that folder still works, and the review
 says so.
 

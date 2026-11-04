@@ -212,9 +212,10 @@ the format and show `formatSample`, the note's first 1,200 characters, as
 data, defused so the note cannot close its delimiter. The optional script
 folder setting goes into the vault map and into the tools as `excludeFolder`:
 `search_notes` leaves its notes out of results, linked notes and
-better-elsewhere hints, `related_notes` leaves them out of its link graph
-unless the queried note is itself in the folder, and `read_note` still reads
-them on request.
+better-elsewhere hints, unless the search is scoped to the folder or inside it
+(a fallback to the whole vault still leaves them out, and the tool's messages
+say so), `related_notes` leaves them out of its link graph unless the queried
+note is itself in the folder, and `read_note` still reads them on request.
 
 At `assistant_end`, `parseDraft` lifts the block out of the reply and `core`
 stores it on the assistant message as `draft: { thread, text, inserts }`. A
@@ -243,8 +244,9 @@ proposal is hashed, reviewed and applied exactly like a model edit, freshness
 check inside `Vault.process` included. The proposal id is stored on the draft
 version (`draft.inserts`), not on a tool message, so it never joins the
 turn's batch review and the model never sees it; the card shows the thread's
-newest insert as a plain proposal card, and a new Insert supersedes an
-earlier one still awaiting review. The summary names the note and says when
+newest insert that can still be acted on, else its newest that was not
+rejected, as a plain proposal card, and a new Insert supersedes an earlier one
+still awaiting review. The summary names the note and says when
 it lies outside the script folder; the Insert button names the note it would
 go into and follows the active note.
 

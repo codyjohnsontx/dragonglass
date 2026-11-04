@@ -24,7 +24,7 @@ export interface VaultToolOptions {
 	maxSearchResults: number;
 	/** Estimated tokens of full note text search_notes appends after its results; 0 or unset for excerpts only. */
 	autoReadTokens?: number;
-	/** The script folder, normalized: search_notes and related_notes leave its notes out, as they are the screenplay, not lore. Unset or "" for none. */
+	/** The script folder, normalized: its notes are the screenplay, not lore, so search_notes and related_notes leave them out unless the folder or note asked about is in it. Unset or "" for none. */
 	excludeFolder?: string;
 }
 
@@ -211,15 +211,19 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				const asked = typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults;
 				const limit = Math.min(Math.max(asked, MIN_SEARCH_RESULTS), 100);
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
-				const exclude = opts.excludeFolder || undefined;
+				const lore = opts.excludeFolder || undefined;
+				const inScript = lore !== undefined && (folder === lore || isScriptNote(folder, lore));
+				const outside = lore ? ` outside ${lore}/` : '';
+				let exclude = inScript ? undefined : lore;
 				let hits = await index.search(query, { folder, exclude, limit, mode });
 				let scope = '';
 				let searched = folder;
 				if (folder !== '' && hits.length === 0) {
-					hits = await index.search(query, { folder: '', exclude, limit, mode });
+					hits = await index.search(query, { folder: '', exclude: lore, limit, mode });
 					if (hits.length > 0) {
 						searched = '';
-						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
+						exclude = lore;
+						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault${outside}.\n\n`;
 					}
 				}
 				let topMode: SearchMode = mode;
@@ -230,10 +234,11 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 					const seen = new Set(hits.map((h) => h.path));
 					let backfill = await index.search(query, { folder: searched, exclude, limit, mode: 'any' });
 					if (backfill.length === 0 && searched !== '') {
-						backfill = await index.search(query, { folder: '', exclude, limit, mode: 'any' });
+						backfill = await index.search(query, { folder: '', exclude: lore, limit, mode: 'any' });
 						if (backfill.length > 0) {
-							scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault.\n\n`;
+							scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault${outside}.\n\n`;
 							searched = '';
+							exclude = lore;
 						}
 					}
 					hits = [...hits, ...backfill.filter((h) => !seen.has(h.path))].slice(0, limit);
@@ -242,9 +247,9 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 						some = `${which} some of them.\n\n`;
 					}
 				}
-				if (hits.length === 0) return ok(`No notes matched "${query}".`);
+				if (hits.length === 0) return ok(`No notes${inScript ? ` in ${folder}/ or` : ''}${outside} matched "${query}".`);
 				if (searched !== '') {
-					const elsewhere = await betterElsewhere(index, query, searched, exclude, topMode, hits[0]!);
+					const elsewhere = await betterElsewhere(index, query, searched, lore, topMode, hits[0]!);
 					if (elsewhere.length > 0) {
 						scope = `Searched only ${searched}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
 					}
@@ -541,10 +546,12 @@ function relatedNotesTool(vault: VaultPort, options: () => VaultToolOptions): Ag
 				const asked = typeof args['limit'] === 'number' ? Math.floor(args['limit']) : DEFAULT_RELATED;
 				const limit = Math.min(Math.max(asked, 1), MAX_RELATED);
 				const script = options().excludeFolder ?? '';
+				const inScript = isScriptNote(found.path, script);
 				const graph = vault.linkGraph();
-				const { notes, total } = relatedNotes(isScriptNote(found.path, script) ? graph : graph.filter((n) => !isScriptNote(n.path, script)), found.path, limit);
+				const { notes, total } = relatedNotes(inScript ? graph : graph.filter((n) => !isScriptNote(n.path, script)), found.path, limit);
+				const outside = script && !inScript ? ` outside ${script}/` : '';
 				const name = `[[${baseName(found.path)}]]`;
-				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes share links or tags with ${name} (${found.path}).`));
+				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes${outside} share links or tags with ${name} (${found.path}).`));
 				const lines = notes.map((n, i) => `${i + 1}. ${linkLabel(n.path)}\n${n.reasons.map((r) => `   - ${r}`).join('\n')}`);
 				const hint = limit < MAX_RELATED ? 'call again with a higher limit to see them' : `${MAX_RELATED} is the most this tool shows`;
 				const more = total > notes.length ? `\n\n${total - notes.length} more related notes not shown; ${hint}.` : '';

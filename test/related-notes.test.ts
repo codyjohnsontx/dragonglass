@@ -182,6 +182,12 @@ describe('related_notes tool', () => {
 		expect(lore.content).not.toContain('Brann');
 	});
 
+	it('says script pages were left out when nothing else is related', async () => {
+		const notes = { 'Characters/Old Tam.md': '# Old Tam\n', 'Script/Scene 3.md': '# Scene 3\n\n[[Old Tam]] coughs.\n' };
+		const r = await tool(notes, 'Script').execute({ path: 'Characters/Old Tam.md' }, ctx);
+		expect(r.content).toBe('No notes outside Script/ share links or tags with [[Old Tam]] (Characters/Old Tam.md).');
+	});
+
 	it('keeps script pages when the queried note is itself in the script folder', async () => {
 		const notes = {
 			'Characters/Kael.md': '# Kael\n',

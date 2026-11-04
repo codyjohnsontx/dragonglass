@@ -53,7 +53,8 @@ export interface ParsedDraft {
 	commentary: string;
 }
 
-const OPEN_FENCE = /^(`{3,}|~{3,})\s*draft(?:\s+(new))?\s*$/i;
+const OPEN_FENCE = /^```draft( new)?$/;
+const CLOSE_FENCE = '```';
 
 /**
  * The draft block of a reply, or null when it has none. The first block
@@ -64,22 +65,15 @@ export function parseDraft(content: string): ParsedDraft | null {
 	for (let i = 0; i < lines.length; i++) {
 		const open = OPEN_FENCE.exec(lines[i]!);
 		if (!open) continue;
-		const fence = open[1]!;
-		const mark = fence[0]!;
-		// A closing fence: the same character, at least as many, nothing else on the line.
-		const closes = (line: string): boolean => {
-			const t = line.trim();
-			return t.length >= fence.length && [...t].every((c) => c === mark);
-		};
 		for (let j = i + 1; j < lines.length; j++) {
-			if (!closes(lines[j]!)) continue;
+			if (lines[j] !== CLOSE_FENCE) continue;
 			const text = lines
 				.slice(i + 1, j)
 				.join('\n')
 				.replace(/^\n+/, '')
 				.replace(/\s+$/, '');
 			const commentary = [lines.slice(0, i).join('\n').trim(), lines.slice(j + 1).join('\n').trim()].filter((part) => part !== '').join('\n\n');
-			return { text, fresh: open[2] !== undefined, commentary };
+			return { text, fresh: open[1] !== undefined, commentary };
 		}
 		return null;
 	}
