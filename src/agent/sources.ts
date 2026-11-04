@@ -146,7 +146,8 @@ export function sanitizeSources(raw: unknown): Source[] {
  * the end of this turn, showed its text (tool results are replayed every
  * turn), or when this turn's attached context did (attached context is sent
  * with its own turn only); a note sent only as a selection counts as an
- * excerpt. Links to notes the turn proposed changes to are left out. Web numbers are per turn, as the tools number them.
+ * excerpt. Links to notes the turn proposed changes to are left out. Web
+ * numbers are per turn, as the tools number them.
  * A turn whose user message has no sources record predates source markers
  * and gets no list; after one, a cited note the record does not show as read
  * is unchecked rather than unread, since the unrecorded turn may have shown it.

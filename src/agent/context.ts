@@ -164,9 +164,8 @@ export function formatContextBlock(items: ContextItem[], maxCharsPerNote: number
 /**
  * The stored user message for a send: the context it carried, and as its
  * sources record the notes that context showed the model, a selection as an
- * excerpt of its note. The record is
- * always present, empty when nothing is attached, so the answer's citations
- * are checked.
+ * excerpt of its note. The record is always present, empty when nothing is
+ * attached, so the answer's citations are checked.
  */
 export function userMessage(id: string, text: string, context: ContextItem[], createdAt: number): StoredMessage {
 	return {
