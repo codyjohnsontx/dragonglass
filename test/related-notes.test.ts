@@ -188,11 +188,14 @@ describe('related_notes tool', () => {
 		const byDefault = await t.execute({ path: 'Hub.md' }, ctx);
 		expect(byDefault.content).toContain('10. Spoke 09 (Spoke 09.md)');
 		expect(byDefault.content).not.toContain('11.');
-		expect(byDefault.content).toContain('30 more related notes not shown');
+		expect(byDefault.content).toContain('30 more related notes not shown; call again with a higher limit');
 		const most = await t.execute({ path: 'Hub.md', limit: 100 }, ctx);
 		expect(most.content).toContain('25. Spoke 24');
 		expect(most.content).not.toContain('26.');
-		expect(most.content).toContain('15 more related notes not shown');
+		expect(most.content).toContain('15 more related notes not shown; 25 is the most this tool shows.');
+		expect(most.content).not.toContain('higher limit');
+		const atMax = await t.execute({ path: 'Hub.md', limit: 25 }, ctx);
+		expect(atMax.content).toContain('15 more related notes not shown; 25 is the most this tool shows.');
 	});
 
 	it('says so when nothing is related, and fails for a missing note', async () => {

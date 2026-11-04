@@ -538,7 +538,8 @@ function relatedNotesTool(vault: VaultPort): AgentTool {
 				const name = `[[${baseName(found.path)}]]`;
 				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes share links or tags with ${name} (${found.path}).`));
 				const lines = notes.map((n, i) => `${i + 1}. ${linkLabel(n.path)}\n${n.reasons.map((r) => `   - ${r}`).join('\n')}`);
-				const more = total > notes.length ? `\n\n${total - notes.length} more related notes not shown; call again with a higher limit to see them.` : '';
+				const hint = limit < MAX_RELATED ? 'call again with a higher limit to see them' : `${MAX_RELATED} is the most this tool shows`;
+				const more = total > notes.length ? `\n\n${total - notes.length} more related notes not shown; ${hint}.` : '';
 				const text = `${found.notice}Notes related to ${name} (${found.path}), most related first:\n\n${lines.join('\n')}${more}\n\nThese are connections only: read_note the ones that matter before citing them as [[Name]].`;
 				return Promise.resolve(ok(text));
 			} catch (e) {
