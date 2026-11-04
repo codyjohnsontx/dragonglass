@@ -250,6 +250,12 @@ export class ProposalEngine {
 	async applyAll(batch: readonly ChangeProposal[]): Promise<ChangeProposal[]> {
 		const pending = batch.filter((p) => p.status === 'pending' || p.status === 'stale');
 		if (pending.length === 0) return [];
+		const repeated = pending.find((p, i) => pending.findIndex((q) => q.path === p.path) !== i);
+		if (repeated) {
+			throw new ProposalError(
+				`Nothing was applied: ${repeated.path} has more than one change waiting in this batch. Approve or reject those changes one at a time.`,
+			);
+		}
 		this.claim(pending);
 		try {
 			for (const p of pending) {

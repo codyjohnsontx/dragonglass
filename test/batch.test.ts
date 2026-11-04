@@ -277,6 +277,25 @@ describe('a note changed twice in one turn', () => {
 	});
 });
 
+describe('a saved turn with two pending changes to one note', () => {
+	it('applies nothing and names the note instead of failing on its own first write', async () => {
+		const vault = new MemoryVaultPort({ 'A.md': 'a1\n', 'B.md': 'b1\n' });
+		const e = engine(vault);
+		const first = await e.proposeEdit('c1', 'A.md', [{ type: 'replace_all', content: 'a2\n' }], 'first');
+		const second = await e.proposeEdit('c1', 'A.md', [{ type: 'append', content: 'more\n' }], 'second');
+		const b = await e.proposeEdit('c1', 'B.md', [{ type: 'replace_all', content: 'b2\n' }], 'b');
+		await expect(e.applyAll([first, b, second])).rejects.toThrow(
+			/Nothing was applied: A\.md has more than one change waiting in this batch\. Approve or reject those changes one at a time\./,
+		);
+		expect(vault.files.get('A.md')).toBe('a1\n');
+		expect(vault.files.get('B.md')).toBe('b1\n');
+		expect([first.status, second.status, b.status]).toEqual(['pending', 'pending', 'pending']);
+		e.reject(second);
+		expect(await e.applyAll([first, b, second])).toEqual([first, b]);
+		expect(vault.files.get('A.md')).toBe('a2\n');
+	});
+});
+
 describe('a proposal held by a running batch', () => {
 	it('ignores Reject and refuses a per-note Approve until Approve all finishes', async () => {
 		const vault = new MemoryVaultPort({ 'A.md': 'a1\n', 'B.md': 'b1\n' });
