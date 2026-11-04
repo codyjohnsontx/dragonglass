@@ -195,8 +195,13 @@ system prompt always carries drafting rules (`agent/drafting.ts`,
 `draftingRules`): look the named characters and places up with the vault
 tools first, put the scene text alone in a fenced block opened with
 ```` ```draft ```` (```` ```draft new ```` for a different scene), cite the
-notes that shaped it outside the block, rewrite the whole scene for every
-revision, and never propose an edit to put a draft in the script. The block
+notes that shaped it outside the block, treat a change request after a draft
+as a full rewrite of that draft unless the user names a note to change, keep
+the open note as context for format and continuity only, and never propose an
+edit to put a draft in the script. A send that follows a draft also carries
+the latest draft in full, right before the user's text (`revisionReminder`,
+built for each send and not stored), and a send right after a draft that
+names no note gets no write tools (`followsDraft`). The block
 is a code fence, so the citation rules and `extractCitations` already leave
 its inside alone; the citations around it make the sources list under the
 draft.

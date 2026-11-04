@@ -438,6 +438,17 @@ model opens the block with `draft new`: the cost of a forgotten `new` is one
 extra version in a thread, while the opposite default would lose the
 history of a revision the model forgot to mark.
 
+How a revision finds its target: the system prompt alone, or the draft beside
+the request. With qwen3:8b the rule alone did not hold: a note attached to the
+send sits next to "make Kael colder" while the draft is further back, so the
+model rewrote the note or looked it up to find the draft. A send that follows
+a draft now repeats the draft in full just before the user's text. It costs
+one scene of prompt on those sends and is not stored. That fixed the target
+but not the habit: the model still patched the note with the draft's lines,
+stopped only by a failed find. So a send right after a draft that names no
+note gets no write tools. The cost: "add that to his file" straight after a
+draft needs a [[link]], a path or the word note before it can propose an edit.
+
 How the format is matched: a Fountain parser, a model-side guess, or a few
 line patterns. The owner asked for the note's own conventions, read from the
 note, and the choice only decides which short instruction and sample the
