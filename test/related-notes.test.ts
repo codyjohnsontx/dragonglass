@@ -96,6 +96,28 @@ describe('relatedNotes', () => {
 		}
 	});
 
+	it('ranks every note a character page names above an index that also links to them', () => {
+		const fillers = Array.from({ length: 30 }, (_, i) => `Filler ${i}`);
+		const indexed = ['Kael', 'Maren', 'Ashen Order', 'Emberfall', 'Duskfang', 'Ysolde', 'Brann', 'Siege', 'The Burning', ...fillers];
+		const notes: Record<string, string> = {
+			'Kael.md': '[[Maren]] [[Ashen Order]] [[Emberfall]] [[Duskfang]]',
+			'Maren.md': '[[Ashen Order]]',
+			'Ashen Order.md': '[[Maren]]',
+			'Duskfang.md': '[[Emberfall]]',
+			'Emberfall.md': 'Emberfall',
+			'Ysolde.md': '[[Maren]] [[Ashen Order]]',
+			'Siege.md': '[[Kael]] [[Brann]]',
+			'Brann.md': 'Brann',
+			'The Burning.md': '[[Emberfall]]',
+			'Index.md': indexed.map((n) => `[[${n}]]`).join(' '),
+		};
+		for (const f of fillers) notes[`${f}.md`] = f;
+		const ranked = related(notes, 'Kael.md', 50).notes;
+		const rank = (path: string) => ranked.findIndex((n) => n.path === path);
+		for (const named of ['Maren.md', 'Ashen Order.md', 'Emberfall.md', 'Duskfang.md']) expect(rank(named)).toBeLessThan(rank('Index.md'));
+		expect(ranked.find((n) => n.path === 'Index.md')!.reasons).toEqual(['links to [[Kael]]', 'both link to [[Duskfang]], [[Ashen Order]], [[Emberfall]] and 1 more']);
+	});
+
 	it('ranks all 40 members a faction note lists above other faction notes sharing its tag', () => {
 		const members = Array.from({ length: 40 }, (_, i) => `M${String(i).padStart(2, '0')}`);
 		const notes: Record<string, string> = { 'Faction.md': members.map((m) => `[[${m}]]`).join(' ') + ' #faction' };

@@ -16,7 +16,9 @@ import { baseName } from '../vault/paths';
  * note that links to everything. A link from the target scores `DIRECT_LINK`,
  * so the notes it names rank highest; a link to the target scores
  * `DIRECT_LINK` / max(1, ln(the linking note's out-degree)), never more than
- * a link from the target, so a link from an index or list note counts little. The order is deterministic:
+ * a link from the target. A shared outgoing link is divided by the same
+ * max(1, ln(out-degree)) of the related note, so an index or list note that
+ * links to the target and its lore counts little. The order is deterministic:
  * score, then path.
  */
 
@@ -74,14 +76,16 @@ export function relatedNotes(graph: NoteLinks[], target: string, limit: number):
 	const linked = out.get(target) ?? [];
 	const linking = inbound.get(target) ?? [];
 	for (const p of linked) evidence(p).linkedFrom = DIRECT_LINK;
-	for (const p of linking) evidence(p).linksTo = DIRECT_LINK / Math.max(1, Math.log(out.get(p)?.length ?? 1));
+	// Evidence from a note's own outgoing links counts less the more notes it links to.
+	const fanOut = (p: string) => Math.max(1, Math.log(out.get(p)?.length ?? 1));
+	for (const p of linking) evidence(p).linksTo = DIRECT_LINK / fanOut(p);
 	for (const citing of linking) {
 		const cited = out.get(citing) ?? [];
 		for (const p of cited) if (p !== target) evidence(p).citedBy.set(citing, weight(cited.length));
 	}
 	for (const shared of linked) {
 		const citing = inbound.get(shared) ?? [];
-		for (const p of citing) if (p !== target) evidence(p).sharedLinks.set(shared, weight(citing.length));
+		for (const p of citing) if (p !== target) evidence(p).sharedLinks.set(shared, weight(citing.length) / fanOut(p));
 	}
 	for (const [key, spelled] of tagsOf.get(target) ?? []) {
 		const withTag = tagged.get(key) ?? [];
