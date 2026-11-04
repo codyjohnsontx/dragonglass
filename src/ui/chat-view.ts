@@ -3,13 +3,13 @@ import { ContextItem } from '../agent/context';
 import { AnswerSources, answerSources, linkWebMarkers, WebSource } from '../agent/sources';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
-import { Conversation, StoredMessage, TurnUsage, usageByTurn } from '../persistence/conversation';
+import { Conversation, ProposalTurn, proposalTurns, StoredMessage, TurnUsage, usageByTurn } from '../persistence/conversation';
 import { modelChoices, ModelMenu, withConfiguredModel } from '../providers/model-choices';
 import { ModelInfo, PROVIDER_IDS, ProviderErrorKind, ProviderId, ToolCall } from '../providers/types';
 import { ActiveContext } from '../vault/port';
 import { baseName } from '../vault/paths';
 import { ConfirmModal } from './confirm-modal';
-import { renderProposalCard } from './proposal-card';
+import { renderBatchCard, renderProposalCard } from './proposal-card';
 import { markUnresolvedLinks, openInternalLink, renderSourcesList } from './sources-list';
 import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
@@ -359,27 +359,57 @@ export class ChatView extends ItemView {
 			summary.createSpan({ cls: 'dg-chip dg-chip-tool', text: label, attr: { title: label } });
 			summary.appendText(m.isError ? ' error' : ' result');
 			details.createEl('pre', { text: m.content.length > 4000 ? `${m.content.slice(0, 4000)}…` : m.content });
-			if (m.proposalId && this.conv) {
-				const proposal = this.conv.proposals[m.proposalId];
-				if (proposal) {
-					const card = wrap.createDiv();
-					card.dataset['proposalId'] = proposal.id;
-					renderProposalCard(this.app, this.core, this.conv, proposal, card, () => this.renderMessages());
-				}
-			}
+			if (m.proposalId && this.conv) this.renderReview(this.conv, m, wrap);
 		}
 		return wrap;
 	}
 
-	/** Re-check proposals for an edited note and redraw their cards in place, without disturbing a live turn. */
+	/**
+	 * The review for a turn's proposals sits on the row of the turn's last
+	 * proposal: a plain card for one proposal, a grouped card with Approve all
+	 * for several (`proposalTurns`). While a turn is live each new proposal
+	 * moves the review down to its own row, so the card drawn on an earlier
+	 * row goes.
+	 */
+	private renderReview(conv: Conversation, m: StoredMessage, parent: HTMLElement): void {
+		const turn = proposalTurns(conv).find((t) => t.proposals.some((p) => p.id === m.proposalId));
+		if (!turn || turn.anchorMessageId !== m.id) return;
+		this.messagesEl.querySelector(`[data-review-turn="${turn.turnId}"]`)?.remove();
+		const card = parent.createDiv();
+		card.dataset['reviewTurn'] = turn.turnId;
+		this.drawReview(conv, turn, card);
+	}
+
+	private drawReview(conv: Conversation, turn: ProposalTurn, card: HTMLElement): void {
+		const redraw = () => this.renderMessages();
+		const [only] = turn.proposals;
+		if (only && turn.proposals.length === 1) {
+			card.dataset['proposalId'] = only.id;
+			renderProposalCard(this.app, this.core, conv, only, card, redraw);
+		} else {
+			delete card.dataset['proposalId'];
+			renderBatchCard(this.app, this.core, conv, turn.proposals, card, redraw);
+		}
+	}
+
+	/**
+	 * Re-check proposals for an edited note and redraw their reviews in place,
+	 * without disturbing a live turn. A proposal in a grouped card redraws the
+	 * whole group, since its header says whether Approve all is still allowed.
+	 */
 	private async onNoteModified(file: TAbstractFile): Promise<void> {
 		const conv = this.conv;
 		if (!conv || !(file instanceof TFile)) return;
 		const changed = await this.core.refreshProposals(conv, file.path);
 		if (this.conv !== conv) return;
+		const turns = changed.length > 0 ? proposalTurns(conv) : [];
+		const redrawn = new Set<HTMLElement>();
 		for (const p of changed) {
-			const card = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`);
-			if (card) renderProposalCard(this.app, this.core, conv, p, card, () => this.renderMessages());
+			const card = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`)?.closest<HTMLElement>('[data-review-turn]');
+			const turn = turns.find((t) => t.proposals.includes(p));
+			if (!card || !turn || redrawn.has(card)) continue;
+			redrawn.add(card);
+			this.drawReview(conv, turn, card);
 		}
 	}
 

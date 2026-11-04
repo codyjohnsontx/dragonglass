@@ -561,6 +561,40 @@ describe('vault tools', () => {
 		expect(bad.isError).toBe(true);
 	});
 
+	it('refuses a second proposal for a note that already has a pending one in the same turn', async () => {
+		const { vault, registry } = setup();
+		const edit = registry.get('propose_edit_note')!;
+		const create = registry.get('propose_create_note')!;
+		const first = await edit.execute({ path: 'Projects/Launch.md', summary: 'date', edits: [{ type: 'find_replace', find: 'November 1', replace: 'November 15' }] }, ctx);
+		expect(first.proposal?.status).toBe('pending');
+		const second = await edit.execute({ path: './Projects/Launch.md', summary: 'tag', edits: [{ type: 'append', content: '#launch' }] }, ctx);
+		expect(second.isError).toBe(true);
+		expect(second.proposal).toBeUndefined();
+		expect(second.content).toBe(
+			'Error: Projects/Launch.md already has a pending proposal in this turn. Put every change to one note in a single propose_edit_note call (several edits in one call); the user reviews one card per note. Nothing was proposed.',
+		);
+		// A create for a note with a pending edit, and any proposal after a pending create, are refused the same way.
+		expect((await create.execute({ path: 'Projects/Launch.md', content: 'x', summary: 's' }, ctx)).content).toMatch(/already has a pending proposal in this turn/);
+		expect((await create.execute({ path: 'New.md', content: 'hi', summary: 's' }, ctx)).proposal?.kind).toBe('create');
+		expect((await create.execute({ path: 'New.md', content: 'hi again', summary: 's' }, ctx)).content).toMatch(/^Error: New\.md already has a pending proposal in this turn/);
+		expect((await edit.execute({ path: 'New.md', summary: 's', edits: [{ type: 'append', content: 'x' }] }, ctx)).content).toMatch(/already has a pending proposal/);
+		// Other notes are unaffected, and so is a bad path (validated as before).
+		expect((await edit.execute({ path: 'Projects/Milestones.md', summary: 's', edits: [{ type: 'append', content: 'x' }] }, ctx)).proposal?.status).toBe('pending');
+		expect((await edit.execute({ path: '../x.md', summary: 's', edits: [{ type: 'append', content: 'x' }] }, ctx)).content).toMatch(/traversal/);
+		// Once the user has resolved the first proposal, the note can be proposed again, against what they now see.
+		const engine = new ProposalEngine(vault);
+		first.proposal!.status = 'rejected';
+		const again = await edit.execute({ path: 'Projects/Launch.md', summary: 'tag', edits: [{ type: 'append', content: '#launch' }] }, ctx);
+		expect(again.proposal?.status).toBe('pending');
+		await engine.apply(again.proposal!);
+		const afterApply = await edit.execute({ path: 'Projects/Launch.md', summary: 'more', edits: [{ type: 'append', content: 'more' }] }, ctx);
+		expect(afterApply.proposal?.before).toContain('#launch');
+		// A new turn builds its own tools, so it starts with no pending notes.
+		const next = new ToolRegistry();
+		for (const t of vaultTools(vault)) next.register(t);
+		expect((await next.get('propose_create_note')!.execute({ path: 'New.md', content: 'hi', summary: 's' }, ctx)).proposal?.kind).toBe('create');
+	});
+
 	it('refuses proposals with placeholder text and tells the model to gather the content', async () => {
 		const { registry } = setup();
 		const edit = await registry.get('propose_edit_note')!.execute(

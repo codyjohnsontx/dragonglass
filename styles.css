@@ -563,3 +563,91 @@ button.dg-chip {
 	color: var(--text-warning);
 	font-size: var(--font-ui-smaller);
 }
+
+/* A turn with several proposals: one card, each note a collapsible section with its own controls. */
+.dg-batch {
+	margin-top: var(--size-2-2);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+	background-color: var(--background-primary);
+}
+
+.dg-batch[data-status='applied'] {
+	border-left-color: var(--color-green);
+}
+
+.dg-batch[data-status='stale'] {
+	border-left-color: var(--color-orange);
+}
+
+.dg-batch[data-status='resolved'] {
+	border-left-color: var(--text-faint);
+	opacity: 0.8;
+}
+
+.dg-batch-title {
+	font-weight: var(--font-semibold);
+}
+
+.dg-batch-actions {
+	margin-top: var(--size-4-1);
+}
+
+.dg-batch-blocked {
+	flex-basis: 100%;
+}
+
+.dg-batch-items {
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-2);
+	margin-top: var(--size-4-2);
+}
+
+.dg-batch-item {
+	border-top: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	padding: var(--size-2-2) 0 var(--size-2-2) var(--size-4-2);
+}
+
+.dg-batch-item[data-status='applied'] {
+	border-left-color: var(--color-green);
+}
+
+.dg-batch-item[data-status='stale'] {
+	border-left-color: var(--color-orange);
+}
+
+.dg-batch-item[data-status='rejected'],
+.dg-batch-item[data-status='reverted'],
+.dg-batch-item[data-status='failed'] {
+	border-left-color: var(--text-faint);
+	opacity: 0.8;
+}
+
+.dg-batch-item > summary {
+	cursor: pointer;
+	list-style: none;
+}
+
+.dg-batch-item > summary::-webkit-details-marker {
+	display: none;
+}
+
+.dg-batch-item > summary::before {
+	content: '▸';
+	color: var(--text-muted);
+	flex: 0 0 auto;
+}
+
+.dg-batch-item[open] > summary::before {
+	content: '▾';
+}
+
+.dg-batch-item > summary .dg-proposal-status {
+	flex: 0 0 auto;
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
+}

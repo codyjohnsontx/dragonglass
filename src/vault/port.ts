@@ -56,6 +56,8 @@ export interface VaultPort {
 	 * returns the new content; throwing inside `fn` aborts without writing.
 	 */
 	processNote(path: string, fn: (current: string) => string): Promise<void>;
+	/** Move a note to the trash, following the user's "Deleted files" setting; never `Vault.delete` directly. Throws if there is no such note. */
+	trashNote(path: string): Promise<void>;
 	/** Write a file under the plugin's private data dir (snapshots). */
 	writePluginFile(relativePath: string, content: string): Promise<void>;
 	readPluginFile(relativePath: string): Promise<string | null>;

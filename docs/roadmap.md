@@ -36,6 +36,9 @@ without redesigning the provider or tool architecture.
 - **OpenAI Responses API** for models that take tool calls only there
   (GPT-6.1 Sol and Terra), statelessly with `store: false`; other OpenAI
   models and the custom endpoint stay on Chat Completions.
+- **Batch review**: the proposals of one turn are reviewed as one grouped
+  card with Approve all, Reject all and Undo all, each all or nothing with
+  rollback; one proposal per note per turn; each note keeps its own controls.
 - **Source markers**: answers cite `[[Note name]]` after each claim taken
   from a note, unsourced text is worded as the model's suggestion, and a
   sources list under the answer, checked against what the tools showed,
@@ -55,10 +58,11 @@ without redesigning the provider or tool architecture.
    "Save to vault" button proposes a reviewed research note with the sources,
    the date and a from-the-web frontmatter marker. An optional preferred-sites
    list is searched first, widening to the whole web only if nothing turns
-   up. Waits on the owner choosing a search service from a researched
-   comparison.
-2. **Batch review**: group proposals from one turn into a single review with
-   approve-all, so multi-file changes are reviewed together.
+   up. The search service is Tavily.
+2. **Review outcome to the model**: tell the model on the next turn which of
+   its proposals were approved, rejected or undone, so it does not assume a
+   change it proposed was made. Today it learns only that the user must
+   approve.
 3. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
 4. **Relationship tools**: "related notes" via shared links, tags and
