@@ -66,6 +66,8 @@ export class ChatView extends ItemView {
 	private liveToolChips: HTMLElement[] = [];
 	private runningChip: HTMLElement | null = null;
 	private pendingApproval: { conv: Conversation; card: HTMLElement } | null = null;
+	/** The conversation whose turn is running, while one is. */
+	private liveConv: Conversation | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
 	/** Serializes announcements to the shared copyStatusEl across concurrent copy clicks. */
 	private readonly copyAnnouncer = new CopyAnnouncer({
@@ -311,8 +313,24 @@ export class ChatView extends ItemView {
 		// One usage line per user turn, on its last reply, rather than one per tool round.
 		const usage = this.core.getSettings().showUsage ? usageByTurn(this.conv.messages) : new Map<string, TurnUsage>();
 		const sources = answerSources(this.conv.messages, this.conv.proposals, (link) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null);
-		for (const m of this.conv.messages) this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] });
+		const messages = this.conv.messages;
+		const answered = (c: ToolCall) => messages.some((t) => t.role === 'tool' && t.toolCallId === c.id);
+		// While a turn runs, the calls of its latest reply are running or waiting, not "not run".
+		const live = this.liveConv === this.conv ? [...messages].reverse().find((m) => m.role === 'assistant') : undefined;
+		// A stopped reply whose calls returned ends after their result rows, where the turn ended.
+		let stopped: StoredMessage | null = null;
+		for (const m of messages) {
+			if (stopped && m.role !== 'tool') {
+				this.renderTurnEnd(stopped, el.createDiv({ cls: 'dg-msg dg-msg-assistant' }), usage.get(stopped.id));
+				stopped = null;
+			}
+			const endAfterTools = !!m.interrupted && (m.toolCalls ?? []).some(answered);
+			this.renderMessage(m, el, usage.get(m.id), { list: sources.lists.get(m.id), web: sources.web.get(m.id) ?? [] }, { live: m === live, endAfterTools });
+			if (endAfterTools) stopped = m;
+		}
+		if (stopped) this.renderTurnEnd(stopped, el.createDiv({ cls: 'dg-msg dg-msg-assistant' }), usage.get(stopped.id));
 		this.renderUsage(el);
+		if (live && this.liveToolRow) el.appendChild(this.liveToolRow);
 		if (this.pendingApproval?.conv === this.conv) el.appendChild(this.pendingApproval.card);
 		this.scrollToBottom();
 	}
@@ -322,7 +340,13 @@ export class ChatView extends ItemView {
 	 * (the chip in the summary), so an assistant turn that only called tools
 	 * renders as a bare step: its thinking, if any, and nothing else.
 	 */
-	private renderMessage(m: StoredMessage, parent: HTMLElement, turnUsage?: TurnUsage, sources?: { list?: AnswerSources; web: WebSource[] }): HTMLElement {
+	private renderMessage(
+		m: StoredMessage,
+		parent: HTMLElement,
+		turnUsage?: TurnUsage,
+		sources?: { list?: AnswerSources; web: WebSource[] },
+		opts: { live?: boolean; endAfterTools?: boolean } = {},
+	): HTMLElement {
 		const wrap = parent.createDiv({ cls: `dg-msg dg-msg-${m.role}` });
 		if (m.role === 'user') {
 			wrap.createDiv({ cls: 'dg-msg-body', text: m.content });
@@ -333,7 +357,7 @@ export class ChatView extends ItemView {
 				for (const a of m.context.attachments) ctx.createSpan({ cls: 'dg-chip', text: a.path });
 			}
 		} else if (m.role === 'assistant') {
-			const toolOnly = !m.content && !m.error && !m.interrupted && (m.toolCalls?.length ?? 0) > 0;
+			const toolOnly = !m.content && !m.error && (!m.interrupted || opts.endAfterTools) && (m.toolCalls?.length ?? 0) > 0;
 			if (toolOnly) wrap.addClass('dg-msg-step');
 			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
 			if (m.content) {
@@ -346,15 +370,15 @@ export class ChatView extends ItemView {
 				renderSourcesList(wrap, sources.list);
 			}
 			// A call whose result never arrived (the run died first) has no result row to live on.
-			const unanswered = (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
+			const unanswered = opts.live ? [] : (m.toolCalls ?? []).filter((c) => !this.conv?.messages.some((t) => t.role === 'tool' && t.toolCallId === c.id));
 			if (unanswered.length > 0) {
 				const calls = wrap.createDiv({ cls: 'dg-tool-calls' });
 				for (const c of unanswered) calls.createSpan({ cls: 'dg-chip dg-chip-tool', text: `${c.name}${argsPreview(c.argumentsJson)} (not run)` });
 			}
-			if (m.interrupted) wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
+			if (m.interrupted && !opts.endAfterTools) wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
 			for (const w of m.warnings ?? []) wrap.createDiv({ cls: 'dg-msg-warning', text: w });
 			if (m.error) wrap.createDiv({ cls: 'dg-msg-error', text: m.error });
-			if (turnUsage) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
+			if (turnUsage && !opts.endAfterTools) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
 			if (wrap.childElementCount === 0) wrap.addClass('dg-msg-hidden');
 		} else {
 			const details = wrap.createEl('details', { cls: `dg-tool-result${m.isError ? ' dg-tool-error' : ''}` });
@@ -367,6 +391,12 @@ export class ChatView extends ItemView {
 			if (m.proposalId && this.conv) this.renderReview(this.conv, m, wrap);
 		}
 		return wrap;
+	}
+
+	/** The Stopped note and usage line of a stopped reply, drawn after its tool results. */
+	private renderTurnEnd(m: StoredMessage, wrap: HTMLElement, turnUsage?: TurnUsage): void {
+		wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
+		if (turnUsage) wrap.createDiv({ cls: 'dg-msg-usage', text: usageLine(turnUsage, m.model) });
 	}
 
 	/**
@@ -640,6 +670,7 @@ export class ChatView extends ItemView {
 		const selection = context.find((c) => c.kind === 'selection');
 		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
 		this.abort = new AbortController();
+		this.liveConv = conv;
 		this.sendBtn.setText('Stop');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
@@ -657,6 +688,7 @@ export class ChatView extends ItemView {
 			});
 		} finally {
 			this.abort = null;
+			this.liveConv = null;
 			this.liveEl = null;
 			this.endLiveTurn();
 			this.sendBtn.setText('Send');
