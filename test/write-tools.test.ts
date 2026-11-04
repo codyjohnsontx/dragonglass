@@ -213,6 +213,39 @@ describe('propose_update_frontmatter', () => {
 		expect(edit.content).toMatch(/Put every change to the note text in a single propose_edit_note call/);
 	});
 
+	it('gives the right refusal hint for every pairing of a pending proposal and a new one on the same path', async () => {
+		const combined: Record<string, string> = {
+			'edit/edit': 'Put every change to the note text in a single propose_edit_note call (several edits in one call)',
+			'frontmatter/frontmatter': 'Put every property change to the note in a single propose_update_frontmatter call (set and remove take several properties)',
+		};
+		const waiting = 'It is waiting for the user to review. Ask the user to approve or reject it first, then propose this change';
+		const earlier: Record<string, { path: string; tool: string; args: Record<string, unknown> }> = {
+			create: { path: 'New.md', tool: 'propose_create_note', args: { content: '# New\n' } },
+			edit: { path: 'Act Two.md', tool: 'propose_edit_note', args: { edits: [{ type: 'append', content: 'Scene.' }] } },
+			frontmatter: { path: 'Act Two.md', tool: 'propose_update_frontmatter', args: { set: [{ key: 'status', value: 'final' }] } },
+			move: { path: 'Act Two.md', tool: 'propose_move_note', args: { new_path: 'Acts/Act Two.md' } },
+			folder: { path: 'Factions', tool: 'propose_create_folder', args: {} },
+		};
+		const next: Record<string, (path: string) => [string, Record<string, unknown>]> = {
+			create: (path) => ['propose_create_note', { path, content: 'x' }],
+			edit: (path) => ['propose_edit_note', { path, edits: [{ type: 'append', content: 'More.' }] }],
+			frontmatter: (path) => ['propose_update_frontmatter', { path, set: [{ key: 'act', value: '2' }] }],
+			move: (path) => ['propose_move_note', { path, new_path: 'Elsewhere.md' }],
+			folder: (path) => ['propose_create_folder', { path }],
+		};
+		for (const [first, e] of Object.entries(earlier)) {
+			for (const [second, make] of Object.entries(next)) {
+				const { call } = setup({ 'Act Two.md': NOTE });
+				expect((await call(e.tool, { path: e.path, summary: 's', ...e.args })).isError, `${first} proposed`).toBeUndefined();
+				const [tool, args] = make(e.path);
+				const refused = await call(tool, { ...args, summary: 's' });
+				expect(refused.content, `${first}/${second}`).toBe(
+					`Error: ${e.path} already has a pending proposal in this turn. ${combined[`${first}/${second}`] ?? waiting}; the user reviews one card per note. Nothing was proposed.`,
+				);
+			}
+		}
+	});
+
 	it('refuses changes that change nothing, bad arguments, missing notes and placeholders', async () => {
 		const { call } = setup({ 'A.md': NOTE });
 		const same = await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'draft' }], remove: ['nope'] });

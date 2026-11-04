@@ -53,6 +53,14 @@ export function createVaultTools(
 	];
 }
 
+/** Refusal hints for a second proposal of the same kind whose tool can carry both changes in one call. */
+const COMBINED: Partial<Record<ProposalKind, string>> = {
+	edit: 'Put every change to the note text in a single propose_edit_note call (several edits in one call)',
+	frontmatter: 'Put every property change to the note in a single propose_update_frontmatter call (set and remove take several properties)',
+};
+
+const WAITING_FOR_REVIEW = 'It is waiting for the user to review. Ask the user to approve or reject it first, then propose this change';
+
 /**
  * The notes proposed through one tool registry. A registry lives for one
  * send, so this is one user turn: a second proposal for a note whose first
@@ -71,10 +79,7 @@ class TurnProposals {
 			const path = validateVaultPath(raw, { markdown: false, configDir: this.configDir });
 			const earlier = this.byPath.get(path);
 			if (!earlier || (earlier.status !== 'pending' && earlier.status !== 'stale')) continue;
-			const hint =
-				(earlier.kind === 'edit' || earlier.kind === 'create') && kind === 'edit'
-					? 'Put every change to the note text in a single propose_edit_note call (several edits in one call)'
-					: 'It is waiting for the user to review. Ask the user to approve or reject it first, then propose this change';
+			const hint = (earlier.kind === kind ? COMBINED[kind] : undefined) ?? WAITING_FOR_REVIEW;
 			throw new ProposalError(`${path} already has a pending proposal in this turn. ${hint}; the user reviews one card per note. Nothing was proposed.`);
 		}
 	}
