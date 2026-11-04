@@ -286,7 +286,7 @@ function renderDiff(core: DragonglassCore, proposal: ChangeProposal, container: 
 	const diffEl = container.createEl('pre', { cls: 'dg-diff' });
 	const hunks = toHunks(core.proposals.diff(proposal), 3);
 	for (const hunk of hunks) {
-		if (hunk.skippedBefore > 0) diffEl.createDiv({ cls: 'dg-diff-skip', text: `… ${hunk.skippedBefore} unchanged lines` });
+		if (hunk.skippedBefore > 0) diffEl.createDiv({ cls: 'dg-diff-skip', text: `… ${plural(hunk.skippedBefore, 'unchanged line')}` });
 		for (const line of hunk.lines) {
 			const row = diffEl.createDiv({ cls: `dg-diff-line dg-diff-${line.op}` });
 			row.createSpan({ cls: 'dg-diff-sign', text: line.op === 'add' ? '+' : line.op === 'del' ? '−' : ' ' });

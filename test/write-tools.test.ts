@@ -3,6 +3,7 @@ import { ToolRegistry } from '../src/agent/tools';
 import { sanitizeConversation } from '../src/persistence/conversation';
 import { VaultSearchIndex } from '../src/search/vault-index';
 import { createVaultTools, DEFAULT_TOOL_OPTIONS } from '../src/tools/vault-tools';
+import { parentFolder } from '../src/vault/paths';
 import { ChangeProposal, ProposalEngine, summarizeBatch } from '../src/vault/proposals';
 import { replaceSection } from '../src/vault/sections';
 import { MemoryVaultPort } from './memory-vault';
@@ -446,6 +447,59 @@ describe('batches with the new kinds', () => {
 		expect(vault.isFolder('New')).toBe(false);
 		expect(vault.trashedFolders).toEqual(['New']);
 		expect([folder.status, move.status]).toEqual(['pending', 'pending']);
+	});
+
+	/** Like Obsidian refusing a file name: the port has made the parent folder by the time the rename fails. */
+	function refuseRename(vault: MemoryVaultPort, from: string, before?: () => void): void {
+		const original = vault.moveNote.bind(vault);
+		vault.moveNote = async (source, to) => {
+			if (source !== from) return original(source, to);
+			await vault.createFolder(parentFolder(to));
+			before?.();
+			throw new Error('File name cannot contain any of the following characters: \\ / :');
+		};
+	}
+
+	it('removes the folders a refused move made, and reports why it failed', async () => {
+		const { vault, engine, call } = setup({ 'Notes.md': 'notes' });
+		const p = (await call('propose_move_note', { path: 'Notes.md', new_path: 'Archive/Old/Gate: Two.md', summary: 's' })).proposal!;
+		refuseRename(vault, 'Notes.md');
+		await expect(engine.apply(p)).rejects.toThrow(/File name cannot contain/);
+		expect(p.status).toBe('failed');
+		expect(p.error).toMatch(/File name cannot contain/);
+		expect(vault.exists('Notes.md')).toBe(true);
+		expect(vault.isFolder('Archive')).toBe(false);
+		expect(vault.trashedFolders).toEqual(['Archive']);
+	});
+
+	it('removes the folder a refused move made in a batch, along with what the batch already wrote', async () => {
+		const files = { 'A.md': '---\nstatus: draft\n---\nBody.\n', 'B.md': 'b' };
+		const { vault, engine, call } = setup(files);
+		const props = (await call('propose_update_frontmatter', { path: 'A.md', summary: 's', set: [{ key: 'status', value: 'final' }] })).proposal!;
+		const move = (await call('propose_move_note', { path: 'B.md', new_path: 'New/B: Two.md', summary: 's' })).proposal!;
+		refuseRename(vault, 'B.md');
+		await expect(engine.applyAll([props, move])).rejects.toThrow(/Applied 1 of 2 changes, then B\.md failed: File name cannot contain .*\. The change to A\.md was rolled back\./);
+		expect(Object.fromEntries(vault.files)).toEqual(files);
+		expect(vault.isFolder('New')).toBe(false);
+		expect(vault.trashedFolders).toEqual(['New']);
+	});
+
+	it('keeps a folder a refused move made once something else is in it', async () => {
+		const { vault, engine, call } = setup({ 'Notes.md': 'notes' });
+		const p = (await call('propose_move_note', { path: 'Notes.md', new_path: 'Archive/Gate: Two.md', summary: 's' })).proposal!;
+		refuseRename(vault, 'Notes.md', () => vault.seed('Archive/Kept.md', 'mine'));
+		await expect(engine.apply(p)).rejects.toThrow(/File name cannot contain/);
+		expect(vault.files.get('Archive/Kept.md')).toBe('mine');
+		expect(vault.trashedFolders).toEqual([]);
+	});
+
+	it('reports why a move failed even if its folder cannot be removed', async () => {
+		const { vault, engine, call } = setup({ 'Notes.md': 'notes' });
+		const p = (await call('propose_move_note', { path: 'Notes.md', new_path: 'Archive/Gate: Two.md', summary: 's' })).proposal!;
+		refuseRename(vault, 'Notes.md');
+		vault.trashFolder = () => Promise.reject(new Error('trash unavailable'));
+		await expect(engine.apply(p)).rejects.toThrow(/File name cannot contain/);
+		expect(p.error).toMatch(/File name cannot contain/);
 	});
 
 	it('undoes a batch whose move rewrote links in notes the same batch changed', async () => {

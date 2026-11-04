@@ -372,7 +372,7 @@ export class ProposalEngine {
 				const created = this.missingFolder(newPath);
 				if (created) p.createdFolder = created;
 				else delete p.createdFolder;
-				await this.vault.moveNote(p.path, newPath);
+				await this.moveNote(p.path, newPath);
 			} else if (p.kind === 'frontmatter') {
 				p.snapshotPath = await this.writeSnapshot(p);
 				// Final guard inside the atomic write: each property still holds what was reviewed.
@@ -577,7 +577,7 @@ export class ProposalEngine {
 				} else if (p.kind === 'move') {
 					const newPath = p.newPath ?? '';
 					if (!this.vault.exists(p.path) || this.vault.exists(newPath)) throw new ProposalError(`${p.path} changed after it was undone`);
-					await this.vault.moveNote(p.path, newPath);
+					await this.moveNote(p.path, newPath);
 				} else if (p.kind === 'frontmatter') {
 					p.after = await this.setProperties(p, 'before', 'after', `${p.path} changed after it was undone`);
 				} else {
@@ -646,8 +646,24 @@ export class ProposalEngine {
 		if (this.vault.exists(p.path)) {
 			throw new ProposalError(step === 'written' ? `${p.path} changed after it was written` : `A file now exists at ${p.path}, so ${newPath} cannot be moved back.`);
 		}
-		await this.vault.moveNote(newPath, p.path);
-		if (p.createdFolder && this.vault.isFolder(p.createdFolder) && this.emptyTree(p.createdFolder)) await this.vault.trashFolder(p.createdFolder);
+		await this.moveNote(newPath, p.path);
+		await this.trashEmptyFolder(p.createdFolder);
+	}
+
+	/** Move a note. If the move fails, the folder made for it goes too, so a refused move leaves the vault as it was. */
+	private async moveNote(from: string, to: string): Promise<void> {
+		const created = this.missingFolder(to);
+		try {
+			await this.vault.moveNote(from, to);
+		} catch (e) {
+			// Why the move failed is what the user needs to read; an empty folder left behind costs nothing.
+			await this.trashEmptyFolder(created).catch(() => undefined);
+			throw e;
+		}
+	}
+
+	private async trashEmptyFolder(folder: string | null | undefined): Promise<void> {
+		if (folder && this.vault.isFolder(folder) && this.emptyTree(folder)) await this.vault.trashFolder(folder);
 	}
 
 	/** The outermost folder above `path` that does not exist yet, or null. */
