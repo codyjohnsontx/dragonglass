@@ -281,9 +281,10 @@ Open the sidebar with the gem icon in the ribbon or the command
   note's diff is a collapsible section with its own Approve and Reject.
   Approve all is all or nothing: if any note changed since it was proposed,
   nothing is written and the card names the note. Once applied, **Undo all**
-  restores every note the same way, and sends notes the batch created to
-  Obsidian's trash if they are untouched. The model is asked for one proposal
-  per note per request, so each card is one note.
+  restores every note the same way, moves moved notes back, and sends notes
+  the batch created to Obsidian's trash if they are untouched; new folders
+  stay. The model is asked for one proposal per note per request, so each card
+  is one note.
 - If you edit the note yourself after a proposal was made, the card switches
   to out of date and approval is blocked; undoing your edit makes it
   approvable again. Otherwise ask again.
@@ -291,8 +292,8 @@ Open the sidebar with the gem icon in the ribbon or the command
   applied. It is refused if the note changed after the edit was applied, so
   later edits are never overwritten. Reverting a property change puts the
   properties back, and reverting a move moves the note back; a created note
-  or folder, including a folder a move created, is not removed. Snapshots are kept under the plugin
-  folder (last 50).
+  or folder, including a folder a move created, is not removed. Snapshots are
+  kept under the plugin folder (last 50).
 - **Stop** cancels generation. Partial text is kept.
 - Conversations persist in the vault's plugin folder and survive switching
   providers. Deleting one asks for confirmation first; there is no undo.

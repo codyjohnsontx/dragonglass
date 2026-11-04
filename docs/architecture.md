@@ -176,7 +176,7 @@ A `ChangeProposal` has a kind:
   `FileManager.renameFile`, which updates links as the user's settings say
   (asking in Obsidian's dialog when "Automatically update internal links" is
   off). Freshness is the note still at its path and nothing at the new one.
-- `folder` creates an empty folder and is never undone.
+- `folder` creates an empty folder, which Revert and Undo all leave in place.
 
 Revert undoes an edit or property change, or moves a note back; it does not
 remove a created note or folder. Approve all writes folders, then note

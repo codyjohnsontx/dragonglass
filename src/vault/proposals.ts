@@ -278,8 +278,9 @@ export class ProposalEngine {
 	}
 
 	/**
-	 * Re-check a pending edit against the current note. Returns `stale` when
-	 * the note changed since the proposal was computed.
+	 * Re-check a pending proposal against the vault. Returns `stale` when the
+	 * note changed since the proposal was computed, `missing` when it is gone,
+	 * and `exists` when something took the path a create, folder or move needs.
 	 */
 	async checkFreshness(p: ChangeProposal): Promise<'fresh' | 'stale' | 'missing' | 'exists'> {
 		if (p.kind === 'create' || p.kind === 'folder') return this.vault.exists(p.path) ? 'exists' : 'fresh';
@@ -717,7 +718,7 @@ export class ProposalEngine {
 		});
 	}
 
-	/** Whether the note's properties, as the metadata cache has them, hold every changed property's `which` value. */
+	/** Whether the note's properties, as the metadata cache has them, hold every changed property's written value. */
 	private propertiesHold(p: ChangeProposal, path: string): boolean {
 		const fm = this.vault.getMetadata(path)?.frontmatter ?? {};
 		return (p.properties ?? []).every((c) => holds(fm, c.key, c.after));
