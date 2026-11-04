@@ -23,6 +23,12 @@ written.
   the web when the vault lacks an answer. You approve every search and can
   change its words first; the answer cites web pages as `[web N]`, and
   **Save to vault** proposes a research note with its sources.
+- **A writing assistant for your script.** Ask for a scene and the model looks
+  up the characters and places in your vault first, drafts it in the chat in
+  the format of the note you have open (Fountain by default), and cites the
+  notes that shaped it. Revise it in the chat; every version stays a click
+  away. **Insert** puts the version you are looking at over your selection or
+  at your cursor, through the same review as any edit.
 
 ## Status
 
@@ -296,6 +302,34 @@ Token counts reported by the provider are shown under each reply, summed over
 every tool round of that turn, and as a conversation total. These are counts,
 not bills. The optional usage warning is a reminder, not a spending limit.
 
+### Drafting scenes
+
+Dragonglass is built for writing a screenplay beside the lore that backs it.
+Open the scene you are working on, then ask: "draft the scene where Kael
+meets Mira at the watchtower". The model searches the vault for the characters
+and places named, reads their notes, and answers with the scene in a draft
+card, saying under it which notes shaped the scene; those notes appear under
+**From your vault** like any answer's sources.
+
+The draft matches the open note's format, read from the note itself: Fountain
+(`INT. PLACE - DAY`, names in capitals, dialogue beneath), a Markdown
+screenplay (headings and bold names), or prose. With nothing to match, drafts
+are Fountain.
+
+Ask for changes in the chat ("make Kael colder") and the whole scene is
+rewritten as a new version; the card shows the latest with arrows to step back
+through the earlier ones, so you can compare or go back. **Copy** copies the
+version shown. **Insert into <note>** puts it into the note you have open:
+over the selected text if there is one, otherwise at the cursor, with a blank
+line either side. The insert is a proposal like any other edit: the diff shows
+under the card, and nothing is written until you approve it.
+
+An optional **Script folder** setting (Settings → Dragonglass AI → Writing)
+names the folder that holds your screenplay. Notes in it are the script, not
+lore, so the model's searches leave them out; the open note is the script a
+draft matches and goes into either way. Inserting into a note outside that
+folder still works, and the review says so.
+
 ## What works
 
 Verified by automated tests against a fake provider server and by driving
@@ -422,6 +456,9 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
   search words (which you see and can edit) and your preferred sites. Reading
   a result page fetches that page with no key or cookie. Search results and
   page text then go to your provider like any tool result.
+- For scene drafts, a short sample of the note you have open (its first 1,200
+  characters) goes with your message so the draft can match its format, whether
+  or not the note is attached.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content and web content are treated as data: the model is told not to

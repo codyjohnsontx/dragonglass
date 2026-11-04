@@ -713,3 +713,110 @@ button.dg-chip {
 .dg-msg-actions {
 	gap: var(--size-2-2);
 }
+
+/* Draft card: a reply that drafted scene text. One header row, the scene text, then the insert review. */
+.dg-draft {
+	margin-top: var(--size-2-3);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+	background-color: var(--background-primary);
+}
+
+.dg-draft-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.dg-draft-title {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	font-weight: var(--font-semibold);
+}
+
+.dg-draft-icon {
+	display: inline-flex;
+	color: var(--interactive-accent);
+}
+
+.dg-draft-icon svg {
+	width: var(--icon-s);
+	height: var(--icon-s);
+}
+
+.dg-draft-stepper {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+}
+
+.dg-draft-step {
+	padding: 0 var(--size-2-1);
+}
+
+.dg-draft-step svg {
+	width: var(--icon-s);
+	height: var(--icon-s);
+}
+
+.dg-draft-spacer {
+	flex: 1;
+}
+
+.dg-draft-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.dg-draft-insert {
+	height: auto;
+	padding: 0 var(--size-4-2);
+	line-height: 1.8;
+	font-size: var(--font-ui-smaller);
+}
+
+.dg-draft-text {
+	margin: var(--size-2-3) 0 0;
+	padding: var(--size-4-2);
+	max-height: 32em;
+	overflow: auto;
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
+	line-height: var(--line-height-tight);
+	white-space: pre-wrap;
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-s);
+}
+
+.dg-draft-review {
+	margin-top: var(--size-2-3);
+}
+
+/* On an earlier version's reply: one line that shows that version in the card. */
+.dg-draft-ref {
+	display: inline-flex;
+	margin-top: var(--size-2-2);
+	padding: 0 var(--size-2-2);
+	height: auto;
+	line-height: 1.8;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	background: none;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	box-shadow: none;
+	cursor: pointer;
+}
+
+.dg-draft-ref:hover {
+	color: var(--text-normal);
+	background-color: var(--background-modifier-hover);
+}

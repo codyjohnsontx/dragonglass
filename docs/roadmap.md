@@ -57,24 +57,44 @@ without redesigning the provider or tool architecture.
   explain ("both link to [[Fort Ashen]]", "shares #faction/ember"); the
   system prompt points the model at it for questions about a character,
   place, faction or what else connects to something.
+- **Writing assistant, build 1: drafting.** Dragonglass's purpose is a
+  screenplay written beside the vault that holds its lore. Drafts appear in
+  the chat as a draft card after the model looks the named characters and
+  places up and cites them; they match the open note's format (Fountain,
+  Markdown screenplay or prose, Fountain by default); each revision is a full
+  rewrite with earlier versions a click away in the card; Insert puts the
+  version shown over the selection or at the cursor of the open note through
+  the normal review; an optional script folder keeps script pages out of lore
+  searches. Builds 2 and 3 follow below.
 
 ## Next
 
-1. **Review outcome to the model**: tell the model on the next turn which of
+1. **Writing assistant, build 2: lore check** against the vault, with a
+   sequel canon note. Flag contradictions in the script (relationships,
+   timeline, voice), each listed in the chat with the line and the vault note
+   it contradicts, and a per-issue "fix it" that proposes the corrected line
+   through the review. A "sequel canon" note, written by the owner or through
+   an "intentional" button, records deliberate changes and overrides the
+   original lore for the check and for drafting.
+2. **Writing assistant, build 3: brainstorm cards**: 3 to 5 short pitch
+   cards for a beat before drafting, each with a "draft this" button, and a
+   way to combine pitches ("combine 2 and 4"). Punch-up and reader notes come
+   after these.
+3. **Review outcome to the model**: tell the model on the next turn which of
    its proposals were approved, rejected or undone, so it does not assume a
    change it proposed was made. Today it learns only that the user must
    approve.
-2. **More write tools**: create folder, move/rename note, update frontmatter
+4. **More write tools**: create folder, move/rename note, update frontmatter
    through `FileManager.processFrontMatter`, section-level replace by heading.
-3. **Propose wikilinks**: suggest links between related notes, each with its
+5. **Propose wikilinks**: suggest links between related notes, each with its
    reason, as reviewed edits.
-4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+6. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-5. **Bases**: read and propose `.base` files once the format is stable.
-6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+7. **Bases**: read and propose `.base` files once the format is stable.
+8. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    fused with the keyword index, only if a measurement on a real vault shows
    they help; never required.
-7. **Cost estimates** for paid providers from a maintained price table,
+9. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
-8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
-   been exercised on desktop.
+10. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+    been exercised on desktop.

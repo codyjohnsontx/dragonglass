@@ -1,5 +1,6 @@
 import { ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
+import { draftVersions, parseDraft } from '../agent/drafting';
 import { AnswerSources, answerSources, linkWebMarkers, WebSource } from '../agent/sources';
 import { RunEvent } from '../agent/runtime';
 import { DragonglassCore } from '../core';
@@ -15,6 +16,7 @@ import { NotePickerModal } from './note-picker';
 import { copyToClipboard, CopyAnnouncer } from './copy';
 import { isSendKey, sendShortcutLabel } from './composer-keys';
 import { renderWebSearchApproval } from './web-approval';
+import { labelInsertButtons, renderDraftCard, renderDraftRef } from './draft-card';
 import type { WebSearchDecision, WebSearchRequest } from '../tools/web-tools';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
@@ -66,6 +68,8 @@ export class ChatView extends ItemView {
 	private liveToolChips: HTMLElement[] = [];
 	private runningChip: HTMLElement | null = null;
 	private pendingApproval: { conv: Conversation; card: HTMLElement } | null = null;
+	/** The draft version shown in each thread's card, by thread id, so a redraw keeps the user's place. */
+	private readonly shownDraft = new Map<string, string>();
 	/** The conversation whose turn is running, while one is. */
 	private liveConv: Conversation | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
@@ -360,7 +364,9 @@ export class ChatView extends ItemView {
 			const toolOnly = !m.content && !m.error && (!m.interrupted || opts.endAfterTools) && (m.toolCalls?.length ?? 0) > 0;
 			if (toolOnly) wrap.addClass('dg-msg-step');
 			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
-			if (m.content) {
+			if (m.draft && this.conv) {
+				this.renderDraftMessage(this.conv, m, wrap, sources);
+			} else if (m.content) {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
 				void MarkdownRenderer.render(this.app, linkWebMarkers(m.content, sources?.web ?? []), body, '', this).then(() => markUnresolvedLinks(this.app, body));
 				if (sources?.list) renderSourcesList(wrap, sources.list);
@@ -391,6 +397,71 @@ export class ChatView extends ItemView {
 			if (m.proposalId && this.conv) this.renderReview(this.conv, m, wrap);
 		}
 		return wrap;
+	}
+
+	/**
+	 * A reply that drafted scene text: what the model said about the draft,
+	 * then the draft card on the thread's latest version, or on an earlier
+	 * version a one-line reference that shows it in the card. The draft block
+	 * itself is not rendered as Markdown; the card holds the scene text.
+	 */
+	private renderDraftMessage(conv: Conversation, m: StoredMessage, wrap: HTMLElement, sources?: { list?: AnswerSources; web: WebSource[] }): void {
+		if (!m.draft) return;
+		const thread = m.draft.thread;
+		const commentary = parseDraft(m.content)?.commentary ?? '';
+		if (commentary) {
+			const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
+			void MarkdownRenderer.render(this.app, linkWebMarkers(commentary, sources?.web ?? []), body, '', this).then(() => markUnresolvedLinks(this.app, body));
+		}
+		const versions = draftVersions(conv.messages, thread);
+		const latest = versions[versions.length - 1];
+		const mine = versions.find((v) => v.messageId === m.id);
+		if (latest && latest.messageId === m.id) {
+			const card = wrap.createDiv();
+			card.dataset['draftThread'] = thread;
+			this.drawDraft(conv, thread, card);
+		} else if (mine) {
+			renderDraftRef(wrap, mine.number, versions.length, () => {
+				this.shownDraft.set(thread, m.id);
+				const card = this.redrawDraft(conv, thread);
+				card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+			});
+		}
+		if (sources?.list) renderSourcesList(wrap, sources.list);
+	}
+
+	private drawDraft(conv: Conversation, thread: string, card: HTMLElement): void {
+		renderDraftCard(card, {
+			app: this.app,
+			core: this.core,
+			conv,
+			versions: draftVersions(conv.messages, thread),
+			shown: this.shownDraft.get(thread) ?? null,
+			onStep: (id) => this.shownDraft.set(thread, id),
+			insert: (id) => this.insertDraft(conv, id),
+			copy: (parent, text) => this.copyButton(parent, text, 'Copy draft to clipboard'),
+			onChange: () => this.redrawDraft(conv, thread),
+		});
+	}
+
+	/** Redraw a thread's card in place, so a live turn is not disturbed; returns the card, or null when it is not on screen. */
+	private redrawDraft(conv: Conversation, thread: string): HTMLElement | null {
+		if (this.conv !== conv) return null;
+		const card = this.messagesEl.querySelector<HTMLElement>(`[data-draft-thread="${thread}"]`);
+		if (card) this.drawDraft(conv, thread, card);
+		return card;
+	}
+
+	/** Insert: propose putting the draft into the open note; the review appears in the card, an error as a Notice. */
+	private async insertDraft(conv: Conversation, messageId: string): Promise<void> {
+		try {
+			await this.core.insertDraft(conv, messageId);
+		} catch (e) {
+			new Notice(e instanceof Error ? e.message : String(e), 8000);
+		} finally {
+			const thread = conv.messages.find((m) => m.id === messageId)?.draft?.thread;
+			if (thread) this.redrawDraft(conv, thread);
+		}
 	}
 
 	/** The Stopped note and usage line of a stopped reply, drawn after its tool results. */
@@ -440,11 +511,22 @@ export class ChatView extends ItemView {
 		const turns = changed.length > 0 ? proposalTurns(conv) : [];
 		const redrawn = new Set<HTMLElement>();
 		for (const p of changed) {
-			const card = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`)?.closest<HTMLElement>('[data-review-turn]');
-			const turn = turns.find((t) => t.proposals.includes(p));
-			if (!card || !turn || redrawn.has(card)) continue;
+			const el = this.messagesEl.querySelector<HTMLElement>(`[data-proposal-id="${p.id}"]`);
+			if (!el) continue;
+			const review = el.closest<HTMLElement>('[data-review-turn]');
+			const draft = el.closest<HTMLElement>('[data-draft-thread]');
+			const card = review ?? draft ?? el;
+			if (redrawn.has(card)) continue;
 			redrawn.add(card);
-			this.drawReview(conv, turn, card);
+			if (review) {
+				const turn = turns.find((t) => t.proposals.includes(p));
+				if (turn) this.drawReview(conv, turn, review);
+			} else if (draft) {
+				this.drawDraft(conv, draft.dataset['draftThread'] ?? '', draft);
+			} else {
+				// A card of its own, such as the research note under a web answer.
+				renderProposalCard(this.app, this.core, conv, p, el, () => this.renderMessages());
+			}
 		}
 	}
 
@@ -454,12 +536,18 @@ export class ChatView extends ItemView {
 	 */
 	private addCopyButton(wrap: HTMLElement, text: string): HTMLElement {
 		const row = wrap.createDiv({ cls: 'dg-msg-actions' });
-		const btn = row.createEl('button', { cls: 'dg-copy-btn', attr: { 'aria-label': 'Copy reply to clipboard' } });
+		this.copyButton(row, text, 'Copy reply to clipboard');
+		return row;
+	}
+
+	/** A Copy button for `text` in `parent`, sharing the view's "Copied" announcement. */
+	private copyButton(parent: HTMLElement, text: string, label: string): HTMLButtonElement {
+		const btn = parent.createEl('button', { cls: 'dg-copy-btn', attr: { 'aria-label': label } });
 		const icon = btn.createSpan();
-		const label = btn.createSpan();
-		const show = (name: string, caption: string): void => {
+		const caption = btn.createSpan();
+		const show = (name: string, text: string): void => {
 			setIcon(icon, name);
-			label.setText(caption);
+			caption.setText(text);
 		};
 		show('copy', 'Copy');
 		let revert: number | null = null;
@@ -478,7 +566,7 @@ export class ChatView extends ItemView {
 				}, 1500);
 			});
 		});
-		return row;
+		return btn;
 	}
 
 	/**
@@ -612,6 +700,8 @@ export class ChatView extends ItemView {
 				text: 'Highlighted context and your message are sent to the cloud provider you configured.',
 			});
 		}
+		// The note an Insert would go into follows the active note.
+		labelInsertButtons(this.messagesEl, active.path);
 	}
 
 	private selectionAlreadySent(active: ActiveContext): boolean {
@@ -758,7 +848,13 @@ export class ChatView extends ItemView {
 				if (this.liveEl) {
 					this.liveEl.empty();
 					this.liveEl.addClass('markdown-rendered');
-					if (ev.content) {
+					const wrap = this.liveEl.parentElement;
+					const stored = conv.messages.find((m) => m.id === wrap?.dataset['id']);
+					if (stored?.draft && wrap) {
+						// The reply drafted scene text: show the draft card now, not after the turn.
+						this.liveEl.remove();
+						this.renderDraftMessage(conv, stored, wrap);
+					} else if (ev.content) {
 						const live = this.liveEl;
 						void MarkdownRenderer.render(this.app, ev.content, live, '', this).then(() => markUnresolvedLinks(this.app, live));
 						// The run may go on with tool rounds; the reply is copyable as soon as it is complete.

@@ -49,6 +49,16 @@ export interface ActiveContext {
 	selection: string | null;
 }
 
+/** Where an insert into the open note goes, taken from its editor at the moment of the click. */
+export interface InsertTarget {
+	path: string;
+	/** The note's text as the editor holds it. */
+	content: string;
+	/** Selection bounds as offsets into `content`; both at the cursor when nothing is selected. */
+	from: number;
+	to: number;
+}
+
 export interface VaultPort {
 	/** Name of the vault's configuration folder (usually `.obsidian`). */
 	readonly configDir: string;
@@ -75,6 +85,8 @@ export interface VaultPort {
 	listPluginFiles(relativeDir: string): Promise<string[]>;
 	deletePluginFile(relativePath: string): Promise<void>;
 	getActiveContext(): ActiveContext;
+	/** The open note's editor state for an insert, after saving its pending edits; null with no note open. */
+	getInsertTarget(): Promise<InsertTarget | null>;
 	/** Hear about vault changes from now on; returns a function that stops listening. */
 	onChange(listener: (change: VaultChange) => void): () => void;
 }

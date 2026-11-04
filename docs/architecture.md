@@ -36,6 +36,9 @@ src/
     context.ts            System prompt and provider message construction.
     sources.ts            Source markers: citations in an answer checked
                           against what tool results and context showed.
+    drafting.ts           Scene drafts: the draft block in a reply, version
+                          threads, format inference from the script note,
+                          the drafting rules, and the insert proposal.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
                           related notes, active note, propose create,
@@ -80,6 +83,8 @@ src/
                           and its screen-reader "Copied" announcement.
     web-approval.ts       The in-chat card that approves a web search, with the
                           search words editable.
+    draft-card.ts         The draft card: version stepper, Copy, Insert into
+                          the open note, and the insert's review.
     proposal-card.ts      Diff review card with approve/reject/revert, and the
                           grouped card for a turn with several proposals
                           (Approve all, Reject all, Undo all).
@@ -182,6 +187,62 @@ with linked markers and a Sources list. It is a `ProposalEngine.proposeCreate`
 proposal stored on the assistant message (`researchProposalId`) and reviewed
 with a plain proposal card under the answer; it is not a tool proposal, so it
 never joins the turn's batch review.
+
+## Drafting scenes
+
+The owner writes a screenplay beside the vault that holds its lore, so the
+system prompt always carries drafting rules (`agent/drafting.ts`,
+`draftingRules`): look the named characters and places up with the vault
+tools first, put the scene text alone in a fenced block opened with
+```` ```draft ```` (```` ```draft new ```` for a different scene), cite the
+notes that shaped it outside the block, rewrite the whole scene for every
+revision, and never propose an edit to put a draft in the script. The block
+is a code fence, so the citation rules and `extractCitations` already leave
+its inside alone; the citations around it make the sources list under the
+draft.
+
+The format to match comes from the open note. `core.send` reads it (the open
+note is the script whether or not it is attached; only a short sample goes
+out), `inferFormat` counts a few line patterns (scene headings, forced
+headings, transitions, character cues with dialogue under them for Fountain;
+bold cues and headings for a Markdown screenplay; otherwise prose; a note too
+short to tell gets Fountain) and the rules name the format and show
+`formatSample`, the note's first 1,200 characters, as data. The optional
+script folder setting goes into the vault map and into the search tools as
+`excludeFolder`: `search_notes` leaves its notes out of results, linked notes
+and better-elsewhere hints, while `read_note` still reads them on request.
+
+At `assistant_end`, `parseDraft` lifts the block out of the reply and `core`
+stores it on the assistant message as `draft: { thread, text, inserts }`. A
+revision continues the thread of the latest draft in the conversation
+(`threadForDraft`); `draft new` starts one. Nothing else is stored for the
+history: `draftVersions` lists a thread's versions from the messages, so the
+versions persist with the conversation and older conversations need no
+migration. The chat view renders a draft message as its commentary, then the
+draft card on the thread's latest version (`ui/draft-card.ts`), and on an
+earlier version a one-line "Draft 1 of 3" reference that shows that version
+in the card. The card is one header row (version stepper when there are
+several, Copy, Insert into the open note) over the scene text; the version
+shown is what Copy and Insert act on, and the view remembers it per thread
+across redraws. The card is drawn as soon as the reply ends, before the
+turn's final render.
+
+Insert reads the open Markdown view at the click through
+`VaultPort.getInsertTarget` (`obsidian-port.ts` saves the view's pending
+edits first, then takes the editor text and the selection offsets, both at
+the cursor when nothing is selected). `insertDraftText` puts the draft over
+`[from, to)` on lines of its own with a blank line each side, except at the
+ends of the note, and `proposeDraftInsert` turns that into a
+`ProposalEngine.proposeRewrite` proposal: the engine re-reads the note and
+refuses when it differs from the editor text (an unsaved edit), then the
+proposal is hashed, reviewed and applied exactly like a model edit, freshness
+check inside `Vault.process` included. The proposal id is stored on the draft
+version (`draft.inserts`), not on a tool message, so it never joins the
+turn's batch review and the model never sees it; the card shows the thread's
+newest insert as a plain proposal card, and a new Insert supersedes an
+earlier one still awaiting review. The summary names the note and says when
+it lies outside the script folder; the Insert button names the note it would
+go into and follows the active note.
 
 ## Source markers
 
