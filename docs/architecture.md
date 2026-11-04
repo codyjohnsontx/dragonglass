@@ -43,21 +43,26 @@ src/
     vault-index.ts        Builds the index from the vault in slices, follows
                           vault events, serializes builds and searches.
   vault/
-    port.ts               Narrow VaultPort interface over Obsidian's vault.
+    port.ts               Narrow VaultPort interface over Obsidian's vault,
+                          including trashing a note (never a hard delete).
     obsidian-port.ts      VaultPort + StoreBackend implemented on App.
     paths.ts              Path validation at the trust boundary.
     proposals.ts          ChangeProposal model and ProposalEngine
-                          (propose, diff, freshness check, apply, revert).
+                          (propose, diff, freshness check, apply, revert, and
+                          the all-or-nothing batch apply and undo with rollback).
     diff.ts               Line diff (LCS) and hunk collapsing for review.
   persistence/
-    conversation.ts       Stored conversation/message model and sanitizer.
+    conversation.ts       Stored conversation/message model and sanitizer;
+                          groups usage and proposals by user turn.
     store.ts              One JSON file per conversation, debounced writes.
   ui/
     chat-view.ts          The sidebar ItemView.
     composer-keys.ts      Which composer keystroke sends (Mod+Enter) and its label.
     copy.ts               Clipboard write behind the per-reply Copy button,
                           and its screen-reader "Copied" announcement.
-    proposal-card.ts      Diff review card with approve/reject/revert.
+    proposal-card.ts      Diff review card with approve/reject/revert, and the
+                          grouped card for a turn with several proposals
+                          (Approve all, Reject all, Undo all).
     note-picker.ts        Fuzzy picker for attaching notes.
     confirm-modal.ts      Confirmation dialog for destructive actions.
     model-suggest.ts      Model suggestions under a free-text model id field.
@@ -79,7 +84,10 @@ src/
    are still streaming.
 4. Each tool call is validated against the tool's JSON schema
    (`agent/tools.ts`). Only then does the tool run. Read tools return text.
-   Write tools return a `ChangeProposal` and *do not write*.
+   Write tools return a `ChangeProposal` and *do not write*. A tool registry
+   lives for one send, and a second proposal for a note whose first proposal
+   of that turn is still awaiting review is refused with a tool error telling
+   the model to put every change to the note in one call.
 5. Tool results are appended as `tool` messages and the loop continues until
    the model answers without tools. A call repeated with the same arguments in
    one turn is answered with an error instead of being run again. After a
@@ -99,6 +107,16 @@ src/
    and auto-reads them right after it within half the auto-read budget.
 6. Every message and proposal is written to the conversation store as it is
    produced, so a crash mid-turn loses nothing already shown.
+7. The view reviews proposals per turn (`proposalTurns`): the proposals made
+   between one user message and the next render on the row of the last one,
+   as a plain card for a single proposal or a grouped card for several, with
+   Approve all and Reject all, then Undo all once applied. Each note's section
+   keeps its own approve, reject and revert, and approving or rejecting one
+   removes it from what Approve all covers. The grouping is derived from the
+   messages when rendering, so nothing new is stored and older conversations
+   group the same way. While a note in the batch is known to be out of date
+   (the same live tracking that marks a single card), Approve all is disabled
+   and the header names the note with a link that scrolls to its section.
 
 ## Trust boundaries
 
@@ -113,7 +131,15 @@ src/
   proposal time, writes a snapshot of the prior content under the plugin
   folder, then writes through `Vault.process` with a final content equality
   check inside the atomic callback. If anything changed, nothing is written and
-  the proposal is marked out of date.
+  the proposal is marked out of date. Approve all composes that per-note path
+  and is all or nothing: every pending note is checked first, and one
+  out-of-date note means nothing is written and the error names it. If a write
+  fails partway, the notes already written are restored from their snapshots
+  and a note the batch created is moved to Obsidian's trash through
+  `VaultPort.trashNote` (`FileManager.trashFile`, never a hard delete), each
+  only while the note still holds exactly what the batch wrote. Undo all
+  checks every applied note the same way before undoing any, and trashes
+  created notes under the same rule; per-note revert never removes a note.
 - **Secrets** live in Obsidian's `SecretStorage`; settings persist only the
   secret id. Each cloud adapter reads its own key through a closure at
   request time and never stores it; `registry.ts` wires each provider to its

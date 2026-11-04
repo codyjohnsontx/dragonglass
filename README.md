@@ -226,6 +226,14 @@ Open the sidebar with the gem icon in the ribbon or the command
 - Ask for edits: "Move the launch date in Projects/Launch.md to November 15."
   The model reads the note, proposes a change, and a card with the diff
   appears. Select **Approve** to apply or **Reject** to discard.
+- When one request changes several notes, the proposals appear as one card
+  ("3 changes across 3 notes") with **Approve all** and **Reject all**; each
+  note's diff is a collapsible section with its own Approve and Reject.
+  Approve all is all or nothing: if any note changed since it was proposed,
+  nothing is written and the card names the note. Once applied, **Undo all**
+  restores every note the same way, and sends notes the batch created to
+  Obsidian's trash if they are untouched. The model is asked for one proposal
+  per note per request, so each card is one note.
 - If you edit the note yourself after a proposal was made, the card switches
   to out of date and approval is blocked; undoing your edit makes it
   approvable again. Otherwise ask again.
@@ -264,6 +272,9 @@ vault:
   find/replace, diff is shown, approve applies it through the Vault API, the
   open editor shows the new content, a snapshot is written, revert restores it.
 - Stale detection: a note edited after the proposal cannot be approved.
+- Batch review: a request that changes several notes shows one grouped card;
+  Approve all applies every note, is disabled while one is out of date, and
+  Undo all puts them all back, trashing the notes it created.
 - Conversation history persists across plugin reload.
 
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above).
@@ -290,7 +301,8 @@ a different URL. To verify live:
   extras (OpenRouter routing options, reasoning fields some services stream)
   are not sent or shown, and a server without a `/models` route fails the
   connection test even if chat works.
-- One proposal per card; multi-file changes are reviewed one card at a time.
+- The model is not told whether a proposal was approved or rejected; it only
+  knows the user must approve.
 - No Canvas, Bases, folder/move/rename tools, or frontmatter-specific editing
   yet.
 - No semantic search or stemming; search matches any query word at the start

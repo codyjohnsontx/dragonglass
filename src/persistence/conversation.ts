@@ -99,6 +99,44 @@ export function usageByTurn(messages: StoredMessage[]): Map<string, TurnUsage> {
 	return out;
 }
 
+/** The proposals one user turn produced, in the order they were made. */
+export interface ProposalTurn {
+	/** Id of the user message that began the turn; empty for proposals before any user message. */
+	turnId: string;
+	proposals: ChangeProposal[];
+	/** Id of the tool message carrying the turn's last proposal, where the review renders. */
+	anchorMessageId: string;
+}
+
+/**
+ * Group proposals by user turn (a user message and everything up to the next
+ * one). A turn with two or more is reviewed as one batch. The grouping is
+ * derived from the messages here, not stored, so conversations saved before
+ * batches existed group the same way when reopened.
+ */
+export function proposalTurns(conv: Conversation): ProposalTurn[] {
+	const out: ProposalTurn[] = [];
+	let turnId = '';
+	let current: ProposalTurn | null = null;
+	for (const m of conv.messages) {
+		if (m.role === 'user') {
+			turnId = m.id;
+			current = null;
+			continue;
+		}
+		if (m.role !== 'tool' || !m.proposalId) continue;
+		const proposal = conv.proposals[m.proposalId];
+		if (!proposal) continue;
+		if (!current) {
+			current = { turnId, proposals: [], anchorMessageId: m.id };
+			out.push(current);
+		}
+		current.proposals.push(proposal);
+		current.anchorMessageId = m.id;
+	}
+	return out;
+}
+
 export function deriveTitle(firstUserMessage: string): string {
 	const line = firstUserMessage.split('\n').find((l) => l.trim().length > 0) ?? 'New conversation';
 	const trimmed = line.trim().replace(/\s+/g, ' ');
