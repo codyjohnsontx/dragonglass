@@ -454,15 +454,18 @@ export class ChatView extends ItemView {
 		return card;
 	}
 
-	/** Insert: propose putting the draft into the open note; the review appears in the card, an error as a Notice. */
+	/** Insert: propose putting the draft into the open note; the review appears in the card and scrolls into view, an error as a Notice. */
 	private async insertDraft(conv: Conversation, messageId: string): Promise<void> {
+		let inserted = false;
 		try {
 			await this.core.insertDraft(conv, messageId);
+			inserted = true;
 		} catch (e) {
 			new Notice(e instanceof Error ? e.message : String(e), 8000);
 		} finally {
 			const thread = conv.messages.find((m) => m.id === messageId)?.draft?.thread;
-			if (thread) this.redrawDraft(conv, thread);
+			const card = thread ? this.redrawDraft(conv, thread) : null;
+			if (inserted) card?.querySelector('.dg-draft-review')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 		}
 	}
 
