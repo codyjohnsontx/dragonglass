@@ -222,7 +222,8 @@ export function answerSources(
 			for (const shown of turnTools) {
 				if (proposed.has(shown)) continue;
 				const path = resolve(shown);
-				list.vault.push({ link: baseName(shown), path, status: path === null ? 'missing' : status(path) });
+				if (path === null) list.vault.push({ link: shown.replace(/\.md$/i, ''), path, status: 'missing' });
+				else list.vault.push({ link: baseName(shown), path, status: status(path) });
 			}
 			if (list.vault.length > 0) list.draftRead = true;
 		}
