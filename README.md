@@ -320,10 +320,15 @@ or with nothing to match, drafts are Fountain.
 Ask for changes in the chat ("make Kael colder") and the whole scene is
 rewritten as a new version; the card shows the latest with arrows to step back
 through the earlier ones, so you can compare or go back. **Copy** copies the
-version shown. **Insert into <note>** puts it into the note you have open:
+version shown. **Insert into …** puts it into the note you have open:
 over the selected text if there is one, otherwise at the cursor, with a blank
 line either side. The insert is a proposal like any other edit: the diff shows
 under the card, and nothing is written until you approve it.
+
+Right after a draft, a message that names no note is taken as being about the
+draft, and the model cannot propose note edits on that turn. To change a note
+then, name it with a `[[link]]`, a path, the word "note" or the open note's
+title.
 
 An optional **Script folder** setting (Settings → Dragonglass AI → Writing)
 names the folder that holds your screenplay. Notes in it are the script, not

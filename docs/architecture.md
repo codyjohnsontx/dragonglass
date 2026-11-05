@@ -39,6 +39,7 @@ src/
     drafting.ts           Scene drafts: the draft block in a reply, version
                           threads, format inference from the script note,
                           the drafting rules, and the insert proposal.
+    delimiters.ts         Defuses untrusted text framed in `<<<…>>>` blocks.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
                           related notes, active note, propose create,
