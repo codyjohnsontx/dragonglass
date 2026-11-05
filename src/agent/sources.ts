@@ -16,7 +16,8 @@ import { ChangeProposal, touchedPaths } from '../vault/proposals';
  * changing, at either path of a move, names the change, not a source, and is
  * not listed. A draft that cites no note lists instead the notes the turn's
  * tools showed the model, so the notes that shaped a scene are shown
- * whether or not the model named them.
+ * whether or not the model named them, and a lore check does the same, so
+ * what was checked against is shown too.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
@@ -68,10 +69,10 @@ export interface WebEntry {
 }
 
 export interface AnswerSources {
-	/** Cited notes in citation order; for a draft that cites none, the notes the turn's tools showed (see `draftRead`). */
+	/** Cited notes in citation order; for a draft or lore check that cites none, the notes the turn's tools showed (see `readFor`). */
 	vault: VaultEntry[];
-	/** The draft cited no note, so `vault` lists what the turn's tools showed the model instead. */
-	draftRead?: true;
+	/** A draft or lore check cited no note in its text, so `vault` lists what the turn's tools showed the model instead. */
+	readFor?: 'draft' | 'check';
 	/** Cited web pages in number order. */
 	web: WebEntry[];
 	/** Web sources shown so far in the conversation, for turning [web N] markers into links. */
@@ -159,9 +160,10 @@ export function sanitizeSources(raw: unknown): Source[] {
  * A turn whose user message has no sources record predates source markers
  * and gets no list; after one, a cited note the record does not show as read
  * is unchecked rather than unread, since the unrecorded turn may have shown it.
- * A turn that ends in a draft citing no note lists the notes this turn's tool
- * results showed, in the order shown, minus notes the turn proposed changing,
- * each with the status the same rules give a cited note.
+ * A turn that ends in a draft citing no note, or in a lore check (whose citations
+ * are in its block), lists the notes this turn's tool results showed, in the
+ * order shown, minus notes the turn proposed changing, each with the status
+ * the same rules give a cited note; a lore check adds the notes sent with it.
  */
 export function answerSources(
 	messages: StoredMessage[],
@@ -218,14 +220,18 @@ export function answerSources(
 			return sent || shown ? 'excerpt' : 'unread';
 		};
 		const list = buildList(assistants.map((a) => a.content).join('\n\n'), status, proposed, web, resolve);
-		if (list.vault.length === 0 && assistants.some((a) => a.draft)) {
-			for (const shown of turnTools) {
+		const readFor = assistants.some((a) => a.loreCheck) ? 'check' : assistants.some((a) => a.draft) ? 'draft' : null;
+		if (list.vault.length === 0 && readFor) {
+			// A lore check is also sent the notes the script names; everything sent but the script itself counts.
+			const check = assistants.find((a) => a.loreCheck)?.loreCheck;
+			const read = check ? [...[...turnContext.keys()].filter((p) => p !== check.scriptPath), ...turnTools] : [...turnTools];
+			for (const shown of new Set(read)) {
 				if (proposed.has(shown)) continue;
 				const path = resolve(shown);
 				if (path === null) list.vault.push({ link: shown.replace(/\.md$/i, ''), path, status: 'missing' });
 				else list.vault.push({ link: baseName(shown), path, status: status(path) });
 			}
-			if (list.vault.length > 0) list.draftRead = true;
+			if (list.vault.length > 0) list.readFor = readFor;
 		}
 		if (list.vault.length > 0 || list.web.length > 0) lists.set(assistants[assistants.length - 1]!.id, list);
 	}

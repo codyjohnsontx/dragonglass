@@ -568,3 +568,96 @@ The script folder is a setting rather than inferred: it only exists to keep
 script pages out of the lore the model searches, the open note is the script
 either way, and inserting outside the folder is allowed and said in the
 review, since a scene may be drafted into an outline or a scratch note.
+
+## 22. Lore check is a block in the reply; canon goes with every send
+
+This is the second build of decision 21: flag where the script contradicts the
+vault on relationships, timeline or voice, list each issue with the line and
+the note, offer a fix and a way to say the change is deliberate. The interview
+fixed that shape and that a sequel canon note overrides the original lore. The
+open questions were how the model hands issues over, how far to trust them, how
+the lore reaches the model, and how the override works.
+
+How the model hands over issues: a `report_issues` tool, JSON in a block, or
+labelled records in a block. A tool has the problems decision 21 found for
+drafts, and a check is read-only, so it would be a tool that changes nothing
+only to carry a list. JSON fails whole: one unescaped quote in a line of
+dialogue loses every issue. Records under ```` ```lore ```` with `LINE`,
+`VAULT`, `NOTE` and `FIX` lose at most the record that is malformed, and the
+parser takes what qwen3:8b writes: bold labels, wrapped values, the cue with
+the dialogue, `None` for no fix, and a record that says no change is needed. An empty block means nothing was found;
+no block is a failed check, kept as a plain reply with a warning, because
+"no contradictions" is a claim that needs an answer behind it.
+
+How far to trust a flag: a flag acts on the script, so what can be checked is
+checked (`groundLoreCheck`). The line must be in the text checked, and the note
+must exist, must not be the script or a script page, and must have been shown
+to the model this turn. A flag that fails is dropped and counted, and the card
+says how many, so a check that lost flags does not read as a clean one. This
+cannot tell whether the model read the note correctly: a kept flag's claim can
+still be wrong, which is why the card shows the claim beside the note link and
+every action goes through a review.
+
+How the lore reaches the model: this is not in the interview and came from
+measuring. With the read tools alone the model chooses what to look up, and a
+small local model chooses badly: it made one useless call in one run and then
+cited no note at all. So the check also sends the notes the script names
+(`loreForScript`): any note whose name or alias appears as a whole word, most
+mentioned first, up to 12, in the same token budget as other context. That
+needs no model judgement, costs nothing beyond the note text, and leaves the
+tools for what the script does not name. The cost is privacy, so it is in the
+settings text and the README: a check sends those notes to the provider without
+the model asking. Dropping the tools was rejected, since a contradiction with a
+note the script never names needs them.
+
+Measured with qwen3:8b on one fixture, a scene with four planted contradictions
+and a clean scene over 12 lore notes, five runs each. With the tools alone it
+found 11 of the 20 plants at about 150 seconds a check, and one run found none.
+With the named notes it found 15 of 20 at about 75 seconds, and every run found
+at least two. That is why the notes go along.
+
+The same runs show what a small local model does to a clean script: it flags
+something. Every run on the clean scene flagged at least one line, seven in all,
+such as "He died in the mine" against notes saying the mine fell in and killed
+him. Telling it that a contradiction means both cannot be true, and that other
+words for the same fact agree, did not help: six false flags before the rule,
+seven after. The rule stays because it says what the check means and cost no
+plants, but no wording fixed this. The card's claim beside the note link is the
+defence: a false flag is read and ignored, and nothing is written. A second
+pass that asks the model about each flag is the obvious next step and is not
+built.
+
+Two things the runs showed could be fixed in code. The model puts the character
+cue in front of the line with no colon (`MIRA I remember`), and those flags were
+left out as unverifiable, which cost real finds. A cue cannot be told from the
+start of a sentence by its shape (`MIRA I` is two capitalised words), so words in
+front of a quote count as a cue only when what follows is a whole line of the
+script. And between a tenth and nearly a third of the fixes were the wrong line
+with a remark added, so a fix that still holds the whole line is dropped and the
+issue keeps only Intentional. Those figures replay the recorded replies through
+the final parser, since neither change alters what the model is sent.
+
+How canon overrides: as data the model reads, and as a filter where a filter
+can be exact. The canon note goes with every send as its own context item,
+framed and defused like any note, because drafting needs it as much as the
+check does and a drafter that has to look it up may not. That spends context
+and sends the note to the provider with each message, which is why it is
+limited to one named note, shares the note budget and is listed in the privacy
+text. An Intentional entry quotes the script line, so a flag on a line the canon
+quotes is dropped in code (`inCanon`) and that line is never flagged again. A
+change the owner wrote in their own words has no line to match, so it rests on
+the prompt rules and the model taking them in. Matching those in code would
+mean judging meaning, which is the model's job and not one a filter can do.
+Measured the same way, with the sister as such a change: it was flagged in none
+of five runs, and the other three plants were found 11 times of 15. A draft
+followed a canon entry that contradicted a lore note, and followed the note once
+the entry was removed.
+
+What Fix it and Intentional are: proposals, like Insert. The proposal hangs off
+the issue rather than a tool message, so it joins no batch and is not replayed
+to the model. The fix replaces that exact line in the note as it is at the
+click, and is refused when the line has gone or repeats, because a fix computed
+from an old check should not land on the wrong line; the review's hash then
+covers everything after the click. While an issue's proposal is pending, stale
+or applied the buttons are hidden, since offering a second proposal on the same
+line invites the second to go stale; reject or undo brings them back.

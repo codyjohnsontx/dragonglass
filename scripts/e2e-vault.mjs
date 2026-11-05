@@ -65,6 +65,12 @@ writeFileSync(
 	'INT. EMBER GUARD BARRACKS - DAWN\n\nKAEL sharpens a blade that does not need it.\n\nKAEL\nAgain.\n\nThe recruits groan.\n\n',
 );
 
+// A script page with contradictions for the lore check (fake server scripts `check the lore of`).
+writeFileSync(
+	resolve(vault, 'Script', 'Scene 13.md'),
+	'INT. COUNCIL HALL - DAY\n\nKAEL kneels before the Council.\n\nKAEL\nI have always trusted this Council with my life.\n\nMIRA\nYou were born in Frosthaven, Kael. Nobody here forgets it.\n\nKAEL\nFrosthaven made me what I am.\n\nThe elders say nothing.\n',
+);
+
 const vaultId = 'e2e0000000000001';
 writeFileSync(
 	resolve(userData, 'obsidian.json'),

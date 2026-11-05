@@ -1,6 +1,8 @@
 import { ChatMessage, estimateTokens } from '../providers/types';
 import { StoredMessage } from '../persistence/conversation';
+import { attr, defuse } from './delimiters';
 import { DraftingOptions, draftingRules } from './drafting';
+import { canonRule, loreCheckRules } from './lore-check';
 import { formatNote, truncateContent } from '../tools/vault-tools';
 import { baseName } from '../vault/paths';
 import { VaultPort } from '../vault/port';
@@ -16,7 +18,8 @@ export interface ContextItem {
 	label: string;
 	path: string | null;
 	content: string;
-	kind: 'active' | 'selection' | 'attachment';
+	/** `canon` is the sequel canon note, which goes with every send, and `lore` a note a lore check named; the user attached neither. */
+	kind: 'active' | 'selection' | 'attachment' | 'canon' | 'lore';
 }
 
 export interface PromptOptions {
@@ -30,6 +33,10 @@ export interface PromptOptions {
 	webSearch?: 'available' | 'needs-key';
 	/** How to draft scene text and which format to match. Absent in tests of the other rules. */
 	drafting?: DraftingOptions;
+	/** This turn is a lore check of the note at this path: its rules replace the drafting rules. */
+	loreCheck?: string;
+	/** Name of the sequel canon note, when its text goes with this send. */
+	canon?: string;
 }
 
 /** What the system prompt says about the vault's shape. */
@@ -83,7 +90,12 @@ export function buildSystemPrompt(opts: PromptOptions): string {
 	} else {
 		lines.push('- Vault tools are not available in this session; answer from the conversation and attached context only.');
 	}
-	if (opts.drafting) lines.push(...draftingRules(opts.drafting, opts.toolsEnabled));
+	if (opts.loreCheck) {
+		lines.push(...loreCheckRules(opts.loreCheck, opts.toolsEnabled, opts.canon ?? null));
+	} else if (opts.drafting) {
+		lines.push(...draftingRules(opts.drafting, opts.toolsEnabled));
+		if (opts.canon) lines.push(canonRule(opts.canon));
+	}
 	return lines.join('\n');
 }
 
@@ -188,11 +200,20 @@ export function formatContextBlock(items: ContextItem[], maxCharsPerNote: number
 		if (item.kind === 'selection') {
 			const { body, note } = truncateContent(item.content, maxCharsPerNote, caps[i]);
 			parts.push(`<<<selection${item.path ? ` from="${item.path}"` : ''}>>>\n${body}${note}\n<<<end selection>>>`);
+		} else if (item.kind === 'canon') {
+			const { body, note } = truncateContent(item.content, maxCharsPerNote, caps[i]);
+			parts.push(`<<<canon path="${attr(item.path ?? item.label)}">>>\n${defuse(body)}${note}\n<<<end canon>>>`);
 		} else {
 			parts.push(formatNote(item.path ?? item.label, item.content, maxCharsPerNote, caps[i]));
 		}
 	});
 	return parts.join('\n\n');
+}
+
+/** How many characters of each item `formatContextBlock` shows the model. */
+export function shownChars(items: ContextItem[], maxCharsPerNote: number, maxTokens?: number): number[] {
+	const caps = allocateTokens(items.map((item) => estimateTokens(item.content.slice(0, maxCharsPerNote))), maxTokens);
+	return items.map((item, i) => truncateContent(item.content, maxCharsPerNote, caps[i]).body.length);
 }
 
 /**

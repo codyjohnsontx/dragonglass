@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, toProviderMessages, userMessage, vaultMap } from './agent/context';
+import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, shownChars, toProviderMessages, userMessage, vaultMap } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -16,8 +16,9 @@ import { createWebTools, DEFAULT_MAX_PAGE_CHARS, nextWebNumber, WebSearchApprove
 import { researchNoteFor } from './web/research-note';
 import { parsePreferredSites, TavilySearch } from './web/search';
 import { draftingForSend, followsDraft, parseDraft, proposeDraftInsert, revisionReminder, threadForDraft } from './agent/drafting';
+import { canonContext, canonNotePath, groundLoreCheck, loreForScript, LoreCheckRecord, LoreIssue, loreCheckRequest, parseLoreBlock, proposeCanonEntry, proposeLoreFix, RawIssue, shownPaths } from './agent/lore-check';
 import { ObsidianVaultPort } from './vault/obsidian-port';
-import { normalizeVaultPath } from './vault/paths';
+import { baseName, normalizeVaultPath } from './vault/paths';
 import { ChangeProposal, ProposalEngine, ProposalError } from './vault/proposals';
 
 /**
@@ -32,6 +33,15 @@ export interface SendOptions {
 	onEvent: (ev: RunEvent) => void;
 	/** Asks the user to approve a web search. Without it, or without a Tavily key, the model has no web tools. */
 	approveWebSearch?: WebSearchApprover;
+	/** This send is a lore check of the first context item. */
+	loreCheck?: { scriptPath: string; resolve: (link: string) => string | null };
+}
+
+export interface LoreCheckOptions {
+	signal: AbortSignal;
+	onEvent: (ev: RunEvent) => void;
+	/** Resolves a cited note's name to its path, as Obsidian would. */
+	resolve: (link: string) => string | null;
 }
 
 export class DragonglassCore {
@@ -171,14 +181,18 @@ export class DragonglassCore {
 			opts.onEvent({ type: 'error', error: new ProviderError('invalid_request', 'No model selected. Pick one in settings or the model menu.') });
 			return;
 		}
-		const userMsg = userMessage(newId(), opts.text, opts.context, Date.now());
+		const lore = opts.loreCheck;
+		const canon = await canonContext(this.vault, this.canonNote(), opts.context);
+		const loreNotes = lore ? await loreForScript(this.vault, opts.context[0]?.content.slice(0, this.settings.maxCharsPerNote) ?? '', { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder(), canonPath: this.canonNote() }) : [];
+		const context = [...opts.context, ...loreNotes, ...(canon ? [canon] : [])];
+		const userMsg = userMessage(newId(), opts.text, context, Date.now());
 		if (conv.messages.length === 0) conv.title = deriveTitle(opts.text);
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
 
 		const contextWindow = await this.contextWindow(provider, model, opts.signal);
 		const noteTokens = noteTokenBudget(contextWindow);
-		const contextBlock = [formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens), revisionReminder(conv.messages)].filter(Boolean).join('\n\n');
+		const contextBlock = [formatContextBlock(context, this.settings.maxCharsPerNote, noteTokens), lore ? '' : revisionReminder(conv.messages)].filter(Boolean).join('\n\n');
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
 		const drafting = await draftingForSend(this.vault, opts.context, this.scriptFolder());
@@ -191,12 +205,12 @@ export class DragonglassCore {
 		const events = runAgent({
 			provider,
 			model,
-			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map, webSearch, webSources, drafting }),
+			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map, webSearch, webSources, drafting, loreCheck: lore?.scriptPath, canon: canon ? canon.label : undefined }),
 			messages,
 			tools: this.createTools(
 				contextWindow,
-				webReady && opts.approveWebSearch ? { approve: opts.approveWebSearch, firstNumber: nextWebNumber(pastSources) } : null,
-				followsDraft(conv.messages, this.vault.getActiveContext().path),
+				!lore && webReady && opts.approveWebSearch ? { approve: opts.approveWebSearch, firstNumber: nextWebNumber(pastSources) } : null,
+				lore !== undefined || followsDraft(conv.messages, this.vault.getActiveContext().path),
 			),
 			toolsEnabled: this.settings.toolsEnabled,
 			conversationId: conv.id,
@@ -224,6 +238,8 @@ export class DragonglassCore {
 						current.warnings = ev.warnings.length ? ev.warnings : undefined;
 						const draft = parseDraft(ev.content);
 						if (draft) current.draft = { thread: threadForDraft(conv.messages, draft.fresh, newId), text: draft.text };
+						const issues = lore && ev.toolCalls.length === 0 ? parseLoreBlock(ev.content) : null;
+						if (lore && issues) current.loreCheck = this.loreResult(conv, userMsg.id, lore, context, canon, issues, noteTokens);
 					}
 					this.store.touch(conv);
 					break;
@@ -272,7 +288,35 @@ export class DragonglassCore {
 			}
 			opts.onEvent(ev);
 		}
+		if (lore && !opts.signal.aborted && current && !current.error && !current.loreCheck) {
+			(current.warnings ??= []).push('The model did not answer with a list of issues, so there is nothing to fix from here. Run the check again.');
+		}
 		this.store.touch(conv);
+	}
+
+	/** Check a lore check reply against the script and what the turn showed the model. */
+	private loreResult(conv: Conversation, userId: string, lore: NonNullable<SendOptions['loreCheck']>, context: ContextItem[], canon: ContextItem | null, raw: RawIssue[], noteTokens: number | undefined): LoreCheckRecord {
+		const [script] = context;
+		const shown = shownPaths(conv.messages, userId);
+		const chars = shownChars(context, this.settings.maxCharsPerNote, noteTokens)[0] ?? 0;
+		const total = script?.content.length ?? 0;
+		const grounded = groundLoreCheck(raw, {
+			scriptPath: lore.scriptPath,
+			scope: (script?.content ?? '').slice(0, chars),
+			scriptFolder: this.scriptFolder(),
+			canonPath: this.canonNote(),
+			canonText: canon?.content ?? null,
+			resolve: lore.resolve,
+			shown,
+			newId,
+		});
+		const readLore = [...shown].some((p) => p !== lore.scriptPath && p !== this.canonNote());
+		return {
+			scriptPath: lore.scriptPath,
+			...grounded,
+			...(readLore ? {} : { readNoLore: true as const }),
+			...(chars < total ? { shown: { chars, of: total } } : {}),
+		};
 	}
 
 	/**
@@ -295,6 +339,57 @@ export class DragonglassCore {
 	/** The script folder setting as a vault path; empty when unset. */
 	scriptFolder(): string {
 		return normalizeVaultPath(this.settings.scriptFolder);
+	}
+
+	/** The sequel canon note's vault path. */
+	canonNote(): string {
+		return canonNotePath(this.settings.canonNote, this.vault.configDir);
+	}
+
+	/**
+	 * What a lore check covers: the open note, or its selection when there is
+	 * one. Refuses, with a reason for the user, when there is nothing to check.
+	 */
+	async loreScript(): Promise<ContextItem> {
+		const { path, selection } = this.vault.getActiveContext();
+		if (!path) throw new ProposalError('Open the script note to check, then try again.');
+		if (path === this.canonNote()) throw new ProposalError(`${baseName(path)} is the sequel canon note, so there is nothing to check it against.`);
+		const content = selection || (await this.vault.readNote(path));
+		if (!content?.trim()) throw new ProposalError(`${baseName(path)} is empty, so there is nothing to check.`);
+		return selection ? { kind: 'selection', label: 'Selection', path, content } : { kind: 'active', label: 'Active note', path, content };
+	}
+
+	/** Lore check: a read-only turn on `script`; the result lands on the reply as a `LoreCheckRecord`. */
+	async checkLore(conv: Conversation, script: ContextItem, opts: LoreCheckOptions): Promise<void> {
+		const path = script.path ?? '';
+		await this.send(conv, { text: loreCheckRequest(path, script.kind === 'selection'), context: [script], signal: opts.signal, onEvent: opts.onEvent, loreCheck: { scriptPath: path, resolve: opts.resolve } });
+	}
+
+	/** The issue and its check, or an error for a list that is gone. */
+	private loreIssue(conv: Conversation, messageId: string, issueId: string): { check: LoreCheckRecord; issue: LoreIssue } {
+		const check = conv.messages.find((m) => m.id === messageId)?.loreCheck;
+		const issue = check?.issues.find((i) => i.id === issueId);
+		if (!check || !issue) throw new ProposalError('That issue is no longer in this conversation.');
+		return { check, issue };
+	}
+
+	/** Fix it: propose the corrected line in the script, reviewed under the issue. */
+	async fixLoreIssue(conv: Conversation, messageId: string, issueId: string): Promise<ChangeProposal> {
+		const { check, issue } = this.loreIssue(conv, messageId, issueId);
+		return this.holdIssueProposal(conv, issue, await proposeLoreFix(this.proposals, this.vault, conv.id, check.scriptPath, issue));
+	}
+
+	/** Intentional: propose recording the change in the sequel canon note, reviewed under the issue. */
+	async markLoreIntentional(conv: Conversation, messageId: string, issueId: string): Promise<ChangeProposal> {
+		const { check, issue } = this.loreIssue(conv, messageId, issueId);
+		return this.holdIssueProposal(conv, issue, await proposeCanonEntry(this.proposals, this.vault, conv.id, this.canonNote(), check.scriptPath, issue));
+	}
+
+	private holdIssueProposal(conv: Conversation, issue: LoreIssue, proposal: ChangeProposal): ChangeProposal {
+		conv.proposals[proposal.id] = proposal;
+		issue.proposalId = proposal.id;
+		this.store.touch(conv);
+		return proposal;
 	}
 
 	/**

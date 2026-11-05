@@ -39,6 +39,9 @@ src/
     drafting.ts           Scene drafts: the draft block in a reply, version
                           threads, format inference from the script note,
                           the drafting rules, and the insert proposal.
+    lore-check.ts         The lore check: the lore block in a reply, grounding
+                          flags against the script and what the model saw, Fix
+                          it, and the sequel canon note.
     delimiters.ts         Defuses untrusted text framed in `<<<…>>>` blocks.
   tools/
     vault-tools.ts        The model-facing tools (list, read, search, metadata,
@@ -298,6 +301,65 @@ still awaiting review. The summary names the note and says when
 it lies outside the script folder; the Insert button names the note it would
 go into and follows the active note.
 
+## Lore check
+
+**Check lore** in the composer runs one read-only turn on the open note, or on
+its selection (`core.loreScript`, `core.checkLore`, which is `send` with a
+`loreCheck` option). Nothing else about the note decides that it is the
+script: it is what is open. The note or selection goes as the turn's context,
+and `loreForScript` adds the notes it names, by note name or alias as whole
+words in any case, most mentioned first, up to 12, leaving out the script,
+script pages and the canon note. They share the context's note budget, and
+the model still has the read tools for anything else. It has no write or web
+tools, and `loreCheckRules` replaces the drafting rules for the turn.
+
+The model answers with one fenced block opened with ```` ```lore ````, one
+record per contradiction: `LINE`, `VAULT`, `NOTE`, `FIX`. `parseLoreBlock`
+reads it (an empty block means nothing found, no block is a failed check and
+the reply stays a plain reply with a warning). `groundLoreCheck` keeps only
+what can be verified: the line must be in the text checked, and the note must
+exist, must not be the script or a script page, and must have been shown to
+the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.
+A quoted fragment widens to its whole line, with the fix applied inside it, and
+a character cue is dropped from a dialogue quote: `KAEL:` anywhere, and words
+with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
+canon note quotes is dropped without a count, as is a repeat on the same line.
+A fix that still holds the whole line corrects nothing and is dropped, which
+leaves the issue with Intentional only.
+The result is a `LoreCheckRecord` on the assistant message, and `content` still
+holds the whole reply for the model's history.
+
+`ui/lore-card.ts` renders it in place of the reply: a header with the count,
+then each issue as its line, what the vault says with the note linked, and
+Fix it and Intentional. Below the list go only the limits of the check: flags
+left out, how much of a script too long for the context was shown (selecting
+the rest checks it), and that no lore note was read, when that is so, in
+place of "no contradictions". The sources list under it, headed "Read for this
+check", is everything sent or read but the script.
+
+**Fix it** (`proposeLoreFix`) replaces that line in the note as it is now
+(`replaceLine`: the one line equal to it, keeping its indent and line ending,
+else the one place the text appears) through
+`ProposalEngine.proposeRewrite`, so it is hashed and re-checked like any edit.
+A line that has gone or repeats is refused. **Intentional**
+(`proposeCanonEntry`) proposes appending a line to the canon note, or creating
+it. Either proposal's id is kept on the issue (`proposalId`), not on a tool
+message, so it joins no batch and the model never sees it; `core.refreshProposals`
+covers it because it lives in `conv.proposals`. While it is pending, stale or
+applied the issue shows its review; rejected, reverted or failed, the buttons
+return, so a review left out of date by another fix is one Reject away from a
+fresh proposal.
+
+The **sequel canon note** is one note at the `canonNote` setting
+(`canonNotePath`: `.md` added, the default for an empty or refused path). It is
+user-written or built through Intentional. While it exists and has text,
+`canonContext` adds it to every send as a `canon` context item, which shares
+the note budget and is framed `<<<canon path="…">>>`, defused. It adds no chip,
+and goes in the user's `sources` record, so citing it counts as read.
+`canonRule` (drafting) and `loreCheckRules` tell the model it wins. An
+Intentional entry quotes the script line, which is what `inCanon` looks for;
+a change the owner wrote in their own words relies on the model reading it.
+
 ## Source markers
 
 The system prompt asks the model to put `[[Note name]]` after each claim
@@ -327,7 +389,7 @@ and this turn's attached context. Only cited notes are listed, minus notes
 the same turn proposed changing: a link to one names the change, not a
 source. A turn that ends in a draft citing no note lists instead the
 notes this turn's tool results showed, in the order shown and minus those
-same proposed notes (`draftRead` on the list), each with the status a citation
+same proposed notes (`readFor` on the list), each with the status a citation
 of it would get, since the notes that shaped a scene should show whatever the
 model typed. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
@@ -347,8 +409,12 @@ nothing on click, so a reply cannot create an empty note.
   characters, and the config folder before any vault access.
 - **Note content** is untrusted data for the model. It is wrapped in
   `<<<note path="…">>>` delimiters (`<<<sample path="…">>>` for the script
-  sample and `<<<draft>>>` for the repeated draft, both defused) and the
+  sample, `<<<draft>>>` for the repeated draft and `<<<canon path="…">>>` for
+  the sequel canon note, all defused) and the
   system prompt says not to follow instructions found inside.
+- **Lore check flags** are model output about the script, so nothing the
+  model says reaches the list unverified: the line must be in the script and
+  the note must be one it was shown (see "Lore check").
 - **Web content** (search snippets, page text, titles) is untrusted data too.
   It is wrapped in `<<<web result …>>>` and `<<<web page …>>>` delimiters,
   under a line saying never to follow instructions in it, with any delimiter

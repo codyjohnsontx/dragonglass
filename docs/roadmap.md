@@ -72,34 +72,36 @@ without redesigning the provider or tool architecture.
   rewrite with earlier versions a click away in the card; Insert puts the
   version shown over the selection or at the cursor of the open note through
   the normal review; an optional script folder keeps script pages out of lore
-  searches. Builds 2 and 3 follow below.
+  searches. Build 3 follows below.
+- **Writing assistant, build 2: lore check.** Check lore in the chat checks
+  the open note or its selection against the vault for contradictions of
+  relationships, timeline and voice. The notes the script names go with the
+  check, and each issue is listed with its line and the note it contradicts,
+  checked against the script and against what the model was shown. Fix it
+  proposes the corrected line through the review; Intentional proposes adding
+  the change to a sequel canon note, at a configurable path, created if absent.
+  That note goes with every message and overrides the lore for drafting and
+  for the check, and a line recorded through Intentional is not flagged again.
 
 ## Next
 
-1. **Writing assistant, build 2: lore check** against the vault, with a
-   sequel canon note. Flag contradictions in the script (relationships,
-   timeline, voice), each listed in the chat with the line and the vault note
-   it contradicts, and a per-issue "fix it" that proposes the corrected line
-   through the review. A "sequel canon" note, written by the owner or through
-   an "intentional" button, records deliberate changes and overrides the
-   original lore for the check and for drafting.
-2. **Writing assistant, build 3: brainstorm cards**: 3 to 5 short pitch
+1. **Writing assistant, build 3: brainstorm cards**: 3 to 5 short pitch
    cards for a beat before drafting, each with a "draft this" button, and a
    way to combine pitches ("combine 2 and 4"). Punch-up and reader notes come
    after these.
-3. **Review outcome to the model**: tell the model on the next turn which of
+2. **Review outcome to the model**: tell the model on the next turn which of
    its proposals were approved, rejected or undone, so it does not assume a
    change it proposed was made. Today it learns only that the user must
    approve.
-4. **Propose wikilinks**: suggest links between related notes, each with its
+3. **Propose wikilinks**: suggest links between related notes, each with its
    reason, as reviewed edits.
-5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-6. **Bases**: read and propose `.base` files once the format is stable.
-7. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+5. **Bases**: read and propose `.base` files once the format is stable.
+6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    fused with the keyword index, only if a measurement on a real vault shows
    they help; never required.
-8. **Cost estimates** for paid providers from a maintained price table,
+7. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
-9. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
    been exercised on desktop.

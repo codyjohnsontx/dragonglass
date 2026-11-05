@@ -1,0 +1,422 @@
+import type { ContextItem } from './context';
+import { attr } from './delimiters';
+import { isScriptNote } from './drafting';
+import type { StoredMessage } from '../persistence/conversation';
+import { baseName, InvalidPathError, normalizeVaultPath, validateVaultPath } from '../vault/paths';
+import { ChangeProposal, ProposalEngine, ProposalError, rejectNewPlaceholders } from '../vault/proposals';
+import type { VaultPort } from '../vault/port';
+
+/**
+ * Lore check. The user runs it on the open script note or its selection. The
+ * notes the script names go with it (`loreForScript`), the model can look up
+ * more, and it answers with a fenced block whose info string is `lore`, one record per contradiction (the same
+ * hand-over as a draft, for the same reasons: see decisions). `parseLoreBlock`
+ * lifts the records out at the end of the turn and `groundLoreCheck` keeps
+ * only what can be checked: a quoted line must be in the script, and the cited
+ * note must exist, be lore rather than script, and have been shown to the
+ * model. `core` stores the result on the assistant message as a
+ * `LoreCheckRecord`; the chat shows it as a list of issues, not as a reply.
+ *
+ * Each issue offers Fix it, which proposes replacing that line in the script,
+ * and Intentional, which proposes recording the change in the sequel canon
+ * note. Both are ordinary proposals that the review applies; the proposal's
+ * id stays on the issue, so it never joins a turn's batch review.
+ *
+ * The sequel canon note holds deliberate changes to the original lore. Sent
+ * with every message (`canonContext`), it overrides the lore for drafting and
+ * for this check. An issue on a line the note quotes is dropped here whatever
+ * the model said, so Intentional always sticks; a change the owner wrote in
+ * their own words relies on the rule in the prompt.
+ */
+
+/** One contradiction between a script line and a lore note. */
+export interface LoreIssue {
+	/** Unique within the check. */
+	id: string;
+	/** The whole script line, as the note has it, trimmed. */
+	line: string;
+	/** What the vault says, in the model's words. */
+	says: string;
+	/** Name of the note that says it, as cited. */
+	note: string;
+	/** Where that note is. */
+	notePath: string;
+	/** The whole line corrected; absent when the model offered none. */
+	fix?: string;
+	/** The latest Fix it or Intentional proposal made from this issue. */
+	proposalId?: string;
+}
+
+/** Stored on an assistant message that holds a lore check result. */
+export interface LoreCheckRecord {
+	/** The script note checked. */
+	scriptPath: string;
+	issues: LoreIssue[];
+	/** Flags left out because their line or their note could not be verified. */
+	leftOut?: number;
+	/** The model was shown no lore note, so finding nothing means nothing. */
+	readNoLore?: true;
+	/** The script did not fit: how much of it the model saw. */
+	shown?: { chars: number; of: number };
+}
+
+/** A record as the model wrote it, before it is checked. */
+export interface RawIssue {
+	line: string;
+	says: string;
+	note: string;
+	fix?: string;
+}
+
+const OPEN_FENCE = /^```lore\s*$/;
+const CLOSE_FENCE = '```';
+const FIELD = /^[\s>*_-]*(line|vault|note|fix)[*_]*\s*:[*_]*\s*(.*)$/i;
+const NO_FIX = /^(?:none|n\/a|no fix|-+)?\.?$/i;
+const NOT_A_FLAG = /\bno (?:change|fix|correction)s? (?:is )?(?:needed|required)\b/i;
+const CUE_ALONE = /^[A-Z][A-Z0-9 .'()-]*:?$/;
+
+/**
+ * The records of a reply's lore block, or null when it has none. An empty
+ * block means nothing was found; an unterminated one (a stopped turn) is not
+ * a result. A record starts at its LINE field and a field runs on to the next
+ * label, so a model that wraps a long sentence loses nothing; a record
+ * without a line, a claim or a note is dropped.
+ */
+export function parseLoreBlock(content: string): RawIssue[] | null {
+	const lines = content.split(/\r?\n/);
+	const open = lines.findIndex((l) => OPEN_FENCE.test(l));
+	if (open < 0) return null;
+	const close = lines.findIndex((l, i) => i > open && l.trimEnd() === CLOSE_FENCE);
+	if (close < 0) return null;
+	type Field = 'line' | 'vault' | 'note' | 'fix';
+	const records: Array<Partial<Record<Field, string>>> = [];
+	let field: Field | null = null;
+	for (const raw of lines.slice(open + 1, close)) {
+		const text = raw.trim();
+		const m = FIELD.exec(raw);
+		if (m) {
+			field = m[1]!.toLowerCase() as Field;
+			if (field === 'line' || records.length === 0) records.push({});
+			records[records.length - 1]![field] = m[2]!.trim();
+		} else if (/^-{3,}$/.test(text)) {
+			field = null;
+		} else if (text && field) {
+			const record = records[records.length - 1]!;
+			// A Fountain cue copied with its dialogue: the dialogue is the line.
+			const cueAlone = field === 'line' && CUE_ALONE.test(record.line ?? '');
+			record[field] = cueAlone ? text : `${record[field] ?? ''} ${text}`.trim();
+		}
+	}
+	const out: RawIssue[] = [];
+	for (const r of records) {
+		const line = unquote(r.line ?? '');
+		const says = (r.vault ?? '').trim();
+		const note = cleanLink(r.note ?? '');
+		// A record that names no note is the model saying the lore has nothing on it.
+		if (!line || !says || NO_FIX.test(note)) continue;
+		const fix = unquote(r.fix ?? '');
+		// The model listing a line it then says is fine has not flagged anything.
+		if (NOT_A_FLAG.test(fix)) continue;
+		out.push({ line, says, note, ...(NO_FIX.test(fix) ? {} : { fix }) });
+	}
+	return out;
+}
+
+/** A value without the quotes or backticks a model wraps around it. */
+function unquote(text: string): string {
+	const t = text.trim();
+	const m = /^(?:"(.*)"|“(.*)”|`(.*)`)$/.exec(t);
+	return (m ? (m[1] ?? m[2] ?? m[3] ?? '') : t).trim();
+}
+
+/** A cited note's name: without [[brackets]], an alias, a heading or `.md`. */
+function cleanLink(text: string): string {
+	const t = text.trim().replace(/^\[\[/, '').replace(/\]\]\.?$/, '');
+	return t.split('|')[0]!.split('#')[0]!.replace(/\.md$/i, '').trim();
+}
+
+/** A character cue a model put in front of the dialogue it quotes ("KAEL: Again."); in a Fountain script the cue is on the line above. */
+const INLINE_CUE = /^[A-Z][A-Z0-9 .'-]*(?: \([^)]*\))?:\s+/;
+/** Longest character cue `leadingCue` looks past. */
+const MAX_CUE = 40;
+
+/** The lines of `text` that a quote names: the lines equal to it, else those containing it. Trimmed, and `quoted` is the part of each the quote covers. */
+function matchLines(text: string, quote: string): Array<{ line: string; quoted: string }> {
+	const lines = text.split('\n').map((l) => l.trim());
+	const whole = lines.filter((l) => l === quote);
+	if (whole.length > 0) return whole.map((line) => ({ line, quoted: line }));
+	const lower = quote.toLowerCase();
+	const out: Array<{ line: string; quoted: string }> = [];
+	for (const line of lines) {
+		const at = line.toLowerCase().indexOf(lower);
+		if (at >= 0) out.push({ line, quoted: line.slice(at, at + quote.length) });
+	}
+	return out;
+}
+
+/** What `groundLoreCheck` checks the model's records against. */
+export interface LoreGround {
+	scriptPath: string;
+	/** The text the check covered: the note or the selection. */
+	scope: string;
+	scriptFolder: string;
+	/** The sequel canon note's path and text, when it exists. */
+	canonPath: string;
+	canonText: string | null;
+	/** Resolves a cited note's name to its path. */
+	resolve: (link: string) => string | null;
+	/** Every vault path shown to the model this turn. */
+	shown: ReadonlySet<string>;
+	newId: () => string;
+}
+
+/**
+ * Keep the flags that can be verified. A line must be in the checked text; a
+ * note must exist, must not be the script or a script page (those are not
+ * lore), and must have been shown to the model. A flag that fails is counted
+ * in `leftOut`, not shown: an issue the list cannot back is worse than one it
+ * misses. A flag on a line the canon note quotes is dropped without a count,
+ * since that change is deliberate, as is a repeat of a flag on the same line.
+ */
+export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<LoreCheckRecord, 'issues' | 'leftOut'> {
+	const issues: LoreIssue[] = [];
+	let leftOut = 0;
+	for (const r of raw) {
+		let found = matchLines(g.scope, r.line);
+		const cue = found.length === 0 ? leadingCue(r.line, g.scope) : '';
+		if (cue) found = matchLines(g.scope, r.line.slice(cue.length));
+		const match = found[0];
+		const notePath = g.resolve(r.note);
+		const lore = notePath !== null && notePath !== g.scriptPath && !isScriptNote(notePath, g.scriptFolder) && g.shown.has(notePath);
+		if (!match || !lore) {
+			leftOut++;
+			continue;
+		}
+		if (g.canonText !== null && inCanon(g.canonText, match.line)) continue;
+		if (issues.some((i) => i.line === match.line)) continue;
+		const issue: LoreIssue = { id: g.newId(), line: match.line, says: r.says, note: baseName(notePath), notePath };
+		const fix = r.fix === undefined ? undefined : correctedLine(match, r.fix, cue);
+		if (fix !== undefined && !keepsLine(fix, match.line)) issue.fix = fix;
+		issues.push(issue);
+	}
+	return { issues, ...(leftOut > 0 ? { leftOut } : {}) };
+}
+
+/** The whole corrected line: the fix itself for a quote of the line, else the line with the quoted part replaced. `cue` is what the quote had in front of the line's text, which the fix may repeat. */
+function correctedLine(match: { line: string; quoted: string }, fix: string, cue: string): string {
+	const body = !cue ? fix : fix.toLowerCase().startsWith(cue.toLowerCase()) ? fix.slice(cue.length) : fix.replace(INLINE_CUE, '');
+	return match.quoted === match.line ? body : match.line.replace(match.quoted, body);
+}
+
+/**
+ * The character cue in front of a quoted line. `KAEL: ` is one anywhere; without
+ * the colon, as in `MIRA I remember`, the words in front count only when what
+ * follows is a whole line of the script, since a name cannot be told from the
+ * start of a sentence.
+ */
+function leadingCue(quote: string, scope: string): string {
+	const colon = INLINE_CUE.exec(quote)?.[0];
+	if (colon) return colon;
+	const lines = new Set(scope.split('\n').map((l) => l.trim().toLowerCase()));
+	for (const gap of quote.matchAll(/\s+/g)) {
+		const rest = gap.index + gap[0].length;
+		if (rest > MAX_CUE) break;
+		if (lines.has(quote.slice(rest).toLowerCase())) return quote.slice(0, rest);
+	}
+	return '';
+}
+
+/** Whether a fix still holds the whole line, the same or with a note added: what it got wrong is still there, so it corrects nothing. */
+function keepsLine(fix: string, line: string): boolean {
+	return fix.toLowerCase().includes(line.replace(/[.!?…]+$/, '').toLowerCase());
+}
+
+/** Whether the canon note quotes this script line, as an Intentional entry does. */
+export function inCanon(canon: string, line: string): boolean {
+	return plainQuotes(canon).includes(`"${plainQuotes(line)}"`);
+}
+
+function plainQuotes(text: string): string {
+	return text.replace(/[“”]/g, '"').replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Vault paths the turn from `userMessageId` on showed the model: attached context and tool results, read or excerpted. */
+export function shownPaths(messages: readonly StoredMessage[], userMessageId: string): Set<string> {
+	const start = messages.findIndex((m) => m.id === userMessageId);
+	const out = new Set<string>();
+	for (const m of messages.slice(Math.max(0, start))) {
+		for (const s of m.sources ?? []) if (s.kind === 'vault') out.add(s.path);
+	}
+	return out;
+}
+
+/** Most lore notes that go with a check; the rest are a tool call away. */
+export const MAX_LORE_NOTES = 12;
+/** Names shorter than this match too many words to mean the note. */
+const MIN_NAME_LENGTH = 3;
+
+/** How often `name` appears in `text` as a whole word or phrase. Both lower case. */
+function mentions(text: string, name: string): number {
+	let count = 0;
+	for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + name.length)) {
+		const before = text.slice(Math.max(0, at - 2), at);
+		const after = text.slice(at + name.length, at + name.length + 2);
+		if (!/[\p{L}\p{N}]$/u.test(before) && !/^[\p{L}\p{N}]/u.test(after)) count++;
+	}
+	return count;
+}
+
+/**
+ * The lore notes a script names, most mentioned first, as context for the
+ * check: every note whose name or alias appears in it, up to `MAX_LORE_NOTES`,
+ * leaving out the script, script pages and the canon note, which goes anyway.
+ * A check that relied on the model to look these up found nothing on the runs
+ * where it did not: see decisions.
+ */
+export async function loreForScript(vault: VaultPort, script: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder' | 'canonPath'>): Promise<ContextItem[]> {
+	const text = script.toLowerCase();
+	const scored: Array<{ path: string; name: string; count: number }> = [];
+	for (const file of vault.listMarkdownFiles()) {
+		if (file.path === g.scriptPath || file.path === g.canonPath || isScriptNote(file.path, g.scriptFolder)) continue;
+		const aliases: unknown = vault.getMetadata(file.path)?.frontmatter?.['aliases'];
+		const names: unknown[] = [file.name, ...(Array.isArray(aliases) ? (aliases as unknown[]) : [aliases])];
+		let count = 0;
+		for (const name of names) {
+			if (typeof name === 'string' && name.trim().length >= MIN_NAME_LENGTH) count += mentions(text, name.trim().toLowerCase());
+		}
+		if (count > 0) scored.push({ path: file.path, name: file.name, count });
+	}
+	scored.sort((a, b) => b.count - a.count || a.path.localeCompare(b.path));
+	const items: ContextItem[] = [];
+	for (const { path, name } of scored.slice(0, MAX_LORE_NOTES)) {
+		const content = await vault.readNote(path);
+		if (content !== null) items.push({ kind: 'lore', label: name, path, content });
+	}
+	return items;
+}
+
+/** The user message of a lore check, shown in the chat and sent to the model. */
+export function loreCheckRequest(scriptPath: string, selection: boolean): string {
+	return `Check the lore of ${selection ? `the selection in ${baseName(scriptPath)}` : baseName(scriptPath)}.`;
+}
+
+/** The rules of a lore check turn, in place of the drafting rules. `canon` names the canon note when it was sent. */
+export function loreCheckRules(scriptPath: string, toolsEnabled: boolean, canon: string | null): string[] {
+	const script = attr(baseName(scriptPath));
+	return [
+		'',
+		`Lore check (the user asked you to check [[${script}]], the script text attached to their message, against the lore in the vault):`,
+		toolsEnabled
+			? '- The notes for the names in the script are attached. Read them first. For anyone or anything else it names, or a relationship they leave open, use search_notes, read_note and related_notes before you answer.'
+			: '- Check against the notes attached and say nothing about what they do not cover.',
+		`- The script is never lore: compare it with the other notes, not with itself${toolsEnabled ? ' or with what search_notes shows of it' : ''}.`,
+		'- Flag a line only where it contradicts what a lore note says: relationships (who is whose family, ally or enemy), timeline (ages, dates, order of events, who is alive or dead, who was where) and voice (how the note says a character speaks or behaves). Do not flag style, or anything the lore does not mention.',
+		'- A contradiction means the line and the note cannot both be true. A line that says the same thing in other words, or with more or less detail, agrees with the lore. VAULT must state a fact the line makes false; if it is only something else true about the same person, leave the line out.',
+		...(canon ? [`- The sequel canon note [[${attr(canon)}]], in the <<<canon>>> block, records deliberate changes to the original lore. A script line that agrees with it is not a contradiction, whatever other notes say.`] : []),
+		'- Your reply is one fenced block that opens with ```lore and closes with ```, and nothing else. Write one record per contradiction, with a blank line between records:',
+		'```lore',
+		'LINE: the script line, copied exactly, one line only',
+		'VAULT: what the lore note says, in one sentence',
+		'NOTE: the name of the lore note that says it',
+		'FIX: the whole line rewritten to agree with the lore, keeping its voice',
+		'```',
+		'- LINE is the one line that is wrong: for dialogue, the spoken line, without the character name above it. List only lines that are wrong; a line that agrees with the lore is not listed at all.',
+		'- With no contradictions, the block is empty. Never invent one; a clean script is a good result.',
+	];
+}
+
+// --------------------------------------------------------------- Fix it
+
+/**
+ * The note with one line replaced: the line that equals `line` when trimmed,
+ * keeping its indent and line ending, or, for a selection that cut a line
+ * short, the one place that text appears. The line must still be there, once.
+ */
+export function replaceLine(note: string, line: string, fix: string): string {
+	const lines = note.split('\n');
+	const at = lines.flatMap((l, i) => (l.trim() === line ? [i] : []));
+	if (at.length > 1) throw new ProposalError(`That line appears ${at.length} times in the note, so it cannot be told which to fix. Edit it by hand.`);
+	const [only] = at;
+	if (only !== undefined) {
+		lines[only] = lines[only]!.replace(line, () => fix);
+		return lines.join('\n');
+	}
+	const first = note.indexOf(line);
+	if (first < 0) throw new ProposalError('That line is no longer in the note. Run the lore check again.');
+	if (note.indexOf(line, first + line.length) >= 0) throw new ProposalError('That text appears more than once in the note, so it cannot be told which to fix. Edit it by hand.');
+	return note.slice(0, first) + fix + note.slice(first + line.length);
+}
+
+/**
+ * Fix it: propose replacing the issue's line in the script with its corrected
+ * line. The engine hashes the note like any edit, so the apply re-checks it.
+ */
+export async function proposeLoreFix(engine: ProposalEngine, vault: VaultPort, conversationId: string, scriptPath: string, issue: LoreIssue): Promise<ChangeProposal> {
+	if (issue.fix === undefined) throw new ProposalError('This issue has no suggested line.');
+	const before = await vault.readNote(scriptPath);
+	if (before === null) throw new ProposalError(`No note found at ${scriptPath}.`);
+	const after = replaceLine(before, issue.line, issue.fix);
+	try {
+		rejectNewPlaceholders(before, after);
+	} catch {
+		throw new ProposalError('The suggested line has placeholder text in it. Edit the line by hand, or run the lore check again.');
+	}
+	return engine.proposeRewrite(conversationId, scriptPath, after, `Replace this line in ${baseName(scriptPath)} to agree with ${issue.note}.`, before);
+}
+
+// --------------------------------------------------------- sequel canon
+
+/** Where the canon note lives when the setting is empty or not a usable path. */
+export const DEFAULT_CANON_NOTE = 'Sequel canon.md';
+
+const CANON_INTRO = '# Sequel canon\n\nDeliberate changes to the original lore. Dragonglass reads this note with every message: where it and another note differ, this note wins for drafting and for the lore check.\n\n';
+
+/** The canon note's path from the setting: `.md` added, and the default for an empty or refused path. */
+export function canonNotePath(setting: string, configDir: string): string {
+	const path = normalizeVaultPath(setting);
+	if (path === '') return DEFAULT_CANON_NOTE;
+	try {
+		return validateVaultPath(/\.md$/i.test(path) ? path : `${path}.md`, { configDir });
+	} catch (e) {
+		if (e instanceof InvalidPathError) return DEFAULT_CANON_NOTE;
+		throw e;
+	}
+}
+
+/** The line an Intentional adds to the canon note. It quotes the script line, which is what keeps that line from being flagged again. */
+export function canonEntry(scriptPath: string, issue: Pick<LoreIssue, 'line' | 'says' | 'note'>): string {
+	return `- "${issue.line}" ([[${baseName(scriptPath)}]]) is deliberate. It replaces what [[${issue.note}]] says: ${issue.says}`;
+}
+
+/**
+ * Intentional: propose adding the change to the canon note, creating the note
+ * when it does not exist yet. The canon note is read back the next time it
+ * is sent, so nothing else has to know about the entry.
+ */
+export async function proposeCanonEntry(engine: ProposalEngine, vault: VaultPort, conversationId: string, canonPath: string, scriptPath: string, issue: LoreIssue): Promise<ChangeProposal> {
+	const entry = canonEntry(scriptPath, issue);
+	const name = baseName(canonPath);
+	try {
+		if (vault.exists(canonPath)) return await engine.proposeEdit(conversationId, canonPath, [{ type: 'append', content: `${entry}\n` }], `Record this change in ${name} as deliberate.`);
+		return await engine.proposeCreate(conversationId, canonPath, `${CANON_INTRO}${entry}\n`, `Create ${name} and record this change as deliberate.`);
+	} catch (e) {
+		if (e instanceof ProposalError && /placeholder/.test(e.message)) throw new ProposalError('This line has placeholder text in it, so it was not added to the canon note. Add it by hand.');
+		throw e;
+	}
+}
+
+/**
+ * The canon note as context for a send, or null when it does not exist, is
+ * blank, or is already attached whole.
+ */
+export async function canonContext(vault: VaultPort, canonPath: string, context: readonly ContextItem[]): Promise<ContextItem | null> {
+	if (context.some((c) => c.kind !== 'selection' && c.path === canonPath)) return null;
+	const content = await vault.readNote(canonPath);
+	if (content === null || content.trim() === '') return null;
+	return { kind: 'canon', label: baseName(canonPath), path: canonPath, content };
+}
+
+/** The system prompt's rule for a send that carries the canon note. */
+export function canonRule(canon: string): string {
+	return `- The sequel canon note [[${attr(canon)}]], in the <<<canon>>> block, records deliberate changes to the original lore. When drafting, it overrides every other note: where they differ, write what it says.`;
+}
