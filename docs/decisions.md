@@ -500,7 +500,11 @@ cite the lore. A fenced block opened with ```` ```draft ```` streams like any
 reply, is written reliably by every model tried, and is a code fence, so the
 citation extractor already ignores its inside and the model cites the lore
 in the prose around it. The block is parsed when the turn ends; an
-unterminated block (a stopped turn) is not a draft.
+unterminated block (a stopped turn) is not a draft. Small local models
+often put nothing but the block in the reply, so no citation and no sources
+list; since the point is to show which notes shaped the scene, a draft that
+cites none lists the notes the turn's tools showed the model, under its own
+heading so it does not read as the model's own citation.
 
 How versions are kept: a separate draft store with its own history, or the
 messages themselves. Each revision is a whole message anyway, so a draft

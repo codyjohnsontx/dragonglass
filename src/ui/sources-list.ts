@@ -6,12 +6,13 @@ import { AnswerSources, VaultCitationStatus, VaultEntry } from '../agent/sources
  * as a working link and a tag when its text was not in the model's context
  * for this answer, unless an earlier turn of the conversation predates
  * source records, when it is left unflagged; "From the web" with each cited
- * [web N] page, once web search results exist.
+ * [web N] page, once web search results exist. Under a draft that cites no
+ * note, the vault list is the notes the turn's tools read, headed so.
  */
 export function renderSourcesList(parent: HTMLElement, sources: AnswerSources): HTMLElement {
 	const box = parent.createDiv({ cls: 'dg-sources' });
 	if (sources.vault.length > 0) {
-		box.createDiv({ cls: 'dg-sources-heading', text: 'From your vault' });
+		box.createDiv({ cls: 'dg-sources-heading', text: sources.draftRead ? 'Read for this draft' : 'From your vault' });
 		const list = box.createEl('ul', { cls: 'dg-sources-list' });
 		for (const entry of sources.vault) vaultItem(list, entry);
 	}

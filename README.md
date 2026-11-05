@@ -318,7 +318,9 @@ Open the scene you are working on, then ask: "draft the scene where Kael
 meets Mira at the watchtower". The model searches the vault for the characters
 and places named, reads their notes, and answers with the scene in a draft
 card, saying under it which notes shaped the scene; those notes appear under
-**From your vault** like any answer's sources.
+**From your vault** like any answer's sources. When the model names none, the
+notes its tools read that turn are listed under **Read for this draft**
+instead, so you can always see what the scene was built from.
 
 The draft matches the open note's format, read from the note itself: Fountain
 (`INT. PLACE - DAY`, names in capitals, dialogue beneath), a Markdown

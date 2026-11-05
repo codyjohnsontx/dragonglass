@@ -242,7 +242,8 @@ built for each send and not stored), and a send right after a draft that
 names no note gets no write tools (`followsDraft`). The block
 is a code fence, so the citation rules and `extractCitations` already leave
 its inside alone; the citations around it make the sources list under the
-draft.
+draft; a draft that cites nothing lists the notes the turn's tools showed
+(`answerSources`, headed "Read for this draft").
 
 The format to match comes from the open note. `draftingForSend` reads it
 only when it is inside the script folder or attached to the message (only a
@@ -320,7 +321,10 @@ model's context for this answer: unverified) or *missing* (the link resolves
 to no note), counting tool results from earlier turns, which are replayed,
 and this turn's attached context. Only cited notes are listed, minus notes
 the same turn proposed changing: a link to one names the change, not a
-source. A turn whose user message has no `sources` record was saved
+source. A turn that ends in a draft citing no note lists instead the
+notes this turn's tool results showed, in the order shown (`draftRead` on
+the list), since the notes that shaped a scene should show whatever the
+model typed. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always

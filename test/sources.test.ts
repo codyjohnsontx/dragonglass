@@ -116,6 +116,39 @@ describe('answerSources', () => {
 		expect(lists.size).toBe(0);
 	});
 
+	it('lists the notes this turn\'s tools showed under a draft that cites none, minus proposed notes', () => {
+		const t1 = ask('Who is Mira?');
+		const s1 = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
+		const r1 = msg('tool', 'Mira...', { toolCallId: 't1', sources: [read('Characters/Mira.md')] });
+		const a1 = msg('assistant', 'She leads the scouts [[Mira]].');
+		const t2 = ask('Draft the scene where Kael reaches Ashfall', 'Script/Scene 12.md');
+		const s2 = msg('assistant', '', { toolCalls: [{ id: 't2', name: 'search_notes', argumentsJson: '{}' }, { id: 't3', name: 'propose_create_note', argumentsJson: '{}' }] });
+		const r2 = msg('tool', 'results', { toolCallId: 't2', sources: [excerpt('Places/Ashfall.md'), read('Characters/Kael.md'), read('Places/Ashfall.md')] });
+		const r3 = msg('tool', 'proposed', { toolCallId: 't3', proposalId: 'p1' });
+		const draft = msg('assistant', 'Here is the scene.\n\n```draft\nEXT. ASHFALL - DAY\n```', { draft: { thread: 'd1', text: 'EXT. ASHFALL - DAY' } });
+		const { lists } = answerSources([t1, s1, r1, a1, t2, s2, r2, r3, draft], { p1: proposal('p1', 'create', 'Characters/Kael.md') }, resolve);
+		expect(lists.get(draft.id)).toEqual({
+			vault: [{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'read' }],
+			web: [],
+			webSources: [],
+			draftRead: true,
+		});
+	});
+
+	it('keeps only the cited notes under a draft that cites some, and no list under a plain reply that cites none', () => {
+		const user = ask('Draft it');
+		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'Kael...', { toolCallId: 't1', sources: [read('Characters/Kael.md'), read('Characters/Mira.md')] });
+		const cited = msg('assistant', 'Kael as in his note [[Kael]].\n\n```draft\nKAEL\nAgain.\n```', { draft: { thread: 'd1', text: 'KAEL\nAgain.' } });
+		expect(answerSources([user, step, tool, cited], {}, resolve).lists.get(cited.id)).toEqual({
+			vault: [{ link: 'Kael', path: 'Characters/Kael.md', status: 'read' }],
+			web: [],
+			webSources: [],
+		});
+		const plain = msg('assistant', 'I would open on the gates.');
+		expect(answerSources([user, step, tool, plain], {}, resolve).lists.size).toBe(0);
+	});
+
 	it('has no list for a turn saved before sources were recorded, and flags nothing it may have shown later', () => {
 		const old = msg('user', 'What is Kael like?', { context: { activeNotePath: null, selection: null, attachments: [] } });
 		const oldStep = msg('assistant', '', { toolCalls: [{ id: 'o1', name: 'read_note', argumentsJson: '{}' }] });
