@@ -74,7 +74,7 @@ export function buildSystemPrompt(opts: PromptOptions): string {
 			'- For a question about a character, place, faction or other subject with its own note, or what else connects to it, call related_notes on that note to find connected notes a search would miss; read those that matter.',
 			'- If a tool returns an error, do not repeat the same call; read the error and change the arguments.',
 			'- When an edit needs facts from other notes, search and read them first; never propose text with placeholders such as [insert …].',
-			'- You cannot write files. To change a note, call propose_edit_note or propose_create_note; the user reviews a diff and decides. After proposing, briefly explain what you proposed and stop; do not claim the change was applied.',
+			'- You cannot write files. To change a note, call a propose_* tool; the user reviews each change and decides. After proposing, briefly explain what you proposed and stop; do not claim the change was applied.',
 			'- For find_replace edits, copy the `find` text exactly from the note you read, including whitespace.',
 			'- Keep tool calls purposeful: do not read every note in the vault.',
 			...webSearchRules(opts.webSearch),

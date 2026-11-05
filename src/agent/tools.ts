@@ -103,6 +103,15 @@ function validateObject(
 
 function validateValue(value: unknown, schema: JsonSchemaProperty, path: string, errors: string[]): void {
 	if (value === undefined) return;
+	if (schema.anyOf) {
+		const accepted = schema.anyOf.some((option) => {
+			const optionErrors: string[] = [];
+			validateValue(value, option, path, optionErrors);
+			return optionErrors.length === 0;
+		});
+		if (!accepted) errors.push(`"${path}" must be one of ${schema.anyOf.map((option) => option.type).join(', ')}`);
+		return;
+	}
 	switch (schema.type) {
 		case 'string':
 			if (typeof value !== 'string') return void errors.push(`"${path}" must be a string`);

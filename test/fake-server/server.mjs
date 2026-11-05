@@ -13,6 +13,7 @@
  *   edit <path> replace <old> with <new>   -> read_note, propose_edit_note, then text
  *   create <path>                          -> propose_create_note, then text
  *   (edit and create take comma-separated paths to propose several notes in one turn)
+ *   run [{"name":…,"args":{…}}, …]         -> calls each tool in order with those arguments, then lists the results
  *   search <query>                         -> search_notes, then text
  *   cite <query>                           -> search_notes, then an answer citing [[Launch]] and [[Milestones]]
  *                                             (e2e vault notes), the unread [[Welcome]] and a missing [[Ghost note]]
@@ -312,6 +313,19 @@ function plan(messages, toolsAvailable) {
 		const errors = toolResults.map((r) => String(r.content ?? '')).filter((c) => c.startsWith('Error'));
 		if (errors.length > 0) return { text: `The edit failed: ${errors.join(' ')}` };
 		return { text: `I proposed replacing "${oldText}" with "${newText}" in ${listPaths(paths)}. Review ${paths.length > 1 ? 'them' : 'it'} in the panel.` };
+	}
+	if ((m = /^run\s+(\[.*\])\s*$/is.exec(text))) {
+		if (noTools) return { text: 'I cannot run tools without tools.' };
+		let calls;
+		try {
+			calls = JSON.parse(m[1]);
+		} catch {
+			return { text: 'The run script is not valid JSON.' };
+		}
+		const call = calls[stage];
+		if (call) return { tool: { name: call.name, args: call.args ?? {} } };
+		const lines = toolResults.map((r) => `- ${String(r.content ?? '').split('\n')[0]}`);
+		return { text: `Ran ${calls.length} tool call${calls.length === 1 ? '' : 's'}:\n${lines.join('\n')}` };
 	}
 	if ((m = /^read\s+(\S+)/i.exec(text))) {
 		const path = m[1];

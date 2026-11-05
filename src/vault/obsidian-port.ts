@@ -1,6 +1,6 @@
 import type { CachedMetadata } from 'obsidian';
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { ActiveContext, InsertTarget, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
+import { ActiveContext, InsertTarget, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
 import { StoreBackend } from '../persistence/store';
 
@@ -8,12 +8,23 @@ import { StoreBackend } from '../persistence/store';
 const SAVE_WAIT_MS = 2000;
 const SAVE_POLL_MS = 50;
 
+/** How long a rename or link lookup waits for Obsidian to index notes this port wrote before it goes ahead anyway. */
+const INDEX_WAIT_MS = 5000;
+
 /** VaultPort backed by the live Obsidian App. Thin by design; logic lives in the port's callers. */
 export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	readonly configDir: string;
 	private lastMarkdownLeaf: WorkspaceLeaf | null = null;
 	private readonly changeListeners = new Set<(change: VaultChange) => void>();
 	private listeningToVault = false;
+	/**
+	 * Notes this port wrote, or a rename through it rewrote links in, that
+	 * Obsidian has not indexed yet. It parses a note into `resolvedLinks`
+	 * some time after the write, and both `renameFile` and `linksTo` read
+	 * links from there.
+	 */
+	private readonly unindexed = new Set<string>();
+	private readonly indexWaiters = new Set<() => void>();
 
 	constructor(
 		private readonly app: App,
@@ -23,6 +34,12 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		plugin.registerEvent(
 			app.workspace.on('active-leaf-change', (leaf) => {
 				if (leaf?.view instanceof MarkdownView) this.lastMarkdownLeaf = leaf;
+			}),
+		);
+		plugin.registerEvent(
+			app.metadataCache.on('resolve', (file) => {
+				this.unindexed.delete(file.path);
+				this.releaseIndexWaiters();
 			}),
 		);
 		app.workspace.onLayoutReady(() => {
@@ -71,7 +88,6 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 			if (targets[path]) backlinks.push(source);
 		}
 		const frontmatter = cache?.frontmatter ? { ...cache.frontmatter } : null;
-		if (frontmatter) delete frontmatter['position'];
 		return {
 			path,
 			frontmatter,
@@ -97,13 +113,95 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		if (folder && !this.app.vault.getFolderByPath(folder)) {
 			await this.app.vault.createFolder(folder);
 		}
-		await this.app.vault.create(path, content);
+		await this.writing(path, () => this.app.vault.create(path, content));
 	}
 
 	async processNote(path: string, fn: (current: string) => string): Promise<void> {
 		const file = this.app.vault.getFileByPath(path);
 		if (!file) throw new Error(`No note at ${path}`);
-		await this.app.vault.process(file, fn);
+		await this.writing(path, () => this.app.vault.process(file, fn));
+	}
+
+	async createFolder(path: string): Promise<void> {
+		await this.app.vault.createFolder(path);
+	}
+
+	async moveNote(from: string, to: string): Promise<void> {
+		const file = this.app.vault.getFileByPath(from);
+		if (!file) throw new Error(`No note at ${from}`);
+		if (this.app.vault.getAbstractFileByPath(to)) throw new Error(`A file already exists at ${to}`);
+		const folder = parentFolder(to);
+		if (folder && !this.app.vault.getFolderByPath(folder)) await this.app.vault.createFolder(folder);
+		await this.whenIndexed();
+		const rewritten = this.app.vault.on('modify', (f) => {
+			if (f instanceof TFile && f.extension === 'md') this.unindexed.add(f.path);
+		});
+		try {
+			await this.app.fileManager.renameFile(file, to);
+		} finally {
+			this.app.vault.offref(rewritten);
+		}
+	}
+
+	async processFrontMatter(path: string, fn: (frontmatter: Record<string, unknown>) => void): Promise<string> {
+		const file = this.app.vault.getFileByPath(path);
+		if (!file) throw new Error(`No note at ${path}`);
+		await this.writing(path, () => this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => fn(fm)));
+		return this.app.vault.read(file);
+	}
+
+	/** Track `path` as waiting to be indexed while `write` changes it; a write that fails leaves the index as it was. */
+	private async writing<T>(path: string, write: () => Promise<T>): Promise<T> {
+		this.unindexed.add(path);
+		try {
+			return await write();
+		} catch (e) {
+			this.unindexed.delete(path);
+			this.releaseIndexWaiters();
+			throw e;
+		}
+	}
+
+	private releaseIndexWaiters(): void {
+		if (this.unindexed.size === 0) [...this.indexWaiters].forEach((done) => done());
+	}
+
+	/** Resolves once Obsidian has indexed every note this port wrote, or after `INDEX_WAIT_MS` if it never reports one. */
+	private whenIndexed(): Promise<void> {
+		if (this.unindexed.size === 0) return Promise.resolve();
+		return new Promise((resolve) => {
+			const done = () => {
+				window.clearTimeout(timer);
+				this.indexWaiters.delete(done);
+				resolve();
+			};
+			const timer = window.setTimeout(() => {
+				this.unindexed.clear();
+				this.releaseIndexWaiters();
+			}, INDEX_WAIT_MS);
+			this.indexWaiters.add(done);
+		});
+	}
+
+	async linksTo(path: string): Promise<LinkRef[]> {
+		await this.whenIndexed();
+		const refs: LinkRef[] = [];
+		for (const [source, targets] of Object.entries(this.app.metadataCache.resolvedLinks)) {
+			if (source === path || !targets[path]) continue;
+			const file = this.app.vault.getFileByPath(source);
+			const cache = file ? this.app.metadataCache.getFileCache(file) : null;
+			for (const ref of [...(cache?.links ?? []), ...(cache?.embeds ?? []), ...(cache?.frontmatterLinks ?? [])]) {
+				const link = ref.link.split(/[#|]/)[0] ?? '';
+				if (this.app.metadataCache.getFirstLinkpathDest(link, source)?.path === path) refs.push({ source, link });
+			}
+		}
+		return refs;
+	}
+
+	async trashFolder(path: string): Promise<void> {
+		const folder = this.app.vault.getFolderByPath(path);
+		if (!folder) throw new Error(`No folder at ${path}`);
+		await this.app.fileManager.trashFile(folder);
 	}
 
 	/** Obsidian's own trash, honouring the user's "Deleted files" preference; never `Vault.delete`. */
