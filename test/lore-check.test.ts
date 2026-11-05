@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TFile } from 'obsidian';
+import type { App, Plugin } from 'obsidian';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildSystemPrompt, ContextItem, formatContextBlock, shownChars, userMessage } from '../src/agent/context';
 import {
 	canonContext,
@@ -22,9 +24,11 @@ import {
 import { runAgent, RunEvent } from '../src/agent/runtime';
 import { answerSources } from '../src/agent/sources';
 import { ToolRegistry } from '../src/agent/tools';
-import { sanitizeConversation, StoredMessage } from '../src/persistence/conversation';
+import { DragonglassCore } from '../src/core';
+import { newConversation, sanitizeConversation, StoredMessage } from '../src/persistence/conversation';
 import { FetchHttpClient } from '../src/providers/http';
 import { OllamaProvider } from '../src/providers/ollama';
+import type { ChatRequest, Provider, StreamEvent } from '../src/providers/types';
 import { VaultSearchIndex } from '../src/search/vault-index';
 import { DEFAULT_SETTINGS, mergeSettings } from '../src/settings';
 import { createVaultTools } from '../src/tools/vault-tools';
@@ -81,7 +85,6 @@ describe('groundLoreCheck', () => {
 		scriptPath: 'Script/Scene.md',
 		scope: SCRIPT,
 		scriptFolder: 'Script',
-		canonPath: 'Sequel canon.md',
 		canonText: null,
 		resolve: (link) => ({ Kael: 'Characters/Kael.md', 'Scene': 'Script/Scene.md', 'Scene 2': 'Script/Scene 2.md' })[link] ?? null,
 		shown: new Set(['Characters/Kael.md', 'Script/Scene.md', 'Script/Scene 2.md']),
@@ -117,6 +120,35 @@ describe('groundLoreCheck', () => {
 	it('widens a quoted fragment to its whole line, and the fix with it', () => {
 		const { issues } = groundLoreCheck([flag({ line: 'my sister', fix: 'My captain' })], ground());
 		expect(issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
+	});
+
+	it.each([
+		['the rest of the line', 'My sister', 'My captain waits at the gate.'],
+		['the start of the line', 'waits at the gate.', 'My sister stands at the gate.'],
+		['both sides of the quote', 'waits at', 'My sister stands at the gate.'],
+	])('takes a fix that carries %s as the corrected line, without doubling it', (_, line, fix) => {
+		expect(groundLoreCheck([flag({ line, fix })], ground()).issues[0]?.fix).toBe(fix);
+	});
+
+	it('adds only the side of the line a fragment fix leaves out', () => {
+		expect(groundLoreCheck([flag({ line: 'waits at', fix: 'My sister stands at' })], ground()).issues[0]?.fix).toBe('My sister stands at the gate.');
+		expect(groundLoreCheck([flag({ line: 'waits at', fix: 'stands at the gate.' })], ground()).issues[0]?.fix).toBe('My sister stands at the gate.');
+	});
+
+	it('takes a fragment fix with a dollar sign literally', () => {
+		expect(groundLoreCheck([flag({ line: 'My sister', fix: "$& and $'" })], ground()).issues[0]?.fix).toBe("$& and $' waits at the gate.");
+	});
+
+	it('keeps the quotes of a prose line a model quoted without them', () => {
+		const scope = '"My sister waits at the gate."\n';
+		expect(groundLoreCheck([flag()], ground({ scope })).issues[0]).toMatchObject({ line: '"My sister waits at the gate."', fix: '"My captain waits at the gate."' });
+	});
+
+	it('leaves out a fragment that fits several lines, but not a line the script repeats', () => {
+		const scope = 'My sister waits.\nMy sister sleeps.\n';
+		expect(groundLoreCheck([flag({ line: 'My sister', fix: 'My captain' })], ground({ scope }))).toEqual({ issues: [], leftOut: 1 });
+		const repeated = 'My sister waits.\nKAEL kneels.\nMy sister waits.\n';
+		expect(groundLoreCheck([flag({ line: 'My sister', fix: 'My captain' })], ground({ scope: repeated })).issues[0]?.line).toBe('My sister waits.');
 	});
 
 	it('matches dialogue quoted with its character cue inline, in the line and the fix', () => {
@@ -202,9 +234,15 @@ describe('loreForScript', () => {
 	});
 
 	it('matches aliases, and skips names too short to mean the note', async () => {
-		const vault = new MemoryVaultPort({ 'Characters/Captain Kael.md': 'k', 'Al.md': 'a' });
-		vault.getMetadata = (path) => (path === 'Characters/Captain Kael.md' ? { path, frontmatter: { aliases: ['Kael'] }, tags: [], headings: [], outgoingLinks: [], unresolvedLinks: [], backlinks: [] } : null);
+		const vault = new MemoryVaultPort({ 'Characters/Captain Kael.md': '---\naliases: [Kael]\n---\nk', 'Al.md': 'a' });
 		expect((await loreForScript(vault, 'Kael met Al.', g)).map((i) => i.path)).toEqual(['Characters/Captain Kael.md']);
+	});
+
+	it('reads properties without asking for each note\'s backlinks, which scan the vault', async () => {
+		const vault = new MemoryVaultPort({ 'Characters/Captain Kael.md': '---\naliases: [Kael]\n---\nk', 'Other.md': 'o' });
+		const metadata = vi.spyOn(vault, 'getMetadata');
+		await loreForScript(vault, 'Kael', g);
+		expect(metadata).not.toHaveBeenCalled();
 	});
 
 	it('sends at most the capped number', async () => {
@@ -332,13 +370,11 @@ describe('the canon note in a send', () => {
 		for (const bad of ['', '   ', '../Canon', '.obsidian/Canon']) expect(canonNotePath(bad, '.obsidian')).toBe(DEFAULT_CANON_NOTE);
 	});
 
-	it('goes along while the note exists and has text, and not when it is already attached', async () => {
-		expect(await canonContext(new MemoryVaultPort(), CANON, [])).toBeNull();
-		expect(await canonContext(new MemoryVaultPort({ [CANON]: '  \n' }), CANON, [])).toBeNull();
+	it('goes along while the note exists and has text', async () => {
+		expect(await canonContext(new MemoryVaultPort(), CANON)).toBeNull();
+		expect(await canonContext(new MemoryVaultPort({ [CANON]: '  \n' }), CANON)).toBeNull();
 		const vault = new MemoryVaultPort({ [CANON]: 'Kael has a sister.' });
-		expect(await canonContext(vault, CANON, [active])).toEqual({ kind: 'canon', label: 'Sequel canon', path: CANON, content: 'Kael has a sister.' });
-		expect(await canonContext(vault, CANON, [{ ...active, path: CANON }])).toBeNull();
-		expect(await canonContext(vault, CANON, [{ ...active, kind: 'selection', path: CANON }])).not.toBeNull();
+		expect(await canonContext(vault, CANON)).toEqual({ kind: 'canon', label: 'Sequel canon', path: CANON, content: 'Kael has a sister.' });
 	});
 
 	it('is wrapped as data, cannot close its own block, and shares the note budget', () => {
@@ -436,6 +472,82 @@ describe('the sources list of a lore check', () => {
 	});
 });
 
+describe('a send through core', () => {
+	const CANON = 'Sequel canon.md';
+
+	/** A core over `files` with `open` as the open note, whose provider plays `replies` in order. */
+	function setup(files: Record<string, string>, open: string, replies: StreamEvent[][]) {
+		const file = (path: string) => Object.assign(new TFile(), { path, basename: path.replace(/^.*\//, '').replace(/\.md$/, ''), extension: 'md', stat: { size: 0, mtime: 0 } });
+		const noEvent = () => ({});
+		const app = {
+			vault: {
+				configDir: '.obsidian',
+				getMarkdownFiles: () => Object.keys(files).map(file),
+				getRoot: () => ({ path: '', children: [] }),
+				getFileByPath: (path: string) => (path in files ? file(path) : null),
+				getAbstractFileByPath: (path: string) => (path in files ? file(path) : null),
+				cachedRead: (f: TFile) => Promise.resolve(files[f.path]),
+				on: noEvent,
+			},
+			metadataCache: { on: noEvent, getFileCache: () => null, resolvedLinks: {}, unresolvedLinks: {} },
+			workspace: { on: noEvent, onLayoutReady: () => undefined, getActiveViewOfType: () => null, getActiveFile: () => file(open) },
+			secretStorage: { getSecret: () => null },
+		} as unknown as App;
+		const plugin = { registerEvent: () => undefined } as unknown as Plugin;
+		const settings = mergeSettings({ scriptFolder: 'Script', ollama: { model: 'm' } });
+		const core = new DragonglassCore(app, plugin, settings, () => Promise.resolve());
+		const requests: ChatRequest[] = [];
+		const provider = {
+			id: 'ollama',
+			capabilities: { toolCalling: true },
+			async *chat(request: ChatRequest) {
+				requests.push(request);
+				await Promise.resolve();
+				yield* replies.shift() ?? [];
+			},
+		} as unknown as Provider;
+		vi.spyOn(core, 'provider').mockReturnValue(provider);
+		return { core, requests, conv: newConversation('c', 0) };
+	}
+	const say = (text: string): StreamEvent[] => [{ type: 'text', delta: text }, { type: 'done', finishReason: 'stop' }];
+	const read = (path: string): StreamEvent[] => [{ type: 'tool_call', call: { id: 'r', name: 'read_note', argumentsJson: JSON.stringify({ path }) } }, { type: 'done', finishReason: 'tool_calls' }];
+	const run = { signal: new AbortController().signal, onEvent: () => undefined };
+	const check = { ...run, resolve: (link: string) => `${link}.md` };
+
+	it('tells the drafter the canon note wins when it is the note the owner has open', async () => {
+		const text = 'Kael has a sister.';
+		const { core, conv, requests } = setup({ [CANON]: text }, CANON, [say('Noted.')]);
+		await core.send(conv, { ...run, text: 'Draft the gate scene', context: [{ kind: 'active', label: 'Active note', path: CANON, content: text }] });
+		const [system, user] = requests[0]!.messages;
+		expect(system?.content).toMatch(/When drafting, it overrides every other note/);
+		expect(user?.content).toContain(`<<<canon path="${CANON}">>>\n${text}`);
+		expect(conv.messages[0]?.context?.activeNotePath).toBe(CANON);
+	});
+
+	it('says nothing was checked when the model read only another script page', async () => {
+		const files = { 'Script/Scene 13.md': 'She waits.', 'Script/Scene 12.md': 'He left.' };
+		const { core, conv } = setup(files, 'Script/Scene 13.md', [read('Script/Scene 12.md'), say('```lore\n```')]);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [], readNoLore: true });
+	});
+
+	it('does not say nothing was checked beside an issue that cites the canon note', async () => {
+		const files = { 'Script/Scene 13.md': 'She waits.', [CANON]: 'She is gone.' };
+		const { core, conv } = setup(files, 'Script/Scene 13.md', [say('```lore\nLINE: She waits.\nVAULT: She is gone.\nNOTE: Sequel canon\n```')]);
+		await core.checkLore(conv, await core.loreScript(), check);
+		const result = conv.messages.at(-1)?.loreCheck;
+		expect(result?.issues).toMatchObject([{ line: 'She waits.', notePath: CANON }]);
+		expect(result?.readNoLore).toBeUndefined();
+	});
+
+	it('counts a lore note it read, and reports a clean result', async () => {
+		const files = { 'Script/Scene 13.md': 'She waits.', 'Lore.md': 'Nothing on her.' };
+		const { core, conv } = setup(files, 'Script/Scene 13.md', [read('Lore.md'), say('```lore\n```')]);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [] });
+	});
+});
+
 describe('a lore check through the agent loop', () => {
 	let server: { port: number; close: () => Promise<void> };
 	const noYield = () => Promise.resolve();
@@ -476,7 +588,6 @@ describe('a lore check through the agent loop', () => {
 			scriptPath: 'Script/Scene 13.md',
 			scope: script,
 			scriptFolder: 'Script',
-			canonPath: 'Sequel canon.md',
 			canonText: null,
 			resolve: (link) => (link === 'Kael' ? 'Characters/Kael.md' : null),
 			shown: shownPaths(stored, 'u'),

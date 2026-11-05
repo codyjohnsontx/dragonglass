@@ -88,16 +88,21 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		for (const [source, targets] of Object.entries(this.app.metadataCache.resolvedLinks)) {
 			if (targets[path]) backlinks.push(source);
 		}
-		const frontmatter = cache?.frontmatter ? { ...cache.frontmatter } : null;
 		return {
 			path,
-			frontmatter,
+			frontmatter: this.getFrontmatter(path),
 			tags,
 			headings: (cache?.headings ?? []).map((h) => ({ level: h.level, text: h.heading })),
 			outgoingLinks: Object.keys(resolved),
 			unresolvedLinks: Object.keys(unresolved),
 			backlinks: backlinks.sort(),
 		};
+	}
+
+	getFrontmatter(path: string): Record<string, unknown> | null {
+		const file = this.app.vault.getFileByPath(path);
+		const frontmatter = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
+		return frontmatter ? { ...frontmatter } : null;
 	}
 
 	linkGraph(): NoteLinks[] {

@@ -320,8 +320,9 @@ the reply stays a plain reply with a warning). `groundLoreCheck` keeps only
 what can be verified: the line must be in the text checked, and the note must
 exist, must not be the script or a script page, and must have been shown to
 the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.
-A quoted fragment widens to its whole line, with the fix applied inside it, and
-a character cue is dropped from a dialogue quote: `KAEL:` anywhere, and words
+A quoted fragment widens to its whole line, or is left out when it fits several.
+The fix keeps whatever the line holds around the fragment that it does not
+already carry, and a character cue is dropped from a dialogue quote: `KAEL:` anywhere, and words
 with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
 canon note quotes is dropped without a count, as is a repeat on the same line.
 A fix that still holds the whole line corrects nothing and is dropped, which
@@ -353,7 +354,8 @@ fresh proposal.
 The **sequel canon note** is one note at the `canonNote` setting
 (`canonNotePath`: `.md` added, the default for an empty or refused path). It is
 user-written or built through Intentional. While it exists and has text,
-`canonContext` adds it to every send as a `canon` context item, which shares
+`canonContext` adds it to every send as a `canon` context item, even when the
+note is also open or attached, so the rule below always has its block. It shares
 the note budget and is framed `<<<canon path="…">>>`, defused. It adds no chip,
 and goes in the user's `sources` record, so citing it counts as read.
 `canonRule` (drafting) and `loreCheckRules` tell the model it wins. An

@@ -140,16 +140,23 @@ const INLINE_CUE = /^[A-Z][A-Z0-9 .'-]*(?: \([^)]*\))?:\s+/;
 /** Longest character cue `leadingCue` looks past. */
 const MAX_CUE = 40;
 
-/** The lines of `text` that a quote names: the lines equal to it, else those containing it. Trimmed, and `quoted` is the part of each the quote covers. */
-function matchLines(text: string, quote: string): Array<{ line: string; quoted: string }> {
+/** A trimmed script line a quote names, and what the line holds around the quote. */
+interface LineMatch {
+	line: string;
+	before: string;
+	after: string;
+}
+
+/** The lines of `text` that a quote names: the lines equal to it, else those containing it. */
+function matchLines(text: string, quote: string): LineMatch[] {
 	const lines = text.split('\n').map((l) => l.trim());
 	const whole = lines.filter((l) => l === quote);
-	if (whole.length > 0) return whole.map((line) => ({ line, quoted: line }));
+	if (whole.length > 0) return whole.map((line) => ({ line, before: '', after: '' }));
 	const lower = quote.toLowerCase();
-	const out: Array<{ line: string; quoted: string }> = [];
+	const out: LineMatch[] = [];
 	for (const line of lines) {
 		const at = line.toLowerCase().indexOf(lower);
-		if (at >= 0) out.push({ line, quoted: line.slice(at, at + quote.length) });
+		if (at >= 0) out.push({ line, before: line.slice(0, at), after: line.slice(at + quote.length) });
 	}
 	return out;
 }
@@ -160,8 +167,7 @@ export interface LoreGround {
 	/** The text the check covered: the note or the selection. */
 	scope: string;
 	scriptFolder: string;
-	/** The sequel canon note's path and text, when it exists. */
-	canonPath: string;
+	/** The sequel canon note's text, when it exists. */
 	canonText: string | null;
 	/** Resolves a cited note's name to its path. */
 	resolve: (link: string) => string | null;
@@ -170,10 +176,15 @@ export interface LoreGround {
 	newId: () => string;
 }
 
+/** Whether a note can be lore for a check: the script and script pages never are. */
+export function isLoreNote(path: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder'>): boolean {
+	return path !== g.scriptPath && !isScriptNote(path, g.scriptFolder);
+}
+
 /**
- * Keep the flags that can be verified. A line must be in the checked text; a
- * note must exist, must not be the script or a script page (those are not
- * lore), and must have been shown to the model. A flag that fails is counted
+ * Keep the flags that can be verified. A line must be in the checked text, and
+ * be one line: a fragment that fits several names none of them. A note must
+ * exist, must be lore, and must have been shown to the model. A flag that fails is counted
  * in `leftOut`, not shown: an issue the list cannot back is worse than one it
  * misses. A flag on a line the canon note quotes is dropped without a count,
  * since that change is deliberate, as is a repeat of a flag on the same line.
@@ -185,9 +196,9 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 		let found = matchLines(g.scope, r.line);
 		const cue = found.length === 0 ? leadingCue(r.line, g.scope) : '';
 		if (cue) found = matchLines(g.scope, r.line.slice(cue.length));
-		const match = found[0];
+		const match = new Set(found.map((f) => f.line)).size === 1 ? found[0] : undefined;
 		const notePath = g.resolve(r.note);
-		const lore = notePath !== null && notePath !== g.scriptPath && !isScriptNote(notePath, g.scriptFolder) && g.shown.has(notePath);
+		const lore = notePath !== null && isLoreNote(notePath, g) && g.shown.has(notePath);
 		if (!match || !lore) {
 			leftOut++;
 			continue;
@@ -202,10 +213,13 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 	return { issues, ...(leftOut > 0 ? { leftOut } : {}) };
 }
 
-/** The whole corrected line: the fix itself for a quote of the line, else the line with the quoted part replaced. `cue` is what the quote had in front of the line's text, which the fix may repeat. */
-function correctedLine(match: { line: string; quoted: string }, fix: string, cue: string): string {
+/** The whole corrected line: the fix, with whatever the line holds around the quote that the fix does not already carry. `cue` is what the quote had in front of the line's text, which the fix may repeat. */
+function correctedLine(match: LineMatch, fix: string, cue: string): string {
 	const body = !cue ? fix : fix.toLowerCase().startsWith(cue.toLowerCase()) ? fix.slice(cue.length) : fix.replace(INLINE_CUE, '');
-	return match.quoted === match.line ? body : match.line.replace(match.quoted, body);
+	const lower = body.toLowerCase();
+	const head = lower.startsWith(match.before.toLowerCase()) ? '' : match.before;
+	const tail = lower.endsWith(match.after.toLowerCase()) ? '' : match.after;
+	return `${head}${body}${tail}`;
 }
 
 /**
@@ -273,12 +287,12 @@ function mentions(text: string, name: string): number {
  * A check that relied on the model to look these up found nothing on the runs
  * where it did not: see decisions.
  */
-export async function loreForScript(vault: VaultPort, script: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder' | 'canonPath'>): Promise<ContextItem[]> {
+export async function loreForScript(vault: VaultPort, script: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder'> & { canonPath: string }): Promise<ContextItem[]> {
 	const text = script.toLowerCase();
 	const scored: Array<{ path: string; name: string; count: number }> = [];
 	for (const file of vault.listMarkdownFiles()) {
-		if (file.path === g.scriptPath || file.path === g.canonPath || isScriptNote(file.path, g.scriptFolder)) continue;
-		const aliases: unknown = vault.getMetadata(file.path)?.frontmatter?.['aliases'];
+		if (file.path === g.canonPath || !isLoreNote(file.path, g)) continue;
+		const aliases: unknown = vault.getFrontmatter(file.path)?.['aliases'];
 		const names: unknown[] = [file.name, ...(Array.isArray(aliases) ? (aliases as unknown[]) : [aliases])];
 		let count = 0;
 		for (const name of names) {
@@ -405,12 +419,8 @@ export async function proposeCanonEntry(engine: ProposalEngine, vault: VaultPort
 	}
 }
 
-/**
- * The canon note as context for a send, or null when it does not exist, is
- * blank, or is already attached whole.
- */
-export async function canonContext(vault: VaultPort, canonPath: string, context: readonly ContextItem[]): Promise<ContextItem | null> {
-	if (context.some((c) => c.kind !== 'selection' && c.path === canonPath)) return null;
+/** The canon note as context for a send, or null when it does not exist or is blank. */
+export async function canonContext(vault: VaultPort, canonPath: string): Promise<ContextItem | null> {
 	const content = await vault.readNote(canonPath);
 	if (content === null || content.trim() === '') return null;
 	return { kind: 'canon', label: baseName(canonPath), path: canonPath, content };

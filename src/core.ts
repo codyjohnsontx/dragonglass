@@ -16,7 +16,7 @@ import { createWebTools, DEFAULT_MAX_PAGE_CHARS, nextWebNumber, WebSearchApprove
 import { researchNoteFor } from './web/research-note';
 import { parsePreferredSites, TavilySearch } from './web/search';
 import { draftingForSend, followsDraft, parseDraft, proposeDraftInsert, revisionReminder, threadForDraft } from './agent/drafting';
-import { canonContext, canonNotePath, groundLoreCheck, loreForScript, LoreCheckRecord, LoreIssue, loreCheckRequest, parseLoreBlock, proposeCanonEntry, proposeLoreFix, RawIssue, shownPaths } from './agent/lore-check';
+import { canonContext, canonNotePath, groundLoreCheck, isLoreNote, loreForScript, LoreCheckRecord, LoreIssue, loreCheckRequest, parseLoreBlock, proposeCanonEntry, proposeLoreFix, RawIssue, shownPaths } from './agent/lore-check';
 import { ObsidianVaultPort } from './vault/obsidian-port';
 import { baseName, normalizeVaultPath } from './vault/paths';
 import { ChangeProposal, ProposalEngine, ProposalError } from './vault/proposals';
@@ -182,7 +182,7 @@ export class DragonglassCore {
 			return;
 		}
 		const lore = opts.loreCheck;
-		const canon = await canonContext(this.vault, this.canonNote(), opts.context);
+		const canon = await canonContext(this.vault, this.canonNote());
 		const loreNotes = lore ? await loreForScript(this.vault, opts.context[0]?.content.slice(0, this.settings.maxCharsPerNote) ?? '', { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder(), canonPath: this.canonNote() }) : [];
 		const context = [...opts.context, ...loreNotes, ...(canon ? [canon] : [])];
 		const userMsg = userMessage(newId(), opts.text, context, Date.now());
@@ -300,17 +300,16 @@ export class DragonglassCore {
 		const shown = shownPaths(conv.messages, userId);
 		const chars = shownChars(context, this.settings.maxCharsPerNote, noteTokens)[0] ?? 0;
 		const total = script?.content.length ?? 0;
+		const notes = { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder() };
 		const grounded = groundLoreCheck(raw, {
-			scriptPath: lore.scriptPath,
+			...notes,
 			scope: (script?.content ?? '').slice(0, chars),
-			scriptFolder: this.scriptFolder(),
-			canonPath: this.canonNote(),
 			canonText: canon?.content ?? null,
 			resolve: lore.resolve,
 			shown,
 			newId,
 		});
-		const readLore = [...shown].some((p) => p !== lore.scriptPath && p !== this.canonNote());
+		const readLore = grounded.issues.length > 0 || [...shown].some((p) => p !== this.canonNote() && isLoreNote(p, notes));
 		return {
 			scriptPath: lore.scriptPath,
 			...grounded,
