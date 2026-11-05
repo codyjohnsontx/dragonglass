@@ -219,8 +219,10 @@ export function answerSources(
 		};
 		const list = buildList(assistants.map((a) => a.content).join('\n\n'), status, proposed, web, resolve);
 		if (list.vault.length === 0 && assistants.some((a) => a.draft)) {
-			for (const path of turnTools) {
-				if (!proposed.has(path)) list.vault.push({ link: baseName(path), path, status: status(path) });
+			for (const shown of turnTools) {
+				if (proposed.has(shown)) continue;
+				const path = resolve(shown);
+				list.vault.push({ link: baseName(shown), path, status: path === null ? 'missing' : status(path) });
 			}
 			if (list.vault.length > 0) list.draftRead = true;
 		}

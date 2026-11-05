@@ -151,6 +151,18 @@ describe('answerSources', () => {
 		]);
 	});
 
+	it('marks a note listed under a draft as missing once it no longer exists', () => {
+		const user = ask('Draft Kael at Ashfall');
+		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'search_notes', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'results', { toolCallId: 't1', sources: [read('Characters/Kael.md'), read('Places/Ashfall.md')] });
+		const draft = msg('assistant', '```draft\nEXT. ASHFALL - DAY\n```', { draft: { thread: 'd1', text: 'EXT. ASHFALL - DAY' } });
+		const afterDelete = (l: string) => (l === 'Places/Ashfall.md' ? null : resolve(l));
+		expect(answerSources([user, step, tool, draft], {}, afterDelete).lists.get(draft.id)?.vault).toEqual([
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read' },
+			{ link: 'Ashfall', path: null, status: 'missing' },
+		]);
+	});
+
 	it('leaves an excerpt under a draft unflagged after a turn saved before sources were recorded', () => {
 		const old = msg('user', 'What is Kael like?', { context: { activeNotePath: null, selection: null, attachments: [] } });
 		const oldStep = msg('assistant', '', { toolCalls: [{ id: 'o1', name: 'read_note', argumentsJson: '{}' }] });
