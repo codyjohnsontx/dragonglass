@@ -65,13 +65,31 @@ describe('parseLoreBlock', () => {
 		expect(parseLoreBlock('```lore\nLINE: KAEL\nMy sister waits at the gate.\nVAULT: Only child.\nNOTE: Kael\n```')?.[0]?.line).toBe('My sister waits at the gate.');
 	});
 
-	it('takes the links a model cites with out of the line, the claim and the fix', () => {
-		const block = '```lore\nLINE: My sister waits at the gate. [[Kael]]\nVAULT: Kael is an only child [[Kael]], says [[Characters/Mira.md|Mira]] at dawn [[Oren]] [[Kael]].\nNOTE: [[Kael]]\nFIX: "My captain waits at the gate." [[Kael]]\n```';
-		expect(parseLoreBlock(block)).toEqual([{ line: 'My sister waits at the gate.', says: 'Kael is an only child, says Mira at dawn.', note: 'Kael', fix: 'My captain waits at the gate.' }]);
+	it('takes off the links that follow the last sentence of the line, the claim and the fix', () => {
+		const block = '```lore\nLINE: My sister waits at the gate. [[Kael]]\nVAULT: Kael is an only child. [[Kael]] [[Oren]]\nNOTE: [[Kael]]\nFIX: "My captain waits at the gate." [[Kael]]\n```';
+		expect(parseLoreBlock(block)).toEqual([{ line: 'My sister waits at the gate.', says: 'Kael is an only child.', note: 'Kael', fix: 'My captain waits at the gate.' }]);
 	});
 
-	it('keeps the words of a link that does not end a claim', () => {
-		expect(parseLoreBlock('```lore\nLINE: a\nVAULT: [[Kael]] has no sister.\nNOTE: Kael\nFIX: [[Kael|He]] has a captain.\n```')).toEqual([{ line: 'a', says: 'Kael has no sister.', note: 'Kael', fix: 'He has a captain.' }]);
+	it.each([
+		['Kael is the son of [[Aldric]].', 'Kael is the son of Aldric.'],
+		['Kael was born in [[Ashfall]], not [[Frosthaven]].', 'Kael was born in Ashfall, not Frosthaven.'],
+		['[[Kael]] has no sister.', 'Kael has no sister.'],
+		['He serves [[Characters/Kael.md|the captain]] well.', 'He serves the captain well.'],
+	])('keeps the words of a link in the claim: %s', (vault, says) => {
+		expect(parseLoreBlock(`\`\`\`lore\nLINE: a\nVAULT: ${vault}\nNOTE: Kael\n\`\`\``)?.[0]?.says).toBe(says);
+	});
+
+	it.each(['I met [[Mira]] at the gate.', 'Kael walks to [[Frosthaven]].'])('leaves a line with a link as written, so it still matches the script: %s', (line) => {
+		const raw = parseLoreBlock(`\`\`\`lore\nLINE: ${line}\nVAULT: No.\nNOTE: Kael\n\`\`\``)!;
+		expect(raw[0]?.line).toBe(line);
+		const { issues, leftOut } = groundLoreCheck(raw, { scriptPath: 'S.md', scope: `${line}\n`, scriptFolder: '', canonText: null, resolve: () => 'Kael.md', shown: new Set(['Kael.md']), newId: () => 'i' });
+		expect(leftOut).toBeUndefined();
+		expect(issues[0]?.line).toBe(line);
+	});
+
+	it('leaves a fix with a link in its text as written', () => {
+		const block = '```lore\nLINE: a\nVAULT: b\nNOTE: c\nFIX: You were born in [[Ashfall]], Kael.\n```';
+		expect(parseLoreBlock(block)?.[0]?.fix).toBe('You were born in [[Ashfall]], Kael.');
 	});
 
 	it('keeps a flag with no suggested line, and drops a record without a line, a claim or a note', () => {
@@ -273,20 +291,20 @@ describe('loreForScript', () => {
 
 	it('sends the notes the script names, most mentioned first, as whole words in any case', async () => {
 		const vault = new MemoryVaultPort({ 'Characters/Kael.md': 'k', 'Characters/Mira.md': 'm', 'Events/The Collapse.md': 'c', 'Places/Ash.md': 'a', 'Other.md': 'o' });
-		const items = await loreForScript(vault, 'MIRA\nKael and Kael. Before the collapse, Ashfall.', g);
+		const { items } = await loreForScript(vault, 'MIRA\nKael and Kael. Before the collapse, Ashfall.', g);
 		expect(items.map((i) => i.path)).toEqual(['Characters/Kael.md', 'Characters/Mira.md', 'Events/The Collapse.md']);
 		expect(items[0]).toEqual({ kind: 'lore', label: 'Kael', path: 'Characters/Kael.md', content: 'k' });
 	});
 
 	it('leaves out the script, script pages and the canon note, which are not lore here', async () => {
 		const vault = new MemoryVaultPort({ 'Script/Scene.md': 'x', 'Script/Kael.md': 'x', 'Sequel canon.md': 'x', 'Scene.md': 'y' });
-		expect((await loreForScript(vault, 'Scene, Kael, Sequel canon', g)).map((i) => i.path)).toEqual(['Scene.md']);
-		expect(await loreForScript(new MemoryVaultPort({ 'Scene.md': 'y' }), 'Scene', { ...g, scriptPath: 'Scene.md', scriptFolder: '' })).toEqual([]);
+		expect((await loreForScript(vault, 'Scene, Kael, Sequel canon', g)).items.map((i) => i.path)).toEqual(['Scene.md']);
+		expect((await loreForScript(new MemoryVaultPort({ 'Scene.md': 'y' }), 'Scene', { ...g, scriptPath: 'Scene.md', scriptFolder: '' })).items).toEqual([]);
 	});
 
 	it('matches aliases, and skips names too short to mean the note', async () => {
 		const vault = new MemoryVaultPort({ 'Characters/Captain Kael.md': '---\naliases: [Kael]\n---\nk', 'Al.md': 'a' });
-		expect((await loreForScript(vault, 'Kael met Al.', g)).map((i) => i.path)).toEqual(['Characters/Captain Kael.md']);
+		expect((await loreForScript(vault, 'Kael met Al.', g)).items.map((i) => i.path)).toEqual(['Characters/Captain Kael.md']);
 	});
 
 	it('reads properties without asking for each note\'s backlinks, which scan the vault', async () => {
@@ -296,10 +314,16 @@ describe('loreForScript', () => {
 		expect(metadata).not.toHaveBeenCalled();
 	});
 
-	it('sends at most the capped number', async () => {
+	it('sends at most the capped number, and counts the notes past it', async () => {
 		const notes = Object.fromEntries(Array.from({ length: MAX_LORE_NOTES + 3 }, (_, i) => [`Name${i}.md`, 'x']));
 		const script = Object.keys(notes).map((n) => n.replace('.md', '')).join(' ');
-		expect(await loreForScript(new MemoryVaultPort(notes), script, g)).toHaveLength(MAX_LORE_NOTES);
+		const { items, named } = await loreForScript(new MemoryVaultPort(notes), script, g);
+		expect(items).toHaveLength(MAX_LORE_NOTES);
+		expect(named).toBe(MAX_LORE_NOTES + 3);
+	});
+
+	it('leaves out a blank note, and does not count it', async () => {
+		expect(await loreForScript(new MemoryVaultPort({ 'Frosthaven.md': '' }), 'Frosthaven', g)).toEqual({ items: [], named: 0 });
 	});
 });
 
@@ -593,7 +617,7 @@ describe('a send through core', () => {
 
 	/** A core over `files` with `open` as the open note, whose provider plays `replies` in order. */
 	function setup(files: Record<string, string>, open: string, replies: StreamEvent[][], contextWindow?: number) {
-		const file = (path: string) => Object.assign(new TFile(), { path, basename: path.replace(/^.*\//, '').replace(/\.md$/, ''), extension: 'md', stat: { size: 0, mtime: 0 } });
+		const file = (path: string) => Object.assign(new TFile(), { path, basename: path.replace(/^.*\//, '').replace(/\.md$/, ''), extension: 'md', stat: { size: files[path]?.length ?? 0, mtime: 0 } });
 		const noEvent = () => ({});
 		const app = {
 			vault: {
@@ -697,6 +721,21 @@ describe('a send through core', () => {
 		await core.checkLore(conv, await core.loreScript(), check);
 		expect(requests[0]?.messages[1]?.content).not.toContain('<<<note path="Kael.md">>>');
 		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [], leftOut: 1, readNoLore: true, loreCut: 1 });
+	});
+
+	it('does not call a check cut over a blank note the script names', async () => {
+		const files = { 'Script/Scene 13.md': 'Kael reaches Frosthaven.', 'Kael.md': 'Only child.', 'Frosthaven.md': '' };
+		const { core, conv } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')], 16_384);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [] });
+	});
+
+	it('counts the notes the script names past the cap, though all that went fit whole', async () => {
+		const names = Array.from({ length: MAX_LORE_NOTES + 3 }, (_, i) => `Name${i}`);
+		const files = { 'Script/Scene 13.md': names.join(' '), ...Object.fromEntries(names.map((n) => [`${n}.md`, 'Short.'])) };
+		const { core, conv } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')], 16_384);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [], loreCut: 3 });
 	});
 
 	it('does not count a note the script names that went whole as cut', async () => {

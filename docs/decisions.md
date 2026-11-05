@@ -627,8 +627,8 @@ its text or less is not sent at all, least mentioned first, and its room goes to
 the rest: a sliver sent would still count as read and could back a flag or a
 clean result, and a few notes the model can use beat a dozen it cannot. If the
 canon note is still cut, the card says how much reached the model, as it does
-for the script. It also counts the notes cut or dropped, and a clean result over
-any cut text says "in what fit" rather than claiming the vault.
+for the script. It also counts the notes cut, dropped or past the 12, and a clean
+result over any cut text says "in what fit" rather than claiming the vault.
 
 The same runs show what a small local model does to a clean script: it flags
 something. Every run on the clean scene flagged at least one line, seven in all,
@@ -663,8 +663,11 @@ which the rules do not ask for.
 
 A check's reply cites in its records, so the citation rules are not sent on a
 check, and the card's list is always what was sent and read. Models link anyway,
-so `[[links]]` are taken out of a record: one that ends a claim is a citation and
-goes, and any other leaves its text.
+and a link's place in a sentence cannot tell a citation from a word the sentence
+needs: `son of [[Aldric]].` looks like `only child [[Kael]].`. So only links after
+a value's last sentence go. Inside `VAULT` a link keeps its text, which at worst
+repeats a name, and `LINE` and `FIX` stay as written, so a script line with a
+link still matches.
 
 How canon overrides: as data the model reads, and as a filter where a filter
 can be exact. The canon note goes with every send as its own context item,

@@ -114,12 +114,12 @@ export function parseLoreBlock(content: string): RawIssue[] | null {
 	}
 	const out: RawIssue[] = [];
 	for (const r of records) {
-		const line = unquote(withoutLinks(r.line ?? ''));
-		const says = withoutLinks(r.vault ?? '').trim();
+		const line = unquote(withoutEndLinks(r.line ?? ''));
+		const says = withoutEndLinks(r.vault ?? '').replace(/\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]/g, '$1').trim();
 		const note = cleanLink(r.note ?? '');
 		// A record that names no note is the model saying the lore has nothing on it.
 		if (!line || !says || NO_FIX.test(note)) continue;
-		const fix = unquote(withoutLinks(r.fix ?? ''));
+		const fix = unquote(withoutEndLinks(r.fix ?? ''));
 		// The model listing a line it then says is fine has not flagged anything.
 		if (NOT_A_FLAG.test(fix)) continue;
 		out.push({ line, says, note, ...(NO_FIX.test(fix) ? {} : { fix }) });
@@ -127,9 +127,9 @@ export function parseLoreBlock(content: string): RawIssue[] | null {
 	return out;
 }
 
-/** A value without [[links]]: one that ends a claim is a citation and goes, and any other leaves its text. */
-function withoutLinks(text: string): string {
-	return text.replace(/(?:\s*\[\[[^\]\n]*\]\])+(?=[.,;:!?…]|\s*$)/g, '').replace(/\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]/g, '$1');
+/** A value without the [[links]] that follow its last sentence: those cite it, while a link inside the text may be the script's own or part of what it says. */
+function withoutEndLinks(text: string): string {
+	return text.replace(/([.!?…"”'’`)])(?:\s*\[\[[^\]\n]*\]\])+\s*$/, '$1');
 }
 
 /** A value without the quotes or backticks a model wraps around it. */
@@ -304,15 +304,16 @@ function mentions(text: string, name: string): number {
 /**
  * The lore notes a script names, most mentioned first, as context for the
  * check: every note whose name or alias appears in it, up to `MAX_LORE_NOTES`,
- * leaving out the script, script pages and the canon note, which goes anyway.
- * A check that relied on the model to look these up found nothing on the runs
- * where it did not: see decisions.
+ * leaving out the script, script pages, blank notes and the canon note, which
+ * goes anyway. `named` counts them before the cap. A check that relied on the
+ * model to look these up found nothing on the runs where it did not: see
+ * decisions.
  */
-export async function loreForScript(vault: VaultPort, script: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder'> & { canonPath: string }): Promise<ContextItem[]> {
+export async function loreForScript(vault: VaultPort, script: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder'> & { canonPath: string }): Promise<{ items: ContextItem[]; named: number }> {
 	const text = script.toLowerCase();
 	const scored: Array<{ path: string; name: string; count: number }> = [];
 	for (const file of vault.listMarkdownFiles()) {
-		if (file.path === g.canonPath || !isLoreNote(file.path, g)) continue;
+		if (file.path === g.canonPath || file.size === 0 || !isLoreNote(file.path, g)) continue;
 		const aliases: unknown = vault.getFrontmatter(file.path)?.['aliases'];
 		const names: unknown[] = [file.name, ...(Array.isArray(aliases) ? (aliases as unknown[]) : [aliases])];
 		let count = 0;
@@ -327,7 +328,7 @@ export async function loreForScript(vault: VaultPort, script: string, g: Pick<Lo
 		const content = await vault.readNote(path);
 		if (content !== null) items.push({ kind: 'lore', label: name, path, content });
 	}
-	return items;
+	return { items, named: scored.length };
 }
 
 /** The user message of a lore check, shown in the chat and sent to the model. */

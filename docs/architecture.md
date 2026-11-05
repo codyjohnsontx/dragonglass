@@ -309,7 +309,7 @@ its selection (`core.loreScript`, `core.checkLore`, which is `send` with a
 script: it is what is open. The note or selection goes as the turn's context,
 and `loreForScript` adds the notes it names, by note name or alias as whole
 words in any case, most mentioned first, up to 12, leaving out the script,
-script pages and the canon note. They share what the script and the canon note
+script pages, blank notes and the canon note. They share what the script and the canon note
 leave of the context's note budget. `fitLoreNotes` drops the least mentioned
 until each shows more than a tenth of its text, so a dropped note is not sent and
 does not count as read, and the model still has the read tools for anything else. It has no write or web
@@ -339,11 +339,12 @@ then each issue as its line, what the vault says with the note linked, and
 Fix it and Intentional. Below the list go only the limits of the check: flags
 left out, how much of a script too long for the context was shown (selecting
 the rest checks it), how much of a canon note too long for it was shown
-(`canonShown`), how many notes the script names were cut or dropped (`loreCut`),
+(`canonShown`), how many notes the script names were cut, dropped or past the 12 (`loreCut`),
 and that no lore note was read, when that is so, in
 place of "no contradictions". A clean result over cut text says so instead of
-claiming the vault (`cleanMessage`). The model's `[[links]]` are taken out of a
-record's text. The sources list under it, headed "Read for this
+claiming the vault (`cleanMessage`). A `[[link]]` after a record's last sentence is
+taken off as a citation; one inside `VAULT` keeps its text, and `LINE` and `FIX`
+keep theirs as written, so a line with a link still matches the script. The sources list under it, headed "Read for this
 check", is everything sent or read but the script.
 
 **Fix it** (`proposeLoreFix`) replaces that line in the note as it is now

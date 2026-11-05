@@ -185,7 +185,7 @@ export class DragonglassCore {
 		const contextWindow = await this.contextWindow(provider, model, opts.signal);
 		const noteTokens = noteTokenBudget(contextWindow);
 		const canon = await canonContext(this.vault, this.canonNote());
-		const loreNotes = lore ? await loreForScript(this.vault, opts.context[0]?.content.slice(0, this.settings.maxCharsPerNote) ?? '', { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder(), canonPath: this.canonNote() }) : [];
+		const { items: loreNotes, named } = lore ? await loreForScript(this.vault, opts.context[0]?.content.slice(0, this.settings.maxCharsPerNote) ?? '', { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder(), canonPath: this.canonNote() }) : { items: [], named: 0 };
 		const context = fitLoreNotes([...opts.context, ...loreNotes, ...(canon ? [canon] : [])], this.settings.maxCharsPerNote, noteTokens);
 		const userMsg = userMessage(newId(), opts.text, context, Date.now());
 		if (conv.messages.length === 0) conv.title = deriveTitle(opts.text);
@@ -239,7 +239,7 @@ export class DragonglassCore {
 						const draft = parseDraft(ev.content);
 						if (draft) current.draft = { thread: threadForDraft(conv.messages, draft.fresh, newId), text: draft.text };
 						const issues = lore && ev.toolCalls.length === 0 ? parseLoreBlock(ev.content) : null;
-						if (lore && issues) current.loreCheck = this.loreResult(conv, userMsg.id, lore, context, canon, loreNotes.length, issues, noteTokens);
+						if (lore && issues) current.loreCheck = this.loreResult(conv, userMsg.id, lore, context, canon, named, issues, noteTokens);
 					}
 					this.store.touch(conv);
 					break;
