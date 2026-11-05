@@ -21,6 +21,10 @@
  *                                             both of the first two results as [web N]
  *   related <note>                         -> related_notes, read_note on the top result, then an answer
  *                                             citing the note and its three most related notes
+ *   draft <subject>                        -> search_notes, then a reply with a Fountain scene in a ```draft block
+ *                                             citing [[Kael]] and [[Ashfall]] (e2e vault lore notes)
+ *   draft new <subject>                    -> the same, opening the block with ```draft new (a different scene)
+ *   revise <instruction>                   -> a full rewrite of the scene in a new ```draft block, no tools
  *   bad tool                               -> calls a tool that does not exist
  *   bad args                               -> read_note with missing arguments
  *   loop                                   -> keeps calling list_files forever (iteration cap test)
@@ -354,6 +358,12 @@ function plan(messages, toolsAvailable) {
 			text: `Kael is the exiled captain of the Ember Guard and distrusts the Council [web ${n}]. Ashfall's history is long [web ${n + 1}].\n\nI'd suggest leaning on his distrust in the scene.`,
 		};
 	}
+	if ((m = /^draft\s+(new\s+)?(.+)/i.exec(text))) {
+		const [, fresh, subject] = m;
+		if (!noTools && stage === 0) return { tool: { name: 'search_notes', args: { query: subject } } };
+		return { text: draftReply(fresh ? 'draft new' : 'draft', subject, null) };
+	}
+	if ((m = /^revise\s+(.+)/i.exec(text))) return { text: draftReply('draft', null, m[1]) };
 	if ((m = /^cite\s+(.+)/i.exec(text))) {
 		if (noTools) return { text: `I cannot search without tools.` };
 		if (stage === 0) return { tool: { name: 'search_notes', args: { query: m[1] } } };
@@ -386,6 +396,31 @@ function plan(messages, toolsAvailable) {
 	}
 	if (lower.startsWith('loop')) return { tool: { name: 'list_files', args: {} } };
 	return { text: `You said: ${text}` };
+}
+
+/** A short Fountain scene, shaped by the lore notes, as the draft rules ask: lore cited outside the block, the scene alone inside. */
+function draftReply(fence, subject, revision) {
+	const scene = [
+		'INT. ASHFALL WATCHTOWER - NIGHT',
+		'',
+		'Wind drives ash across the parapet. KAEL, 40s, scarred, keeps his back to the door.',
+		'',
+		'MIRA enters, hood up, scouts\' sigil on her shoulder.',
+		'',
+		'MIRA',
+		'You came.',
+		'',
+		'KAEL',
+		revision ? `(${revision})` : '(not turning)',
+		'The Council sent you. Say it.',
+		'',
+		'MIRA',
+		'They did. I came anyway.',
+	].join('\n');
+	const intro = revision
+		? `Rewrote the whole scene, ${revision}. Kael still keeps his distrust of the Council [[Kael]].`
+		: `Here is a first pass at ${subject}. Kael's distrust of the Council [[Kael]] and the ash-choked watchtower of Ashfall [[Ashfall]] shape it.`;
+	return `${intro}\n\n\`\`\`${fence}\n${scene}\n\`\`\`\n\nSay how you want it changed, or insert it from the card.`;
 }
 
 function listPaths(paths) {

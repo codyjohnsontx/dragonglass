@@ -15,8 +15,10 @@ import { createVaultTools } from './tools/vault-tools';
 import { createWebTools, DEFAULT_MAX_PAGE_CHARS, nextWebNumber, WebSearchApprover } from './tools/web-tools';
 import { researchNoteFor } from './web/research-note';
 import { parsePreferredSites, TavilySearch } from './web/search';
+import { draftingForSend, followsDraft, parseDraft, proposeDraftInsert, revisionReminder, threadForDraft } from './agent/drafting';
 import { ObsidianVaultPort } from './vault/obsidian-port';
-import { ChangeProposal, ProposalEngine } from './vault/proposals';
+import { normalizeVaultPath } from './vault/paths';
+import { ChangeProposal, ProposalEngine, ProposalError } from './vault/proposals';
 
 /**
  * Wires providers, tools, persistence and the agent loop together. The chat
@@ -131,7 +133,7 @@ export class DragonglassCore {
 	 * note budgets the read tools apply are the ones computed for that send's
 	 * provider and model, even when two sends overlap.
 	 */
-	private createTools(contextWindow: number | undefined, web: { approve: WebSearchApprover; firstNumber: number } | null): ToolRegistry {
+	private createTools(contextWindow: number | undefined, web: { approve: WebSearchApprover; firstNumber: number } | null, readOnly: boolean): ToolRegistry {
 		const tools = new ToolRegistry();
 		const maxReadTokens = noteTokenBudget(contextWindow);
 		const options = () => ({
@@ -139,8 +141,9 @@ export class DragonglassCore {
 			maxReadTokens,
 			maxSearchResults: 20,
 			autoReadTokens: autoReadBudget(this.settings.autoReadTokens, contextWindow),
+			excludeFolder: this.scriptFolder(),
 		});
-		for (const t of createVaultTools(this.vault, this.proposals, options, this.searchIndex)) tools.register(t);
+		for (const t of createVaultTools(this.vault, this.proposals, options, this.searchIndex)) if (t.readOnly || !readOnly) tools.register(t);
 		if (web) {
 			const webTools = createWebTools({
 				search: this.webSearch,
@@ -175,9 +178,10 @@ export class DragonglassCore {
 
 		const contextWindow = await this.contextWindow(provider, model, opts.signal);
 		const noteTokens = noteTokenBudget(contextWindow);
-		const contextBlock = formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens);
+		const contextBlock = [formatContextBlock(opts.context, this.settings.maxCharsPerNote, noteTokens), revisionReminder(conv.messages)].filter(Boolean).join('\n\n');
 		const messages = toProviderMessages(conv.messages, contextBlock);
-		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null);
+		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
+		const drafting = await draftingForSend(this.vault, opts.context, this.scriptFolder());
 		const webReady = this.webSearchKey() !== null && opts.approveWebSearch !== undefined;
 		const webSearch = webReady ? 'available' : 'needs-key';
 		const pastSources = conv.messages.map((m) => m.sources);
@@ -187,9 +191,13 @@ export class DragonglassCore {
 		const events = runAgent({
 			provider,
 			model,
-			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map, webSearch, webSources }),
+			system: (toolsEnabled) => buildSystemPrompt({ toolsEnabled, maxCharsPerNote: this.settings.maxCharsPerNote, vault: map, webSearch, webSources, drafting }),
 			messages,
-			tools: this.createTools(contextWindow, webReady && opts.approveWebSearch ? { approve: opts.approveWebSearch, firstNumber: nextWebNumber(pastSources) } : null),
+			tools: this.createTools(
+				contextWindow,
+				webReady && opts.approveWebSearch ? { approve: opts.approveWebSearch, firstNumber: nextWebNumber(pastSources) } : null,
+				followsDraft(conv.messages, this.vault.getActiveContext().path),
+			),
 			toolsEnabled: this.settings.toolsEnabled,
 			conversationId: conv.id,
 			signal: opts.signal,
@@ -214,6 +222,8 @@ export class DragonglassCore {
 						current.toolCalls = ev.toolCalls.length ? ev.toolCalls : undefined;
 						current.usage = ev.usage;
 						current.warnings = ev.warnings.length ? ev.warnings : undefined;
+						const draft = parseDraft(ev.content);
+						if (draft) current.draft = { thread: threadForDraft(conv.messages, draft.fresh, newId), text: draft.text };
 					}
 					this.store.touch(conv);
 					break;
@@ -278,6 +288,36 @@ export class DragonglassCore {
 		const proposal = await this.proposals.proposeCreate(conv.id, note.path, note.content, 'Research note from a web-sourced answer');
 		conv.proposals[proposal.id] = proposal;
 		message.researchProposalId = proposal.id;
+		this.store.touch(conv);
+		return proposal;
+	}
+
+	/** The script folder setting as a vault path; empty when unset. */
+	scriptFolder(): string {
+		return normalizeVaultPath(this.settings.scriptFolder);
+	}
+
+	/**
+	 * Insert a draft version into the open note: a proposal that puts the
+	 * draft over the editor's selection or at its cursor, reviewed under the
+	 * draft like any edit. An earlier insert of the same thread still awaiting
+	 * review is superseded (rejected), so one review is open per draft.
+	 */
+	async insertDraft(conv: Conversation, messageId: string): Promise<ChangeProposal> {
+		const message = conv.messages.find((m) => m.id === messageId);
+		if (!message?.draft) throw new ProposalError('There is no draft to insert.');
+		const target = await this.vault.getInsertTarget();
+		if (!target) throw new ProposalError('Open the note to insert into, place the cursor or select the text to replace, then try again.');
+		const proposal = await proposeDraftInsert(this.proposals, conv.id, target, message.draft.text, this.scriptFolder());
+		for (const m of conv.messages) {
+			if (m.draft?.thread !== message.draft.thread) continue;
+			for (const id of m.draft.inserts ?? []) {
+				const earlier = conv.proposals[id];
+				if (earlier && (earlier.status === 'pending' || earlier.status === 'stale')) this.proposals.reject(earlier);
+			}
+		}
+		conv.proposals[proposal.id] = proposal;
+		(message.draft.inserts ??= []).push(proposal.id);
 		this.store.touch(conv);
 		return proposal;
 	}

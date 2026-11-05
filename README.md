@@ -24,6 +24,12 @@ written.
   the web when the vault lacks an answer. You approve every search and can
   change its words first; the answer cites web pages as `[web N]`, and
   **Save to vault** proposes a research note with its sources.
+- **A writing assistant for your script.** Ask for a scene and the model looks
+  up the characters and places in your vault first, drafts it in the chat in
+  the format of the note you have open (Fountain by default), and cites the
+  notes that shaped it. Revise it in the chat; every version stays a click
+  away. **Insert** puts the version you are looking at over your selection or
+  at your cursor, through the same review as any edit.
 
 ## Status
 
@@ -305,6 +311,46 @@ Token counts reported by the provider are shown under each reply, summed over
 every tool round of that turn, and as a conversation total. These are counts,
 not bills. The optional usage warning is a reminder, not a spending limit.
 
+### Drafting scenes
+
+Dragonglass is built for writing a screenplay beside the lore that backs it.
+Open the scene you are working on, then ask: "draft the scene where Kael
+meets Mira at the watchtower". The model searches the vault for the characters
+and places named, reads their notes, and answers with the scene in a draft
+card, saying under it which notes shaped the scene; those notes appear under
+**From your vault** like any answer's sources. When the model names none, the
+notes its tools read that turn are listed under **Read for this draft**
+instead, so you can always see what the scene was built from.
+
+The draft matches the open note's format, read from the note itself: Fountain
+(`INT. PLACE - DAY`, names in capitals, dialogue beneath), a Markdown
+screenplay (headings and bold names), or prose. The note is read for this only
+when it is in the script folder (below) or attached to your message; otherwise,
+or with nothing to match, drafts are Fountain.
+
+Ask for changes in the chat ("make Kael colder") and the whole scene is
+rewritten as a new version; the card shows the latest with arrows to step back
+through the earlier ones, so you can compare or go back. **Copy** copies the
+version shown. **Insert into …** puts it into the note you have open:
+over the selected text if there is one, otherwise at the cursor, with a blank
+line either side. The note must be in editing view, since Reading view has no
+cursor; Insert asks you to switch if it is not. The insert is a proposal like
+any other edit: the diff shows under the card, and nothing is written until you
+approve it.
+
+Right after a draft, a message that names no note is taken as being about the
+draft, and the model cannot propose note edits on that turn. To change a note
+then, name it with a `[[link]]`, a `.md` path, the word "note" or the open
+note's title.
+
+An optional **Script folder** setting (Settings → Dragonglass AI → Writing)
+names the folder that holds your screenplay. Notes in it are the script, not
+lore, so the model's searches and related-note lookups leave them out unless
+it asks about the script itself, and the open note's format is matched when the
+note is in this folder. Drafts go into the open note either
+way: inserting into a note outside that folder still works, and the review
+says so.
+
 ## What works
 
 Verified by automated tests against a fake provider server and by driving
@@ -341,11 +387,16 @@ vault:
   new folder reverted, a property change applied and
   reverted exactly, a stale property change refused, and `replace_section`
   refusing a missing or ambiguous heading.
+- Scene drafting: a draft card with the notes that shaped it listed under it,
+  revisions stepped through in the card, Insert at the cursor or over a
+  selection through the review, a stale review refused, and script pages left
+  out of search.
 - Conversation history persists across plugin reload.
 
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above
 except the folder, move, property and section changes, which have run only
-with the scripted model).
+with the scripted model, and for drafting only a draft, a revision and Insert
+at the cursor).
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
@@ -439,6 +490,10 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
   search words (which you see and can edit) and your preferred sites. Reading
   a result page fetches that page with no key or cookie. Search results and
   page text then go to your provider like any tool result.
+- With every message, while the note you have open is in the script folder or
+  attached, a short sample of it (its first 1,200 characters) goes along so
+  drafts can match its format, whether or not you are drafting. Otherwise no
+  part of it is sent, and drafts default to Fountain.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content and web content are treated as data: the model is told not to

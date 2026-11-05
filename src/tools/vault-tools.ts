@@ -1,3 +1,4 @@
+import { isScriptNote } from '../agent/drafting';
 import type { Source } from '../agent/sources';
 import { AgentTool, ToolResult } from '../agent/tools';
 import { estimateTokens, prefixWithinTokens } from '../providers/types';
@@ -23,6 +24,8 @@ export interface VaultToolOptions {
 	maxSearchResults: number;
 	/** Estimated tokens of full note text search_notes appends after its results; 0 or unset for excerpts only. */
 	autoReadTokens?: number;
+	/** The script folder, normalized: its notes are the screenplay, not lore, so search_notes and related_notes leave them out unless the folder or note asked about is in it. Unset or "" for none. */
+	excludeFolder?: string;
 }
 
 export const DEFAULT_TOOL_OPTIONS: VaultToolOptions = { maxReadChars: 24_000, maxSearchResults: 20 };
@@ -45,7 +48,7 @@ export function createVaultTools(
 		readNoteTool(vault, opts),
 		searchNotesTool(vault, index, opts),
 		getNoteMetadataTool(vault),
-		relatedNotesTool(vault),
+		relatedNotesTool(vault, opts),
 		getActiveNoteTool(vault, opts),
 		proposeCreateNoteTool(proposals, turn),
 		proposeEditNoteTool(proposals, turn),
@@ -219,14 +222,19 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 				const asked = typeof args['limit'] === 'number' ? args['limit'] : opts.maxSearchResults;
 				const limit = Math.min(Math.max(asked, MIN_SEARCH_RESULTS), 100);
 				const mode = args['mode'] === 'all' ? 'all' : 'any';
-				let hits = await index.search(query, { folder, limit, mode });
+				const lore = opts.excludeFolder || undefined;
+				const inScript = lore !== undefined && (folder === lore || isScriptNote(folder, lore));
+				const outside = lore ? ` outside ${lore}/` : '';
+				let exclude = inScript ? undefined : lore;
+				let hits = await index.search(query, { folder, exclude, limit, mode });
 				let scope = '';
 				let searched = folder;
 				if (folder !== '' && hits.length === 0) {
-					hits = await index.search(query, { folder: '', limit, mode });
+					hits = await index.search(query, { folder: '', exclude: lore, limit, mode });
 					if (hits.length > 0) {
 						searched = '';
-						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault.\n\n`;
+						exclude = lore;
+						scope = `No notes in ${folder}/ matched "${query}"; these results are from the whole vault${outside}.\n\n`;
 					}
 				}
 				let topMode: SearchMode = mode;
@@ -235,12 +243,13 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 					const withEvery = hits.length;
 					if (withEvery === 0) topMode = 'any';
 					const seen = new Set(hits.map((h) => h.path));
-					let backfill = await index.search(query, { folder: searched, limit, mode: 'any' });
+					let backfill = await index.search(query, { folder: searched, exclude, limit, mode: 'any' });
 					if (backfill.length === 0 && searched !== '') {
-						backfill = await index.search(query, { folder: '', limit, mode: 'any' });
+						backfill = await index.search(query, { folder: '', exclude: lore, limit, mode: 'any' });
 						if (backfill.length > 0) {
-							scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault.\n\n`;
+							scope = `No notes in ${searched}/ matched "${query}"; these results are from the whole vault${outside}.\n\n`;
 							searched = '';
+							exclude = lore;
 						}
 					}
 					hits = [...hits, ...backfill.filter((h) => !seen.has(h.path))].slice(0, limit);
@@ -249,9 +258,9 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 						some = `${which} some of them.\n\n`;
 					}
 				}
-				if (hits.length === 0) return ok(`No notes matched "${query}".`);
+				if (hits.length === 0) return ok(`No notes${inScript ? ` in ${folder}/ or` : ''}${outside} matched "${query}".`);
 				if (searched !== '') {
-					const elsewhere = await betterElsewhere(index, query, searched, topMode, hits[0]!);
+					const elsewhere = await betterElsewhere(index, query, searched, lore, topMode, hits[0]!);
 					if (elsewhere.length > 0) {
 						scope = `Searched only ${searched}/. Notes elsewhere match better: ${elsewhere.join('; ')}. Search again without folder if the results below do not answer the question.\n\n`;
 					}
@@ -267,7 +276,7 @@ function searchNotesTool(vault: VaultPort, index: VaultSearchIndex, options: () 
 						return formatHit(h, terms.length, excerpt);
 					})
 					.join('\n');
-				const linked = await linkedFromNamedResult(vault, hits, terms);
+				const linked = await linkedFromNamedResult(vault, hits, terms, exclude);
 				const links = linked ? linkedSection(linked) : '';
 				const budget = opts.autoReadTokens ?? 0;
 				const full = budget > 0 ? autoReadSection(autoReadOrder(hits, contents, linked), budget, opts.maxReadChars) : { text: '', shown: [] };
@@ -324,13 +333,15 @@ interface LinkedNotes {
  * the model answered from whatever else the search showed instead of
  * following the links.
  */
-async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[]): Promise<LinkedNotes | null> {
+async function linkedFromNamedResult(vault: VaultPort, hits: SearchHit[], terms: string[], exclude: string | undefined): Promise<LinkedNotes | null> {
 	const hub = hits.find((h) => {
 		const named = searchTerms(h.name).filter((t) => !/^\p{L}$/u.test(t));
 		return named.length >= 2 && named.every((t) => terms.includes(t)) && terms.some((t) => !h.matched.includes(t));
 	});
 	if (!hub) return null;
-	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? []).filter((p) => p !== hub.path && p.toLowerCase().endsWith('.md')).slice(0, MAX_LINKED);
+	const paths = (vault.getMetadata(hub.path)?.outgoingLinks ?? [])
+		.filter((p) => p !== hub.path && p.toLowerCase().endsWith('.md') && !(exclude && p.startsWith(`${exclude}/`)))
+		.slice(0, MAX_LINKED);
 	if (paths.length === 0) return null;
 	const notes = await Promise.all(paths.map(async (path) => ({ name: baseName(path), path, content: await vault.readNote(path).catch(() => null) })));
 	return { hub, missing: terms.filter((t) => !hub.matched.includes(t)), notes };
@@ -381,8 +392,8 @@ const MAX_ELSEWHERE = 3;
  * A folder with no match at all gets the whole vault's results instead
  * (Projects for a warranty kept in a daily note).
  */
-async function betterElsewhere(index: VaultSearchIndex, query: string, folder: string, mode: SearchMode, best: SearchHit): Promise<string[]> {
-	const all = await index.search(query, { folder: '', limit: MAX_ELSEWHERE + 1, mode });
+async function betterElsewhere(index: VaultSearchIndex, query: string, folder: string, exclude: string | undefined, mode: SearchMode, best: SearchHit): Promise<string[]> {
+	const all = await index.search(query, { folder: '', exclude, limit: MAX_ELSEWHERE + 1, mode });
 	return all
 		.filter((h) => !h.path.startsWith(`${folder}/`) && h.score > best.score)
 		.slice(0, MAX_ELSEWHERE)
@@ -522,7 +533,7 @@ function getNoteMetadataTool(vault: VaultPort): AgentTool {
 const DEFAULT_RELATED = 10;
 const MAX_RELATED = 25;
 
-function relatedNotesTool(vault: VaultPort): AgentTool {
+function relatedNotesTool(vault: VaultPort, options: () => VaultToolOptions): AgentTool {
 	return {
 		name: 'related_notes',
 		description:
@@ -545,9 +556,13 @@ function relatedNotesTool(vault: VaultPort): AgentTool {
 				if (!vault.getMetadata(found.path)) return Promise.resolve(fail(`Error: no note at ${found.path}. Use list_files or search_notes to find the right path.`));
 				const asked = typeof args['limit'] === 'number' ? Math.floor(args['limit']) : DEFAULT_RELATED;
 				const limit = Math.min(Math.max(asked, 1), MAX_RELATED);
-				const { notes, total } = relatedNotes(vault.linkGraph(), found.path, limit);
+				const script = options().excludeFolder ?? '';
+				const inScript = isScriptNote(found.path, script);
+				const graph = vault.linkGraph();
+				const { notes, total } = relatedNotes(inScript ? graph : graph.filter((n) => !isScriptNote(n.path, script)), found.path, limit);
+				const outside = script && !inScript ? ` outside ${script}/` : '';
 				const name = `[[${baseName(found.path)}]]`;
-				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes share links or tags with ${name} (${found.path}).`));
+				if (notes.length === 0) return Promise.resolve(ok(`${found.notice}No notes${outside} share links or tags with ${name} (${found.path}).`));
 				const lines = notes.map((n, i) => `${i + 1}. ${linkLabel(n.path)}\n${n.reasons.map((r) => `   - ${r}`).join('\n')}`);
 				const hint = limit < MAX_RELATED ? 'call again with a higher limit to see them' : `${MAX_RELATED} is the most this tool shows`;
 				const more = total > notes.length ? `\n\n${total - notes.length} more related notes not shown; ${hint}.` : '';

@@ -477,3 +477,94 @@ never removed by Revert; the review says so. Rolling back a failed Approve
 all does remove a folder it just created while the folder is empty, and so
 does a move that fails after making its folder, so a refused move leaves the
 vault as it was.
+
+## 21. Drafts are a block in the reply; versions are the messages
+
+The owner wants Dragonglass as a writing assistant for a screenplay whose
+lore the vault holds: draft a scene in the chat, revise it there, then put
+it in the note. An interview fixed the shape: drafts land in the chat first
+and one click inserts them through the normal review; the format is read
+from the script note, Fountain when there is nothing to match; the
+characters and places are looked up first and cited like an answer's
+sources; every revision is a full rewrite with the earlier versions a click
+away; insert replaces the selection or goes at the cursor; the script is the
+open note, with an optional script folder so script pages are not lore. It
+ships in three builds: drafting, then a lore check with a sequel canon note,
+then brainstorm cards. This is the first.
+
+How the model hands over a draft: a `draft_scene` tool with the text as an
+argument, or a marked block in the reply. The tool would put the scene in
+tool-call arguments, which small local models produce unreliably for long
+text and which do not stream, and the reply would then need separate text to
+cite the lore. A fenced block opened with ```` ```draft ```` streams like any
+reply, is written reliably by every model tried, and is a code fence, so the
+citation extractor already ignores its inside and the model cites the lore
+in the prose around it. The block is parsed when the turn ends; an
+unterminated block (a stopped turn) is not a draft. Small local models
+often put nothing but the block in the reply, so no citation and no sources
+list; since the point is to show which notes shaped the scene, a draft that
+cites none lists the notes the turn's tools showed the model, under its own
+heading so it does not read as the model's own citation.
+
+How versions are kept: a separate draft store with its own history, or the
+messages themselves. Each revision is a whole message anyway, so a draft
+message carries the text and a thread id, and the thread's versions are
+listed from the conversation when rendering, the way proposal batches are.
+Nothing new is persisted, nothing can drift from the chat, and older
+conversations open unchanged. A revision joins the latest thread unless the
+model opens the block with `draft new`: the cost of a forgotten `new` is one
+extra version in a thread, while the opposite default would lose the
+history of a revision the model forgot to mark.
+
+How a revision finds its target: the system prompt alone, or the draft beside
+the request. With qwen3:8b the rule alone did not hold: a note attached to the
+send sits next to "make Kael colder" while the draft is further back, so the
+model rewrote the note or looked it up to find the draft. A send that follows
+a draft now repeats the draft in full just before the user's text. It costs
+one scene of prompt on those sends and is not stored. That fixed the target
+but not the habit: the model still patched the note with the draft's lines,
+stopped only by a failed find. So a send right after a draft that names no
+note gets no write tools. The cost: "add that to his file" straight after a
+draft needs a [[link]], a `.md` path or the word note before it can propose an edit.
+
+How the format is matched: a Fountain parser, a model-side guess, or a few
+line patterns. The owner asked for the note's own conventions, read from the
+note, and the choice only decides which short instruction and sample the
+model gets, so a parser is more than the decision needs. `inferFormat`
+counts scene headings, forced headings, transitions and character cues with
+dialogue under them against bold cues (two at least) and headings, with
+Fountain as the default when the note is too short to tell, and the note's opening goes to
+the model as a sample so it can match what the counts cannot describe. The
+sample and the format go only when the open note is inside the script
+folder or attached to the message: the open note is the script by the
+owner's choice, but a public plugin should not send an unrelated private
+note (a journal, say) with every message. Otherwise neither is sent, drafts
+default to Fountain, and the rules tell the model that no script note is
+shared, so it asks which note the scene is for when it should match one and
+can read a note the user names with the read tools.
+
+How Insert writes: a direct editor replace, or a proposal. Writes still never
+write (decision 5). In Reading mode Insert refuses and asks to switch to
+editing: there is no visible cursor to honour, the hidden editor sits at the
+top of the note and goes stale when the note changes, and falling back to the
+end of the note is a placement nobody asked for. Otherwise the insert reads the
+editor at the click (selection or cursor), after saving the view's pending edits and waiting briefly for a
+save already under way (the blur from the click starts one) to reach the
+vault, builds the whole new note
+text and goes through `ProposalEngine.proposeRewrite`, which refuses when
+the vault still differs from the editor and otherwise hashes the note like
+any edit; apply re-checks the hash inside `Vault.process`. It does not refuse
+placeholder text as the write tools do: that guard stops a model proposing
+before it has the content, while Insert is the user's click on a draft they
+have read, and a beat such as `[Insert song lyrics]` may be what they want,
+so the diff review is the check. The proposal
+hangs off the draft version rather than a tool message, so it is not part
+of the turn's batch review and is not replayed to the model, which was told
+not to propose script edits itself. The draft goes in on lines of its own
+with a blank line each side, since screenplay elements are blank-line
+separated and a scene pasted mid-line is never what was meant.
+
+The script folder is a setting rather than inferred: it only exists to keep
+script pages out of the lore the model searches, the open note is the script
+either way, and inserting outside the folder is allowed and said in the
+review, since a scene may be drafted into an outline or a scratch note.

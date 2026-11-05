@@ -1,8 +1,13 @@
 import type { CachedMetadata } from 'obsidian';
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
-import { ActiveContext, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
+import { ActiveContext, InsertTarget, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
+import { ProposalError } from './proposals';
 import { StoreBackend } from '../persistence/store';
+
+/** How long an insert waits for an editor save already in flight to reach the vault, and how often it looks. */
+const SAVE_WAIT_MS = 2000;
+const SAVE_POLL_MS = 50;
 
 /** How long a rename or link lookup waits for Obsidian to index notes this port wrote before it goes ahead anyway. */
 const INDEX_WAIT_MS = 5000;
@@ -207,14 +212,51 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 		await this.app.fileManager.trashFile(file);
 	}
 
-	getActiveContext(): ActiveContext {
+	/** The Markdown view the user was last in, while it is still open; else whatever Markdown view is active. */
+	private markdownView(): MarkdownView | null {
 		const leaf = this.lastMarkdownLeaf;
 		const tracked =
 			leaf?.view instanceof MarkdownView && this.app.workspace.getLeavesOfType('markdown').includes(leaf) ? leaf.view : null;
-		const view = tracked ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+		return tracked ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+	}
+
+	getActiveContext(): ActiveContext {
+		const view = this.markdownView();
 		const file = view?.file ?? this.app.workspace.getActiveFile();
 		const selection = view?.editor.getSelection() ?? '';
 		return { path: file instanceof TFile ? file.path : null, selection: selection.length > 0 ? selection : null };
+	}
+
+	/**
+	 * The editor's text and selection at the moment of an insert. Pending
+	 * edits are saved first so the vault holds what the editor shows and the
+	 * proposal's freshness check passes. When the editor's own save is already
+	 * writing (the blur from clicking Insert starts one), `save()` returns
+	 * before that write lands, so this waits a short while for the vault to
+	 * catch up. A save that fails or never lands leaves the text as it is and
+	 * the proposal engine reports the mismatch. Reading mode is refused: its
+	 * hidden editor shows no cursor and is not kept up to date.
+	 */
+	async getInsertTarget(): Promise<InsertTarget | null> {
+		const view = this.markdownView();
+		const file = view?.file;
+		if (!view || !file) return null;
+		if (view.getMode() === 'preview') throw new ProposalError('Switch the note to editing, place the cursor or select the text to replace, then Insert.');
+		try {
+			await view.save();
+		} catch {
+			// Reported by the engine's unsaved-changes check.
+		}
+		const editor = view.editor;
+		for (let waited = 0; waited < SAVE_WAIT_MS && (await this.app.vault.cachedRead(file)) !== editor.getValue(); waited += SAVE_POLL_MS) {
+			await new Promise((resolve) => window.setTimeout(resolve, SAVE_POLL_MS));
+		}
+		return {
+			path: file.path,
+			content: editor.getValue(),
+			from: editor.posToOffset(editor.getCursor('from')),
+			to: editor.posToOffset(editor.getCursor('to')),
+		};
 	}
 
 	/**

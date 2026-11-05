@@ -1,5 +1,5 @@
 import { StoreBackend } from '../src/persistence/store';
-import { ActiveContext, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
+import { ActiveContext, InsertTarget, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from '../src/vault/port';
 import { baseName, parentFolder } from '../src/vault/paths';
 
 /** In-memory VaultPort + StoreBackend for tests. Mirrors Obsidian semantics closely enough. */
@@ -13,6 +13,8 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	/** Folders moved to the trash. */
 	trashedFolders: string[] = [];
 	active: ActiveContext = { path: null, selection: null };
+	/** What `getInsertTarget` answers: the open note's editor state, or null with no note open. */
+	insertTarget: InsertTarget | null = null;
 	private listeners = new Set<(change: VaultChange) => void>();
 	private clock = 1_700_000_000_000;
 
@@ -274,6 +276,10 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 
 	getActiveContext(): ActiveContext {
 		return this.active;
+	}
+
+	getInsertTarget(): Promise<InsertTarget | null> {
+		return Promise.resolve(this.insertTarget);
 	}
 
 	// StoreBackend

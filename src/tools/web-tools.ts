@@ -1,4 +1,5 @@
 import type { AgentTool, ToolResult } from '../agent/tools';
+import { attr, defuse } from '../agent/delimiters';
 import type { Source, WebSource } from '../agent/sources';
 import { HttpClient } from '../providers/http';
 import { fetchPageText, PageFetchError } from '../web/pages';
@@ -191,15 +192,6 @@ function webSource(n: number, url: string, title: string): WebSource {
 
 function fail(content: string): ToolResult {
 	return { content, isError: true };
-}
-
-/** Web text must not be able to close or open a delimiter of its own. */
-function defuse(text: string): string {
-	return text.replace(/<<</g, '‹‹‹').replace(/>>>/g, '›››');
-}
-
-function attr(text: string): string {
-	return defuse(text).replace(/"/g, '\'').replace(/[\r\n]+/g, ' ');
 }
 
 /** One past the highest [web N] any tool result in `sources` showed; results are numbered across a conversation. */

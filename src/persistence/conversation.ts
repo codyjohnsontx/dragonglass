@@ -1,4 +1,5 @@
 import { ToolCall, Usage } from '../providers/types';
+import type { DraftRecord } from '../agent/drafting';
 import type { Source } from '../agent/sources';
 import { ChangeProposal, PROPOSAL_KINDS } from '../vault/proposals';
 
@@ -36,6 +37,12 @@ export interface StoredMessage {
 	 * is not part of the turn's batch review.
 	 */
 	researchProposalId?: string;
+	/**
+	 * On a reply that drafted scene text: the draft, its thread and the insert
+	 * proposals made from it. A draft message is shown as a draft card, not a
+	 * plain reply; `content` still holds the whole reply for the model.
+	 */
+	draft?: DraftRecord;
 	/**
 	 * What the message showed the model, for the answer's sources list: for a
 	 * tool result the notes and web pages it returned, for a user message the
@@ -162,7 +169,7 @@ export function sanitizeConversation(raw: unknown): Conversation | null {
 	if (!raw || typeof raw !== 'object') return null;
 	const c = raw as Record<string, unknown>;
 	if (typeof c['id'] !== 'string' || !Array.isArray(c['messages'])) return null;
-	const messages = (c['messages'] as unknown[]).filter(isStoredMessage);
+	const messages = (c['messages'] as unknown[]).filter(isStoredMessage).map(sanitizeDraft);
 	const proposalsRaw = c['proposals'];
 	const proposals: Record<string, ChangeProposal> = {};
 	if (proposalsRaw && typeof proposalsRaw === 'object') {
@@ -188,6 +195,17 @@ function isStoredMessage(v: unknown): v is StoredMessage {
 		(m['role'] === 'user' || m['role'] === 'assistant' || m['role'] === 'tool') &&
 		typeof m['content'] === 'string'
 	);
+}
+
+/** Drop a malformed draft record; the message then renders as a plain reply. */
+function sanitizeDraft(m: StoredMessage): StoredMessage {
+	const d = m.draft as unknown;
+	if (d === undefined) return m;
+	if (!d || typeof d !== 'object') return { ...m, draft: undefined };
+	const r = d as Record<string, unknown>;
+	if (typeof r['thread'] !== 'string' || typeof r['text'] !== 'string') return { ...m, draft: undefined };
+	const inserts = Array.isArray(r['inserts']) ? r['inserts'].filter((id): id is string => typeof id === 'string') : undefined;
+	return { ...m, draft: { thread: r['thread'], text: r['text'], ...(inserts?.length ? { inserts } : {}) } };
 }
 
 function isProposal(v: unknown): v is ChangeProposal {

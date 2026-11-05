@@ -17,7 +17,9 @@ const vault = resolve(workdir, 'vault');
 const userData = resolve(workdir, 'userdata');
 const pluginDir = resolve(vault, '.obsidian', 'plugins', 'dragonglass-ai');
 
-for (const d of [vault, userData, pluginDir, resolve(vault, 'Projects')]) mkdirSync(d, { recursive: true });
+for (const d of [vault, userData, pluginDir, resolve(vault, 'Projects'), resolve(vault, 'Characters'), resolve(vault, 'Places'), resolve(vault, 'Script')]) {
+	mkdirSync(d, { recursive: true });
+}
 
 if (!existsSync('main.js')) {
 	console.error('main.js not found; run `npm run build` first');
@@ -50,6 +52,18 @@ writeFileSync(
 );
 writeFileSync(resolve(vault, 'Projects', 'Milestones.md'), '# Milestones\n\n- Beta: October 20\n- Launch: see [[Launch]]\n');
 writeFileSync(resolve(vault, 'Welcome.md'), '# Welcome\n\nThis is a disposable test vault for Dragonglass AI.\n');
+
+// Lore and a script note for the drafting check (fake server scripts `draft` and `revise`).
+writeFileSync(
+	resolve(vault, 'Characters', 'Kael.md'),
+	'# Kael\n\nExiled captain of the Ember Guard. Gruff, loyal to his soldiers, distrusts the Council. Grew up in [[Ashfall]].\n',
+);
+writeFileSync(resolve(vault, 'Characters', 'Mira.md'), '# Mira\n\nLeads the scouts. Reports to the Council but trusts [[Kael]] more than she should.\n');
+writeFileSync(resolve(vault, 'Places', 'Ashfall.md'), '# Ashfall\n\nA mining city under a volcano; ash falls year round. The watchtower overlooks the old gates.\n');
+writeFileSync(
+	resolve(vault, 'Script', 'Scene 12.md'),
+	'INT. EMBER GUARD BARRACKS - DAWN\n\nKAEL sharpens a blade that does not need it.\n\nKAEL\nAgain.\n\nThe recruits groan.\n\n',
+);
 
 const vaultId = 'e2e0000000000001';
 writeFileSync(

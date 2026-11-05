@@ -171,8 +171,28 @@ export class ProposalEngine {
 		const before = await this.vault.readNote(path);
 		if (before === null) throw new ProposalError(`No note found at ${path}.`);
 		const after = applyOperations(before, ops);
-		if (after === before) throw new ProposalError('The proposed edit makes no changes.');
 		rejectNewPlaceholders(before, after);
+		return this.edit(conversationId, path, before, after, summary);
+	}
+
+	/**
+	 * Propose the whole new content of a note, as the draft insert does from
+	 * the editor's text. With `expectedBefore`, the note must still hold that
+	 * text: an editor whose edits are not saved yet differs from the vault,
+	 * and a proposal built on the editor would be stale the moment it is made.
+	 */
+	async proposeRewrite(conversationId: string, rawPath: string, after: string, summary: string, expectedBefore?: string): Promise<ChangeProposal> {
+		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
+		const before = await this.vault.readNote(path);
+		if (before === null) throw new ProposalError(`No note found at ${path}.`);
+		if (expectedBefore !== undefined && before !== expectedBefore) {
+			throw new ProposalError(`${path} has edits that are not saved yet. Wait a moment and try again.`);
+		}
+		return this.edit(conversationId, path, before, after, summary);
+	}
+
+	private async edit(conversationId: string, path: string, before: string, after: string, summary: string): Promise<ChangeProposal> {
+		if (after === before) throw new ProposalError('The proposed edit makes no changes.');
 		return {
 			id: this.newId(),
 			conversationId,

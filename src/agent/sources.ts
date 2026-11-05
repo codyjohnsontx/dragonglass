@@ -1,4 +1,5 @@
 import type { StoredMessage } from '../persistence/conversation';
+import { baseName } from '../vault/paths';
 import { ChangeProposal, touchedPaths } from '../vault/proposals';
 
 /**
@@ -13,7 +14,9 @@ import { ChangeProposal, touchedPaths } from '../vault/proposals';
  * note the record does not show as read is left unflagged, since the
  * unrecorded turn may have shown it. A link to a note the same turn proposed
  * changing, at either path of a move, names the change, not a source, and is
- * not listed.
+ * not listed. A draft that cites no note lists instead the notes the turn's
+ * tools showed the model, so the notes that shaped a scene are shown
+ * whether or not the model named them.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
@@ -65,8 +68,10 @@ export interface WebEntry {
 }
 
 export interface AnswerSources {
-	/** Cited notes in citation order. */
+	/** Cited notes in citation order; for a draft that cites none, the notes the turn's tools showed (see `draftRead`). */
 	vault: VaultEntry[];
+	/** The draft cited no note, so `vault` lists what the turn's tools showed the model instead. */
+	draftRead?: true;
 	/** Cited web pages in number order. */
 	web: WebEntry[];
 	/** Web sources shown so far in the conversation, for turning [web N] markers into links. */
@@ -154,6 +159,9 @@ export function sanitizeSources(raw: unknown): Source[] {
  * A turn whose user message has no sources record predates source markers
  * and gets no list; after one, a cited note the record does not show as read
  * is unchecked rather than unread, since the unrecorded turn may have shown it.
+ * A turn that ends in a draft citing no note lists the notes this turn's tool
+ * results showed, in the order shown, minus notes the turn proposed changing,
+ * each with the status the same rules give a cited note.
  */
 export function answerSources(
 	messages: StoredMessage[],
@@ -169,6 +177,7 @@ export function answerSources(
 	let i = 0;
 	while (i < messages.length) {
 		const turnContext = new Map<string, 'full' | 'excerpt'>();
+		const turnTools = new Set<string>();
 		const proposed = new Set<string>();
 		const assistants: StoredMessage[] = [];
 		const user = messages[i]?.role === 'user' ? messages[i]! : null;
@@ -189,6 +198,7 @@ export function answerSources(
 			for (const s of sanitizeSources(m.sources)) {
 				if (s.kind === 'vault') {
 					if (s.seen === 'full' || !seenEver.has(s.path)) seenEver.set(s.path, s.seen);
+					turnTools.add(s.path);
 				} else {
 					const at = webEver.findIndex((w) => w.n === s.n);
 					if (at >= 0) webEver[at] = s;
@@ -200,12 +210,23 @@ export function answerSources(
 		const web = [...webEver];
 		for (const a of assistants) webByMessage.set(a.id, web);
 		if (!turnRecorded) continue;
-		const seen = (path: string) => {
+		const status = (path: string): VaultCitationStatus => {
 			const sent = turnContext.get(path);
 			const shown = seenEver.get(path);
-			return sent === 'full' || shown === 'full' ? 'full' : (sent ?? shown);
+			if (sent === 'full' || shown === 'full') return 'read';
+			if (!historyRecorded) return 'unchecked';
+			return sent || shown ? 'excerpt' : 'unread';
 		};
-		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, historyRecorded, proposed, web, resolve);
+		const list = buildList(assistants.map((a) => a.content).join('\n\n'), status, proposed, web, resolve);
+		if (list.vault.length === 0 && assistants.some((a) => a.draft)) {
+			for (const shown of turnTools) {
+				if (proposed.has(shown)) continue;
+				const path = resolve(shown);
+				if (path === null) list.vault.push({ link: shown.replace(/\.md$/i, ''), path, status: 'missing' });
+				else list.vault.push({ link: baseName(shown), path, status: status(path) });
+			}
+			if (list.vault.length > 0) list.draftRead = true;
+		}
 		if (list.vault.length > 0 || list.web.length > 0) lists.set(assistants[assistants.length - 1]!.id, list);
 	}
 	return { lists, web: webByMessage };
@@ -213,8 +234,7 @@ export function answerSources(
 
 function buildList(
 	answer: string,
-	seen: (path: string) => 'full' | 'excerpt' | undefined,
-	historyRecorded: boolean,
+	status: (path: string) => VaultCitationStatus,
 	proposed: Set<string>,
 	web: WebSource[],
 	resolve: LinkResolver,
@@ -227,10 +247,7 @@ function buildList(
 		if (isProposed(link, path, proposed)) continue;
 		if (path !== null && citedPaths.has(path)) continue;
 		if (path !== null) citedPaths.add(path);
-		const shown = path === null ? undefined : seen(path);
-		const status: VaultCitationStatus =
-			path === null ? 'missing' : shown === 'full' ? 'read' : !historyRecorded ? 'unchecked' : shown === 'excerpt' ? 'excerpt' : 'unread';
-		vault.push({ link, path, status });
+		vault.push({ link, path, status: path === null ? 'missing' : status(path) });
 	}
 	const byNumber = new Map(web.map((w) => [w.n, w]));
 	const webEntries = [...cited.web].sort((a, b) => a - b).map((n) => ({ n, source: byNumber.get(n) ?? null }));

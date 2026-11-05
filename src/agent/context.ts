@@ -1,5 +1,6 @@
 import { ChatMessage, estimateTokens } from '../providers/types';
 import { StoredMessage } from '../persistence/conversation';
+import { DraftingOptions, draftingRules } from './drafting';
 import { formatNote, truncateContent } from '../tools/vault-tools';
 import { baseName } from '../vault/paths';
 import { VaultPort } from '../vault/port';
@@ -27,6 +28,8 @@ export interface PromptOptions {
 	webSources?: boolean;
 	/** `available`: the web tools are sent; `needs-key`: they are not, because no Tavily key is set. Only with tools. */
 	webSearch?: 'available' | 'needs-key';
+	/** How to draft scene text and which format to match. Absent in tests of the other rules. */
+	drafting?: DraftingOptions;
 }
 
 /** What the system prompt says about the vault's shape. */
@@ -36,14 +39,18 @@ export interface VaultMap {
 	folders: string[];
 	/** The attached active note, if any. */
 	activeNotePath: string | null;
+	/** The script folder setting, normalized; empty when unset. Its notes are the screenplay, left out of search. */
+	scriptFolder?: string;
 }
 
 const MAX_MAP_FOLDERS = 15;
 
-export function vaultMap(vault: VaultPort, activeNotePath: string | null): VaultMap {
+export function vaultMap(vault: VaultPort, activeNotePath: string | null, scriptFolder = ''): VaultMap {
 	const root = vault.listFolder('');
 	const folders = (root?.children ?? []).filter((c) => vault.isFolder(c) && !c.startsWith('.')).sort((a, b) => a.localeCompare(b));
-	return { noteCount: vault.listMarkdownFiles().length, folders, activeNotePath };
+	const map: VaultMap = { noteCount: vault.listMarkdownFiles().length, folders, activeNotePath };
+	if (scriptFolder) map.scriptFolder = scriptFolder;
+	return map;
 }
 
 export function buildSystemPrompt(opts: PromptOptions): string {
@@ -76,6 +83,7 @@ export function buildSystemPrompt(opts: PromptOptions): string {
 	} else {
 		lines.push('- Vault tools are not available in this session; answer from the conversation and attached context only.');
 	}
+	if (opts.drafting) lines.push(...draftingRules(opts.drafting, opts.toolsEnabled));
 	return lines.join('\n');
 }
 
@@ -119,6 +127,7 @@ function describeVaultMap(map: VaultMap): string[] {
 	const more = map.folders.length > shown.length ? `, and ${map.folders.length - shown.length} more` : '';
 	const lines = [`Vault: ${notes}. Top-level folders: ${shown.length ? shown.join(', ') + more : 'none'}.`];
 	if (map.activeNotePath) lines.push(`Active note: ${map.activeNotePath} ([[${baseName(map.activeNotePath)}]]).`);
+	if (map.scriptFolder) lines.push(`Script folder: ${map.scriptFolder}/ holds the screenplay, not lore; search_notes and related_notes leave it out unless the folder or note you give them is in it.`);
 	return lines;
 }
 
