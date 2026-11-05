@@ -622,10 +622,13 @@ and selecting the rest met the same split; it cut the canon note too, newest
 entries first, so a change in the owner's words could fall out of what is meant
 to override the lore. So the script and the canon note get their caps first and
 the lore notes share the remainder, on the one allocation (`contextCaps`) behind
-both `formatContextBlock` and `shownChars`. A lore note left no room is not sent
-at all, because a note sent empty would still count as read and could back a
-flag or a clean result. If the canon note is still cut, the card says how much
-reached the model, as it does for the script.
+both `formatContextBlock` and `shownChars`. A note that would show a tenth of
+its text or less is not sent at all, least mentioned first, and its room goes to
+the rest: a sliver sent would still count as read and could back a flag or a
+clean result, and a few notes the model can use beat a dozen it cannot. If the
+canon note is still cut, the card says how much reached the model, as it does
+for the script. It also counts the notes cut or dropped, and a clean result over
+any cut text says "in what fit" rather than claiming the vault.
 
 The same runs show what a small local model does to a clean script: it flags
 something. Every run on the clean scene flagged at least one line, seven in all,
@@ -648,13 +651,20 @@ with a remark added, so a fix that still holds the whole line is dropped and the
 issue keeps only Intentional. Those figures replay the recorded replies through
 the final parser, since neither change alters what the model is sent.
 
-A fix for a quoted fragment is only used if it can be proved whole. Telling a
-fragment from a rewrite by comparing the fix's length with the line's garbled
-some lines and silently dropped text from others, whatever the thresholds. So
-text without words around the quote, such as a prose line's outer quotes, is
-added back, a fix that carries the line's words stands as the corrected line,
-and any other fix is dropped, leaving Intentional. That loses Fix it where a
-model answers a fragment with a fragment, which the rules do not ask for.
+Fix it replaces the whole line, so a fix is only used if it can be shown to be
+that line. Telling a fragment from a rewrite by comparing the fix's length with
+the line's garbled some lines and silently dropped text from others, whatever
+the thresholds, and adding back punctuation doubled it. So only the quote marks
+of a prose line are added back, because `unquote` took them off, and a fix that
+carries the rest of the line stands as the corrected line. Any other fix is
+dropped, leaving Intentional, as is one that leaves off the cue of a line written
+with one. That loses Fix it where a model answers a fragment with a fragment,
+which the rules do not ask for.
+
+A check's reply cites in its records, so the citation rules are not sent on a
+check, and the card's list is always what was sent and read. Models link anyway,
+so `[[links]]` are taken out of a record: one that ends a claim is a citation and
+goes, and any other leaves its text.
 
 How canon overrides: as data the model reads, and as a filter where a filter
 can be exact. The canon note goes with every send as its own context item,

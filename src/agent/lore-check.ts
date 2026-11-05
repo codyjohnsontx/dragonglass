@@ -61,6 +61,8 @@ export interface LoreCheckRecord {
 	shown?: { chars: number; of: number };
 	/** The sequel canon note did not fit: how much of it the model saw. */
 	canonShown?: { chars: number; of: number };
+	/** How many notes the script names went with it cut short, or not at all. */
+	loreCut?: number;
 }
 
 /** A record as the model wrote it, before it is checked. */
@@ -112,17 +114,22 @@ export function parseLoreBlock(content: string): RawIssue[] | null {
 	}
 	const out: RawIssue[] = [];
 	for (const r of records) {
-		const line = unquote(r.line ?? '');
-		const says = (r.vault ?? '').trim();
+		const line = unquote(withoutLinks(r.line ?? ''));
+		const says = withoutLinks(r.vault ?? '').trim();
 		const note = cleanLink(r.note ?? '');
 		// A record that names no note is the model saying the lore has nothing on it.
 		if (!line || !says || NO_FIX.test(note)) continue;
-		const fix = unquote(r.fix ?? '');
+		const fix = unquote(withoutLinks(r.fix ?? ''));
 		// The model listing a line it then says is fine has not flagged anything.
 		if (NOT_A_FLAG.test(fix)) continue;
 		out.push({ line, says, note, ...(NO_FIX.test(fix) ? {} : { fix }) });
 	}
 	return out;
+}
+
+/** A value without [[links]]: one that ends a claim is a citation and goes, and any other leaves its text. */
+function withoutLinks(text: string): string {
+	return text.replace(/(?:\s*\[\[[^\]\n]*\]\])+(?=[.,;:!?…]|\s*$)/g, '').replace(/\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]/g, '$1');
 }
 
 /** A value without the quotes or backticks a model wraps around it. */
@@ -138,8 +145,8 @@ function cleanLink(text: string): string {
 	return t.split('|')[0]!.split('#')[0]!.replace(/\.md$/i, '').trim();
 }
 
-/** A character cue a model put in front of the dialogue it quotes ("KAEL: Again."); in a Fountain script the cue is on the line above. */
-const INLINE_CUE = /^[A-Z][A-Z0-9 .'-]*(?: \([^)]*\))?:\s+/;
+/** A character cue leading a line: `KAEL: Again.`, as a model quotes Fountain dialogue or a script writes it, or the Markdown `**Kael:** Again.`. */
+const INLINE_CUE = /^(?:[A-Z][A-Z0-9 .'-]*(?: \([^)]*\))?:|\*\*[^*\n]+:\*\*)\s+/;
 /** Longest character cue `leadingCue` looks past. */
 const MAX_CUE = 40;
 
@@ -217,21 +224,23 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 }
 
 /**
- * The whole corrected line, or undefined when it cannot be told. A fix for
- * part of a line must carry the rest of the line. Only text without words,
- * such as the outer quotes of a prose line, is added back: where words are
- * missing, the fix may be a fragment or a rewrite of them, and guessing garbles
- * the line. A character name is dropped unless the line is written with one;
- * `cue` is what the quote had in front of the line's text, which the fix may
- * repeat.
+ * The whole corrected line, or undefined when that cannot be shown. Fix it
+ * replaces the whole script line, so a fix for part of a line must carry the
+ * rest of it, and a line written with a character cue must keep the cue. All
+ * that is added back is the quote marks of a prose line, which `unquote` took
+ * off the line and the fix alike. A character name on any other line is
+ * dropped; `cue` is what the quote had in front of the line's text, which the
+ * fix may repeat.
  */
 function correctedLine(match: LineMatch, fix: string, cue: string): string | undefined {
 	const uncued = cue && fix.toLowerCase().startsWith(cue.toLowerCase()) ? fix.slice(cue.length) : fix;
-	const body = INLINE_CUE.test(match.line) ? uncued : uncued.replace(INLINE_CUE, '');
+	const lineCue = INLINE_CUE.exec(match.line)?.[0] ?? '';
+	const body = lineCue ? uncued : uncued.replace(INLINE_CUE, '');
 	const plain = plainQuotes(body);
+	if (!plain.startsWith(plainQuotes(lineCue))) return undefined;
 	const head = plain.startsWith(plainQuotes(match.before)) ? '' : match.before;
 	const tail = plain.endsWith(plainQuotes(match.after)) ? '' : match.after;
-	return /[\p{L}\p{N}]/u.test(head + tail) ? undefined : `${head}${body}${tail}`;
+	return /[^"'“”‘’]/.test(head + tail) ? undefined : `${head}${body}${tail}`;
 }
 
 /**
@@ -346,7 +355,7 @@ export function loreCheckRules(scriptPath: string, toolsEnabled: boolean, canon:
 		'NOTE: the name of the lore note that says it',
 		'FIX: the whole line rewritten to agree with the lore, keeping its voice',
 		'```',
-		'- LINE is the one line that is wrong: for dialogue, the spoken line, without the character name above it. FIX has no character name either. List only lines that are wrong; a line that agrees with the lore is not listed at all.',
+		'- LINE is the one line that is wrong: for dialogue, the spoken line, without the character name above it. FIX has a character name only if LINE does. List only lines that are wrong; a line that agrees with the lore is not listed at all.',
 		'- With no contradictions, the block is empty. Never invent one; a clean script is a good result.',
 	];
 }

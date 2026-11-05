@@ -16,8 +16,9 @@ import { ChangeProposal, touchedPaths } from '../vault/proposals';
  * changing, at either path of a move, names the change, not a source, and is
  * not listed. A draft that cites no note lists instead the notes the turn's
  * tools showed the model, so the notes that shaped a scene are shown
- * whether or not the model named them, and a lore check does the same, so
- * what was checked against is shown too.
+ * whether or not the model named them. A lore check always lists what was
+ * sent and read, since what it was checked against is the point and a link in
+ * its records may be a flag that was left out.
  *
  * Tools report what they showed as `Source`s on their result; the chat view
  * calls `answerSources` on the stored conversation to build the lists.
@@ -69,9 +70,9 @@ export interface WebEntry {
 }
 
 export interface AnswerSources {
-	/** Cited notes in citation order; for a draft or lore check that cites none, the notes the turn's tools showed (see `readFor`). */
+	/** Cited notes in citation order; for a draft that cites none and for a lore check, the notes the turn showed (see `readFor`). */
 	vault: VaultEntry[];
-	/** A draft or lore check cited no note in its text, so `vault` lists what the turn's tools showed the model instead. */
+	/** `vault` lists what the turn showed the model instead of citations: a draft that cited none, or any lore check. */
 	readFor?: 'draft' | 'check';
 	/** Cited web pages in number order. */
 	web: WebEntry[];
@@ -221,9 +222,10 @@ export function answerSources(
 		};
 		const list = buildList(assistants.map((a) => a.content).join('\n\n'), status, proposed, web, resolve);
 		const readFor = assistants.some((a) => a.loreCheck) ? 'check' : assistants.some((a) => a.draft) ? 'draft' : null;
+		const check = assistants.find((a) => a.loreCheck)?.loreCheck;
+		if (check) list.vault = [];
 		if (list.vault.length === 0 && readFor) {
 			// A lore check is also sent the notes the script names; everything sent but the script itself counts.
-			const check = assistants.find((a) => a.loreCheck)?.loreCheck;
 			const read = check ? [...[...turnContext.keys()].filter((p) => p !== check.scriptPath), ...turnTools] : [...turnTools];
 			for (const shown of new Set(read)) {
 				if (proposed.has(shown)) continue;

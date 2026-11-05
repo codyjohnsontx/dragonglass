@@ -1,7 +1,7 @@
 import { TFile } from 'obsidian';
 import type { App, Plugin } from 'obsidian';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buildSystemPrompt, ContextItem, formatContextBlock, shownChars, userMessage } from '../src/agent/context';
+import { buildSystemPrompt, ContextItem, fitLoreNotes, formatContextBlock, shownChars, userMessage } from '../src/agent/context';
 import {
 	canonContext,
 	canonEntry,
@@ -27,11 +27,12 @@ import { DragonglassCore } from '../src/core';
 import { newConversation, sanitizeConversation, StoredMessage } from '../src/persistence/conversation';
 import { FetchHttpClient } from '../src/providers/http';
 import { OllamaProvider } from '../src/providers/ollama';
+import { estimateTokens } from '../src/providers/types';
 import type { ChatRequest, Provider, StreamEvent } from '../src/providers/types';
 import { VaultSearchIndex } from '../src/search/vault-index';
 import { DEFAULT_SETTINGS, mergeSettings } from '../src/settings';
 import { createVaultTools } from '../src/tools/vault-tools';
-import { liveProposal, loreNotes } from '../src/ui/lore-card';
+import { cleanMessage, liveProposal, loreNotes } from '../src/ui/lore-card';
 import { ChangeProposal, ProposalEngine, ProposalError } from '../src/vault/proposals';
 import { MemoryVaultPort } from './memory-vault';
 // @ts-expect-error plain JS module
@@ -62,6 +63,15 @@ describe('parseLoreBlock', () => {
 
 	it('takes the dialogue when the character cue was copied with it', () => {
 		expect(parseLoreBlock('```lore\nLINE: KAEL\nMy sister waits at the gate.\nVAULT: Only child.\nNOTE: Kael\n```')?.[0]?.line).toBe('My sister waits at the gate.');
+	});
+
+	it('takes the links a model cites with out of the line, the claim and the fix', () => {
+		const block = '```lore\nLINE: My sister waits at the gate. [[Kael]]\nVAULT: Kael is an only child [[Kael]], says [[Characters/Mira.md|Mira]] at dawn [[Oren]] [[Kael]].\nNOTE: [[Kael]]\nFIX: "My captain waits at the gate." [[Kael]]\n```';
+		expect(parseLoreBlock(block)).toEqual([{ line: 'My sister waits at the gate.', says: 'Kael is an only child, says Mira at dawn.', note: 'Kael', fix: 'My captain waits at the gate.' }]);
+	});
+
+	it('keeps the words of a link that does not end a claim', () => {
+		expect(parseLoreBlock('```lore\nLINE: a\nVAULT: [[Kael]] has no sister.\nNOTE: Kael\nFIX: [[Kael|He]] has a captain.\n```')).toEqual([{ line: 'a', says: 'Kael has no sister.', note: 'Kael', fix: 'He has a captain.' }]);
 	});
 
 	it('keeps a flag with no suggested line, and drops a record without a line, a claim or a note', () => {
@@ -142,6 +152,10 @@ describe('groundLoreCheck', () => {
 		['a rewrite of the text after the quote', 'You were born in Frosthaven, Kael. Nobody here forgets it.', 'You were born in Frosthaven, Kael.', 'You were born in Ashfall, Kael. Nobody here doubts it.'],
 		['a rewrite of the text before the quote', 'I swear it, my sister waits.', 'my sister waits.', 'I swore it, my captain waits.'],
 		['a fix that keeps only one side', 'My sister waits at the gate.', 'waits at', 'My sister stands at'],
+		['end punctuation the quote left off, inside quote marks', '"My sister waits at the gate."', 'My sister waits at the gate', 'My captain waits at the gate.'],
+		['other end punctuation than the line has', 'My sister waits at the gate.', 'My sister waits at the gate', 'My captain waits at the gate!'],
+		['a line whose cue the fix leaves off', 'KAEL: My sister waits at the gate.', 'KAEL: My sister waits at the gate.', 'My captain waits at the gate.'],
+		['a line whose bold cue the fix leaves off', '**Kael:** My sister waits at the gate.', '**Kael:** My sister waits at the gate.', 'My captain waits at the gate.'],
 	])('keeps the issue but offers no fix for %s, which does not carry the rest of the line', (_, scope, line, fix) => {
 		const { issues } = groundLoreCheck([flag({ line, fix })], ground({ scope }));
 		expect(issues).toHaveLength(1);
@@ -189,10 +203,10 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck([flag({ fix: 'KAEL: My captain waits at the gate.' })], ground()).issues[0]?.fix).toBe('My captain waits at the gate.');
 	});
 
-	it('keeps a character cue in the fix of a line written with one', () => {
-		const scope = 'KAEL: My sister waits at the gate.\n';
-		const { issues } = groundLoreCheck([flag({ line: 'KAEL: My sister waits at the gate.', fix: 'KAEL: My captain waits at the gate.' })], ground({ scope }));
-		expect(issues[0]).toMatchObject({ line: 'KAEL: My sister waits at the gate.', fix: 'KAEL: My captain waits at the gate.' });
+	it.each(['KAEL: ', '**Kael:** '])('keeps the cue in the fix of a line written with %s', (lineCue) => {
+		const line = `${lineCue}My sister waits at the gate.`;
+		const fix = `${lineCue}My captain waits at the gate.`;
+		expect(groundLoreCheck([flag({ line, fix })], ground({ scope: `${line}\n` })).issues[0]).toMatchObject({ line, fix });
 	});
 
 	it('takes a lower-case cue left alone on the LINE row, through to the line', () => {
@@ -439,6 +453,27 @@ describe('the canon note in a send', () => {
 		}
 	});
 
+	it('on a check, drops the least mentioned lore notes until the rest show a real share of their text', () => {
+		const script = { ...active, content: 's'.repeat(4_000) };
+		const lore: ContextItem[] = Array.from({ length: 12 }, (_, i) => ({ kind: 'lore', label: `L${i}`, path: `L${i}.md`, content: 'l'.repeat(12_000) }));
+		const kept = fitLoreNotes([script, ...lore], 20_000, 2_000);
+		expect(kept.length).toBeGreaterThan(1);
+		expect(kept.length).toBeLessThan(13);
+		expect(kept).toEqual([script, ...lore.slice(0, kept.length - 1)]);
+		for (const chars of shownChars(kept, 20_000, 2_000).slice(1)) expect(chars).toBeGreaterThan(1_200);
+	});
+
+	it('keeps a lore note that fits whatever comes before it, and a long note only the character cap cuts', () => {
+		const long: ContextItem = { kind: 'lore', label: 'L', path: 'L.md', content: 'l'.repeat(300_000) };
+		const short: ContextItem = { kind: 'lore', label: 'S', path: 'S.md', content: 'short' };
+		expect(fitLoreNotes([active, long, short], 20_000)).toEqual([active, long, short]);
+	});
+
+	it('leaves other sends alone', () => {
+		const attached: ContextItem = { kind: 'attachment', label: 'A', path: 'A.md', content: 'a'.repeat(9_000) };
+		expect(fitLoreNotes([active, attached], 20_000, 10)).toEqual([active, attached]);
+	});
+
 	it('counts as read for citations, and adds no chip to the user message', () => {
 		const m = userMessage('u', 'hi', [active, { kind: 'canon', label: 'Sequel canon', path: CANON, content: 'x' }], 0);
 		expect(m.sources).toContainEqual({ kind: 'vault', path: CANON, seen: 'full' });
@@ -461,7 +496,8 @@ describe('the canon note in a send', () => {
 		expect(prompt).toMatch(/agrees with it is not a contradiction/);
 		expect(prompt).toContain('[[Scene]]');
 		expect(prompt).not.toContain('```draft');
-		expect(prompt).toMatch(/FIX has no character name/);
+		expect(prompt).toMatch(/FIX has a character name only if LINE does/);
+		expect(prompt).not.toContain('Cite sources');
 		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, loreCheck: 'Script/Scene.md' })).not.toContain('canon');
 	});
 });
@@ -487,7 +523,20 @@ describe('the issue list', () => {
 		expect(loreNotes({ scriptPath: 's', issues: [ISSUE], leftOut: 2 })[0]).toMatch(/^2 more flags were/);
 		expect(loreNotes({ scriptPath: 's', issues: [], shown: { chars: 250, of: 1000 } })).toEqual(["Only the first 25% fit in the model's context. Select the rest to check it."]);
 		expect(loreNotes({ scriptPath: 's', issues: [], canonShown: { chars: 250, of: 1000 } })).toEqual(["Only the first 25% of the sequel canon note fit in the model's context, so a change further down can still be flagged."]);
+		expect(loreNotes({ scriptPath: 's', issues: [], loreCut: 1 })).toEqual(["1 note the script names did not fit in the model's context in full, so a contradiction with it can be missed."]);
+		expect(loreNotes({ scriptPath: 's', issues: [], loreCut: 3 })[0]).toMatch(/^3 notes .* with them can be missed/);
 		expect(loreNotes({ scriptPath: 's', issues: [], readNoLore: true })[0]).toMatch(/read no lore notes/);
+	});
+
+	it('claims a clean check only over what the model saw', () => {
+		const check = { scriptPath: 's', issues: [] };
+		expect(cleanMessage(check)).toBe('No contradictions with the vault.');
+		for (const cut of [{ loreCut: 2 }, { shown: { chars: 1, of: 2 } }, { canonShown: { chars: 1, of: 2 } }]) {
+			expect(cleanMessage({ ...check, ...cut })).toBe("No contradictions in what fit in the model's context.");
+		}
+		expect(cleanMessage({ ...check, leftOut: 1, loreCut: 2 })).toBe('No contradictions that could be verified.');
+		expect(cleanMessage({ ...check, readNoLore: true })).toBeNull();
+		expect(cleanMessage({ ...check, issues: [ISSUE], loreCut: 2 })).toBeNull();
 	});
 });
 
@@ -495,7 +544,7 @@ describe('stored lore checks', () => {
 	const conv = (loreCheck: unknown) => ({ id: 'c', messages: [{ id: 'm', role: 'assistant', content: 'x', loreCheck }] });
 
 	it('survive a reload, proposal ids included', () => {
-		const check = { scriptPath: 's.md', issues: [{ ...ISSUE, proposalId: 'p' }], leftOut: 1, readNoLore: true, shown: { chars: 1, of: 2 }, canonShown: { chars: 3, of: 4 } };
+		const check = { scriptPath: 's.md', issues: [{ ...ISSUE, proposalId: 'p' }], leftOut: 1, readNoLore: true, shown: { chars: 1, of: 2 }, canonShown: { chars: 3, of: 4 }, loreCut: 2 };
 		expect(sanitizeConversation(conv(check))?.messages[0]?.loreCheck).toEqual(check);
 	});
 
@@ -508,6 +557,19 @@ describe('stored lore checks', () => {
 });
 
 describe('the sources list of a lore check', () => {
+	it('lists what the turn read and was sent even when the reply links a note, and not a link to a flag left out', () => {
+		const content = 'Two lines disagree with [[Kael]] and [[Ghost]].\n\n```lore\nLINE: a\nVAULT: b\nNOTE: [[Kael]]\n\nLINE: c\nVAULT: d\nNOTE: [[Ghost]]\n```';
+		const messages: StoredMessage[] = [
+			{ id: 'u', role: 'user', content: 'check', createdAt: 0, sources: [{ kind: 'vault', path: 'Script/Scene.md', seen: 'full' }, { kind: 'vault', path: 'Characters/Mira.md', seen: 'full' }, { kind: 'vault', path: 'Characters/Kael.md', seen: 'full' }] },
+			{ id: 'a1', role: 'assistant', content: '', createdAt: 0, toolCalls: [{ id: 'c', name: 'read_note', argumentsJson: '{}' }] },
+			{ id: 't', role: 'tool', content: '', createdAt: 0, toolCallId: 'c', sources: [{ kind: 'vault', path: 'Characters/Oren.md', seen: 'full' }] },
+			{ id: 'a2', role: 'assistant', content, createdAt: 0, loreCheck: { scriptPath: 'Script/Scene.md', issues: [] } },
+		];
+		const list = answerSources(messages, {}, (link) => (link === 'Ghost' ? null : link)).lists.get('a2');
+		expect(list?.readFor).toBe('check');
+		expect(list?.vault.map((v) => v.link)).toEqual(['Mira', 'Kael', 'Oren']);
+	});
+
 	it('lists what the turn read and was sent, under its own heading, not the script', () => {
 		const messages: StoredMessage[] = [
 			{ id: 'u', role: 'user', content: 'check', createdAt: 0, sources: [{ kind: 'vault', path: 'Script/Scene.md', seen: 'full' }, { kind: 'vault', path: 'Characters/Mira.md', seen: 'full' }] },
@@ -601,7 +663,7 @@ describe('a send through core', () => {
 		const files = { 'Script/Scene 13.md': scene, ...Object.fromEntries(names.map((n) => [`${n}.md`, 'lore '.repeat(6_000)])) };
 		const { core, conv, requests } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')], 16_384);
 		await core.checkLore(conv, await core.loreScript(), check);
-		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [] });
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [], loreCut: 12 });
 		expect(requests[0]?.messages[1]?.content).toContain(scene);
 		expect(requests[0]?.messages[1]?.content).toContain('<<<note path="Name0.md">>>');
 	});
@@ -624,7 +686,25 @@ describe('a send through core', () => {
 		await core.checkLore(conv, await core.loreScript(), check);
 		expect(requests[0]?.messages[1]?.content).not.toContain('Kael.md');
 		expect(conv.messages[0]?.sources).toEqual([{ kind: 'vault', path: 'Script/Scene 13.md', seen: 'full' }]);
-		expect(conv.messages.at(-1)?.loreCheck).toMatchObject({ issues: [], readNoLore: true });
+		expect(conv.messages.at(-1)?.loreCheck).toMatchObject({ issues: [], readNoLore: true, loreCut: 1 });
+	});
+
+	it('does not let a sliver of a lore note back a flag or a clean result', async () => {
+		const scene = `She waits.\nKael kneels.\n${'word '.repeat(800)}`;
+		const files = { 'Script/Scene 13.md': scene, 'Kael.md': 'lore '.repeat(2_000) };
+		const room = 40;
+		const { core, conv, requests } = setup(files, 'Script/Scene 13.md', [say('```lore\nLINE: She waits.\nVAULT: She left.\nNOTE: Kael\n```')], 2 * (estimateTokens(scene) + room));
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(requests[0]?.messages[1]?.content).not.toContain('<<<note path="Kael.md">>>');
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [], leftOut: 1, readNoLore: true, loreCut: 1 });
+	});
+
+	it('does not count a note the script names that went whole as cut', async () => {
+		const files = { 'Script/Scene 13.md': 'Kael waits.', 'Kael.md': 'Only child.', 'Mira.md': 'Unnamed.' };
+		const { core, conv, requests } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')], 16_384);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(requests[0]?.messages[1]?.content).toContain('Only child.');
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [] });
 	});
 
 	it('counts a lore note it read, and reports a clean result', async () => {

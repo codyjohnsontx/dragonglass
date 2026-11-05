@@ -310,8 +310,9 @@ script: it is what is open. The note or selection goes as the turn's context,
 and `loreForScript` adds the notes it names, by note name or alias as whole
 words in any case, most mentioned first, up to 12, leaving out the script,
 script pages and the canon note. They share what the script and the canon note
-leave of the context's note budget, one left no room is not sent (so it does not
-count as read), and the model still has the read tools for anything else. It has no write or web
+leave of the context's note budget. `fitLoreNotes` drops the least mentioned
+until each shows more than a tenth of its text, so a dropped note is not sent and
+does not count as read, and the model still has the read tools for anything else. It has no write or web
 tools, and `loreCheckRules` replaces the drafting rules for the turn.
 
 The model answers with one fenced block opened with ```` ```lore ````, one
@@ -322,11 +323,11 @@ what can be verified: the line must be in the text checked, and the note must
 exist, must not be the script or a script page, and must have been shown to
 the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.
 A quoted fragment widens to its whole line, or is left out when it fits several.
-A fix for a fragment must carry the rest of the line. Only text without words,
-such as a prose line's outer quotes, is added back; a fix missing any of the
-line's words is dropped, since it could be a fragment or a rewrite. A character
-name in a fix is dropped unless the line is written with one. A character
-cue is dropped from a dialogue quote: `KAEL:` anywhere, and words with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
+Fix it replaces the whole line, so a fix for a fragment must carry the rest of
+it. Only a prose line's quote marks are added back; a fix missing anything else
+of the line is dropped, as is one that leaves off the cue of a line written with
+one, plain or bold. A character name in a fix for any other line is removed. A
+character cue is dropped from a dialogue quote: `KAEL:` anywhere, and words with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
 canon note quotes is dropped without a count, as is a repeat on the same line.
 A fix that still holds the whole line corrects nothing and is dropped, which
 leaves the issue with Intentional only.
@@ -338,8 +339,11 @@ then each issue as its line, what the vault says with the note linked, and
 Fix it and Intentional. Below the list go only the limits of the check: flags
 left out, how much of a script too long for the context was shown (selecting
 the rest checks it), how much of a canon note too long for it was shown
-(`canonShown`), and that no lore note was read, when that is so, in
-place of "no contradictions". The sources list under it, headed "Read for this
+(`canonShown`), how many notes the script names were cut or dropped (`loreCut`),
+and that no lore note was read, when that is so, in
+place of "no contradictions". A clean result over cut text says so instead of
+claiming the vault (`cleanMessage`). The model's `[[links]]` are taken out of a
+record's text. The sources list under it, headed "Read for this
 check", is everything sent or read but the script.
 
 **Fix it** (`proposeLoreFix`) replaces that line in the note as it is now

@@ -233,6 +233,7 @@ function sanitizeLoreCheck(m: StoredMessage): StoredMessage {
 			...(typeof r['leftOut'] === 'number' ? { leftOut: r['leftOut'] } : {}),
 			...(shown ? { shown } : {}),
 			...(canonShown ? { canonShown } : {}),
+			...(typeof r['loreCut'] === 'number' ? { loreCut: r['loreCut'] } : {}),
 		},
 	};
 }

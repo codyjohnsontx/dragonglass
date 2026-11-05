@@ -36,7 +36,8 @@ export function renderLoreCard(container: HTMLElement, opts: LoreCardOptions): v
 	header.createSpan({ text: 'Lore check' });
 	if (count > 0) header.createSpan({ cls: 'dg-lore-count', text: count === 1 ? '1 issue' : `${count} issues` });
 
-	if (count === 0 && !check.readNoLore) container.createDiv({ cls: 'dg-lore-clean', text: check.leftOut ? 'No contradictions that could be verified.' : 'No contradictions with the vault.' });
+	const clean = cleanMessage(check);
+	if (clean) container.createDiv({ cls: 'dg-lore-clean', text: clean });
 	if (count > 0) {
 		const list = container.createEl('ul', { cls: 'dg-lore-issues' });
 		for (const issue of check.issues) renderIssue(list, issue, opts);
@@ -78,12 +79,21 @@ export function liveProposal(issue: LoreIssue, proposals: Readonly<Record<string
 	return p && (p.status === 'pending' || p.status === 'stale' || p.status === 'applied') ? p : null;
 }
 
+/** The line a check with nothing to list shows, claiming only what it covered; null with issues, or when nothing was checked. */
+export function cleanMessage(check: LoreCheckRecord): string | null {
+	if (check.issues.length > 0 || check.readNoLore) return null;
+	if (check.leftOut) return 'No contradictions that could be verified.';
+	return check.shown || check.canonShown || check.loreCut ? "No contradictions in what fit in the model's context." : 'No contradictions with the vault.';
+}
+
 /** What the reader should know about how far a check went. */
 export function loreNotes(check: LoreCheckRecord): string[] {
 	const notes: string[] = [];
 	if (check.readNoLore) notes.push('The model read no lore notes, so nothing was checked. Run the check again.');
 	if (check.shown) notes.push(`Only the first ${percentShown(check.shown)}% fit in the model's context. Select the rest to check it.`);
 	if (check.canonShown) notes.push(`Only the first ${percentShown(check.canonShown)}% of the sequel canon note fit in the model's context, so a change further down can still be flagged.`);
+	const cut = check.loreCut ?? 0;
+	if (cut > 0) notes.push(`${cut} ${cut === 1 ? 'note' : 'notes'} the script names did not fit in the model's context in full, so a contradiction with ${cut === 1 ? 'it' : 'them'} can be missed.`);
 	const left = check.leftOut ?? 0;
 	if (left > 0) notes.push(`${left}${check.issues.length > 0 ? ' more' : ''} ${left === 1 ? 'flag was' : 'flags were'} left out: the line or the note cited could not be verified.`);
 	return notes;

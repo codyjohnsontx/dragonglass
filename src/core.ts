@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, shownChars, toProviderMessages, userMessage, vaultMap, withoutLoreLeftNoRoom } from './agent/context';
+import { autoReadBudget, buildSystemPrompt, ContextItem, fitLoreNotes, formatContextBlock, noteTokenBudget, shownChars, toProviderMessages, userMessage, vaultMap } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -186,7 +186,7 @@ export class DragonglassCore {
 		const noteTokens = noteTokenBudget(contextWindow);
 		const canon = await canonContext(this.vault, this.canonNote());
 		const loreNotes = lore ? await loreForScript(this.vault, opts.context[0]?.content.slice(0, this.settings.maxCharsPerNote) ?? '', { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder(), canonPath: this.canonNote() }) : [];
-		const context = withoutLoreLeftNoRoom([...opts.context, ...loreNotes, ...(canon ? [canon] : [])], this.settings.maxCharsPerNote, noteTokens);
+		const context = fitLoreNotes([...opts.context, ...loreNotes, ...(canon ? [canon] : [])], this.settings.maxCharsPerNote, noteTokens);
 		const userMsg = userMessage(newId(), opts.text, context, Date.now());
 		if (conv.messages.length === 0) conv.title = deriveTitle(opts.text);
 		conv.messages.push(userMsg);
@@ -239,7 +239,7 @@ export class DragonglassCore {
 						const draft = parseDraft(ev.content);
 						if (draft) current.draft = { thread: threadForDraft(conv.messages, draft.fresh, newId), text: draft.text };
 						const issues = lore && ev.toolCalls.length === 0 ? parseLoreBlock(ev.content) : null;
-						if (lore && issues) current.loreCheck = this.loreResult(conv, userMsg.id, lore, context, canon, issues, noteTokens);
+						if (lore && issues) current.loreCheck = this.loreResult(conv, userMsg.id, lore, context, canon, loreNotes.length, issues, noteTokens);
 					}
 					this.store.touch(conv);
 					break;
@@ -295,13 +295,14 @@ export class DragonglassCore {
 	}
 
 	/** Check a lore check reply against the script and what the turn showed the model. */
-	private loreResult(conv: Conversation, userId: string, lore: NonNullable<SendOptions['loreCheck']>, context: ContextItem[], canon: ContextItem | null, raw: RawIssue[], noteTokens: number | undefined): LoreCheckRecord {
+	private loreResult(conv: Conversation, userId: string, lore: NonNullable<SendOptions['loreCheck']>, context: ContextItem[], canon: ContextItem | null, named: number, raw: RawIssue[], noteTokens: number | undefined): LoreCheckRecord {
 		const [script] = context;
 		const shown = shownPaths(conv.messages, userId);
 		const sent = shownChars(context, this.settings.maxCharsPerNote, noteTokens);
 		const chars = sent[0] ?? 0;
 		const total = script?.content.length ?? 0;
 		const canonChars = canon ? (sent[context.indexOf(canon)] ?? 0) : 0;
+		const loreCut = named - context.filter((item, i) => item.kind === 'lore' && sent[i] === item.content.length).length;
 		const notes = { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder() };
 		const grounded = groundLoreCheck(raw, {
 			...notes,
@@ -318,6 +319,7 @@ export class DragonglassCore {
 			...(readLore ? {} : { readNoLore: true as const }),
 			...(chars < total ? { shown: { chars, of: total } } : {}),
 			...(canon && canonChars < canon.content.length ? { canonShown: { chars: canonChars, of: canon.content.length } } : {}),
+			...(loreCut > 0 ? { loreCut } : {}),
 		};
 	}
 
