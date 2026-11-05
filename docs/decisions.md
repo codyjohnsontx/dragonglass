@@ -550,7 +550,11 @@ save already under way (the blur from the click starts one) to reach the
 vault, builds the whole new note
 text and goes through `ProposalEngine.proposeRewrite`, which refuses when
 the vault still differs from the editor and otherwise hashes the note like
-any edit; apply re-checks the hash inside `Vault.process`. The proposal
+any edit; apply re-checks the hash inside `Vault.process`. It does not refuse
+placeholder text as the write tools do: that guard stops a model proposing
+before it has the content, while Insert is the user's click on a draft they
+have read, and a beat such as `[Insert song lyrics]` may be what they want,
+so the diff review is the check. The proposal
 hangs off the draft version rather than a tool message, so it is not part
 of the turn's batch review and is not replayed to the model, which was told
 not to propose script edits itself. The draft goes in on lines of its own

@@ -453,6 +453,18 @@ describe('insert proposal', () => {
 		expect(noFolder.summary).toBe('Replace the selected text in Ideas with the draft.');
 	});
 
+	it('inserts a draft with bracketed fill-in text through the review, which a model edit may not add', async () => {
+		const vault = new MemoryVaultPort({ 'Script/Scene 12.md': 'KAEL\nAgain.\n' });
+		const e = engine(vault);
+		const draft = 'MIRA (singing)\n[Insert song lyrics]\n\n[TODO: better line]';
+		const p = await proposeDraftInsert(e, 'c1', { path: 'Script/Scene 12.md', content: 'KAEL\nAgain.\n', from: 12, to: 12 }, draft, 'Script');
+		expect(p).toMatchObject({ kind: 'edit', status: 'pending' });
+		expect(p.after).toBe(`KAEL\nAgain.\n\n${draft}\n`);
+		await e.apply(p);
+		expect(vault.files.get('Script/Scene 12.md')).toBe(p.after);
+		await expect(e.proposeEdit('c1', 'Script/Scene 12.md', [{ type: 'append', content: '[Insert ending]' }], 'model edit')).rejects.toThrow(/placeholder text/);
+	});
+
 	it('refuses while the editor has unsaved edits, and when the selection already is the draft', async () => {
 		const vault = new MemoryVaultPort({ 'A.md': 'saved\n' });
 		const e = engine(vault);

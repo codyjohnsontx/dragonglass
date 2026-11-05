@@ -285,7 +285,9 @@ ends of the note, and `proposeDraftInsert` turns that into a
 `ProposalEngine.proposeRewrite` proposal: the engine re-reads the note and
 refuses when it differs from the editor text (an unsaved edit), then the
 proposal is hashed, reviewed and applied exactly like a model edit, freshness
-check inside `Vault.process` included. The proposal id is stored on the draft
+check inside `Vault.process` included. The write tools' placeholder refusal
+does not apply: the user chose the text, and the review is the check. The
+proposal id is stored on the draft
 version (`draft.inserts`), not on a tool message, so it never joins the
 turn's batch review and the model never sees it; the card shows the thread's
 newest insert that can still be acted on, else its newest that was not

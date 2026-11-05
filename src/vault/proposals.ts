@@ -170,7 +170,9 @@ export class ProposalEngine {
 		const path = validateVaultPath(rawPath, { configDir: this.vault.configDir });
 		const before = await this.vault.readNote(path);
 		if (before === null) throw new ProposalError(`No note found at ${path}.`);
-		return this.edit(conversationId, path, before, applyOperations(before, ops), summary);
+		const after = applyOperations(before, ops);
+		rejectNewPlaceholders(before, after);
+		return this.edit(conversationId, path, before, after, summary);
 	}
 
 	/**
@@ -191,7 +193,6 @@ export class ProposalEngine {
 
 	private async edit(conversationId: string, path: string, before: string, after: string, summary: string): Promise<ChangeProposal> {
 		if (after === before) throw new ProposalError('The proposed edit makes no changes.');
-		rejectNewPlaceholders(before, after);
 		return {
 			id: this.newId(),
 			conversationId,
