@@ -317,8 +317,10 @@ tools, and `loreCheckRules` replaces the drafting rules for the turn.
 
 The model answers with one fenced block opened with ```` ```lore ````, one
 record per contradiction: `LINE`, `VAULT`, `NOTE`, `FIX`. `parseLoreBlock`
-reads it (an empty block means nothing found, no block is a failed check and
-the reply stays a plain reply with a warning). `groundLoreCheck` keeps only
+reads it (an empty block means nothing found, no block or an unterminated one
+is a failed check and the reply stays a plain reply with a warning). A reply
+that splits its records over several blocks loses none of them, whatever the
+rule asks. `groundLoreCheck` keeps only
 what can be verified: the line must be in the text checked, and the note must
 exist, must not be the script or a script page, and must have been shown to
 the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.

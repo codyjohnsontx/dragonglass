@@ -73,6 +73,9 @@ export interface RawIssue {
 	fix?: string;
 }
 
+type LoreField = 'line' | 'vault' | 'note' | 'fix';
+type LoreFields = Partial<Record<LoreField, string>>;
+
 const OPEN_FENCE = /^```lore\s*$/;
 const CLOSE_FENCE = '```';
 const FIELD = /^[\s>*_-]*(line|vault|note|fix)[*_]*\s*:[*_]*\s*(.*)$/i;
@@ -81,37 +84,25 @@ const NOT_A_FLAG = /\bno (?:change|fix|correction)s? (?:is )?(?:needed|required)
 const CUE_ALONE = /^[A-Z][A-Z0-9 .'()-]*:?$/;
 
 /**
- * The records of a reply's lore block, or null when it has none. An empty
- * block means nothing was found; an unterminated one (a stopped turn) is not
- * a result. A record starts at its LINE field and a field runs on to the next
- * label, so a model that wraps a long sentence loses nothing; a record
- * without a line, a claim or a note is dropped.
+ * The records of a reply's lore blocks, or null when it has none. An empty
+ * block means nothing was found; an unterminated one (a stopped turn) makes
+ * the whole reply no result, since what it held is unknown. A model told to
+ * write one block can still split its records over several, so all count. A
+ * record starts at its LINE field and a field runs on to the next label, so a
+ * model that wraps a long sentence loses nothing; a record without a line, a
+ * claim or a note is dropped.
  */
 export function parseLoreBlock(content: string): RawIssue[] | null {
 	const lines = content.split(/\r?\n/);
-	const open = lines.findIndex((l) => OPEN_FENCE.test(l));
-	if (open < 0) return null;
-	const close = lines.findIndex((l, i) => i > open && l.trimEnd() === CLOSE_FENCE);
-	if (close < 0) return null;
-	type Field = 'line' | 'vault' | 'note' | 'fix';
-	const records: Array<Partial<Record<Field, string>>> = [];
-	let field: Field | null = null;
-	for (const raw of lines.slice(open + 1, close)) {
-		const text = raw.trim();
-		const m = FIELD.exec(raw);
-		if (m) {
-			field = m[1]!.toLowerCase() as Field;
-			if (field === 'line' || records.length === 0) records.push({});
-			records[records.length - 1]![field] = m[2]!.trim();
-		} else if (/^-{3,}$/.test(text)) {
-			field = null;
-		} else if (text && field) {
-			const record = records[records.length - 1]!;
-			// A Fountain cue copied with its dialogue: the dialogue is the value.
-			const cueAlone = (field === 'line' || field === 'fix') && CUE_ALONE.test(record[field] ?? '');
-			record[field] = cueAlone ? text : `${record[field] ?? ''} ${text}`.trim();
-		}
+	let records: LoreFields[] | null = null;
+	for (let open = 0; open < lines.length; open++) {
+		if (!OPEN_FENCE.test(lines[open]!)) continue;
+		const close = lines.findIndex((l, i) => i > open && l.trimEnd() === CLOSE_FENCE);
+		if (close < 0) return null;
+		records = [...(records ?? []), ...blockRecords(lines.slice(open + 1, close))];
+		open = close;
 	}
+	if (!records) return null;
 	const out: RawIssue[] = [];
 	for (const r of records) {
 		const line = unquote(withoutEndLinks(r.line ?? ''));
@@ -125,6 +116,29 @@ export function parseLoreBlock(content: string): RawIssue[] | null {
 		out.push({ line, says, note, ...(NO_FIX.test(fix) ? {} : { fix }) });
 	}
 	return out;
+}
+
+/** The labelled fields of one block's records, as written. */
+function blockRecords(body: string[]): LoreFields[] {
+	const records: LoreFields[] = [];
+	let field: LoreField | null = null;
+	for (const raw of body) {
+		const text = raw.trim();
+		const m = FIELD.exec(raw);
+		if (m) {
+			field = m[1]!.toLowerCase() as LoreField;
+			if (field === 'line' || records.length === 0) records.push({});
+			records[records.length - 1]![field] = m[2]!.trim();
+		} else if (/^-{3,}$/.test(text)) {
+			field = null;
+		} else if (text && field) {
+			const record = records[records.length - 1]!;
+			// A Fountain cue copied with its dialogue: the dialogue is the value.
+			const cueAlone = (field === 'line' || field === 'fix') && CUE_ALONE.test(record[field] ?? '');
+			record[field] = cueAlone ? text : `${record[field] ?? ''} ${text}`.trim();
+		}
+	}
+	return records;
 }
 
 /** A value without the [[links]] that follow its last sentence: those cite it, while a link inside the text may be the script's own or part of what it says. */

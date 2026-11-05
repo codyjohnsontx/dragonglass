@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
+import { debounce, ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
 import { draftVersions, parseDraft } from '../agent/drafting';
 import { AnswerSources, answerSources, linkWebMarkers, WebSource } from '../agent/sources';
@@ -75,6 +75,9 @@ export class ChatView extends ItemView {
 	/** The conversation whose turn is running, while one is. */
 	private liveConv: Conversation | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
+	/** The note and selection the context bar and Check lore button last showed. */
+	private shownContext: ActiveContext | null = null;
+	private readonly refreshSelection = debounce(() => this.refreshContextBar(), 100, true);
 	/** Serializes announcements to the shared copyStatusEl across concurrent copy clicks. */
 	private readonly copyAnnouncer = new CopyAnnouncer({
 		setTimeout: (fn, delayMs) => window.setTimeout(fn, delayMs),
@@ -128,10 +131,14 @@ export class ChatView extends ItemView {
 		this.composerEl = root.createDiv({ cls: 'dg-composer' });
 		this.buildComposer();
 		await this.openConversation(this.core.getSettings().lastConversationId);
-		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.renderContextBar()));
-		this.registerEvent(this.app.workspace.on('file-open', () => this.renderContextBar()));
+		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshContextBar()));
+		this.registerEvent(this.app.workspace.on('file-open', () => this.refreshContextBar()));
 		// Closing the tracked note's tab or popout fires neither event above.
-		this.registerEvent(this.app.workspace.on('layout-change', () => this.renderContextBar()));
+		this.registerEvent(this.app.workspace.on('layout-change', () => this.refreshContextBar()));
+		// Selecting fires no workspace event, and the note can be in any window.
+		const watchSelection = (win: Window) => this.registerDomEvent(win.document, 'selectionchange', this.refreshSelection);
+		this.app.workspace.iterateAllLeaves((leaf) => watchSelection(leaf.getContainer().win));
+		this.registerEvent(this.app.workspace.on('window-open', (_popout, win) => watchSelection(win)));
 		// A note edited behind a pending proposal makes the proposal stale; say so before Approve is clicked.
 		this.registerEvent(this.app.vault.on('modify', (file) => void this.onNoteModified(file)));
 		await this.renderHeader();
@@ -140,6 +147,7 @@ export class ChatView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.abort?.abort();
+		this.refreshSelection.cancel();
 		this.copyAnnouncer.dispose();
 		await this.core.store.flush();
 	}
@@ -700,10 +708,17 @@ export class ChatView extends ItemView {
 
 	// ----------------------------------------------------------- context bar
 
+	/** Redraws only for a real change: clicking into this view fires the workspace events, and a redraw between mouse down and up would lose a click on a chip. */
+	private refreshContextBar(): void {
+		const { path, selection } = this.core.vault.getActiveContext();
+		if (path !== this.shownContext?.path || selection !== this.shownContext.selection) this.renderContextBar();
+	}
+
 	private renderContextBar(): void {
 		const bar = this.contextBarEl;
 		bar.empty();
 		const active = this.core.vault.getActiveContext();
+		this.shownContext = active;
 		const activeToggle = bar.createEl('button', {
 			cls: `dg-chip dg-chip-toggle${this.includeActive && active.path ? ' is-active' : ''}`,
 			text: active.path ? `Active note: ${active.path}` : 'No active note',
@@ -755,7 +770,7 @@ export class ChatView extends ItemView {
 		// The note an Insert would go into follows the active note.
 		labelInsertButtons(this.messagesEl, active.path);
 		this.loreBtn.setText(active.selection ? 'Check lore of selection' : 'Check lore');
-		this.loreBtn.disabled = !active.path;
+		this.loreBtn.disabled = !active.path || this.abort !== null;
 		this.loreBtn.setAttribute('aria-label', active.path ? `Check ${active.selection ? 'the selection in ' : ''}${active.path} against the vault's lore` : 'Open a script note to check its lore');
 	}
 

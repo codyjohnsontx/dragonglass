@@ -56,6 +56,23 @@ describe('parseLoreBlock', () => {
 		expect(parseLoreBlock(`\`\`\`lore\n${record}`)).toBeNull();
 	});
 
+	it('reads every lore block of a reply', () => {
+		const second = 'LINE: I saw Oren last week.\nVAULT: Oren died in the Collapse.\nNOTE: The Collapse';
+		const lines = (reply: string) => parseLoreBlock(reply)?.map((r) => r.line);
+		expect(lines(`\`\`\`lore\n${record}\n\`\`\`\n\nAnd one more:\n\n\`\`\`lore\n${second}\n\`\`\``)).toEqual(['My sister waits at the gate.', 'I saw Oren last week.']);
+		expect(lines(`\`\`\`lore\n\`\`\`\n\`\`\`lore\n${second}\n\`\`\``)).toEqual(['I saw Oren last week.']);
+	});
+
+	it('keeps a record that opens without its line in its own block', () => {
+		const reply = `\`\`\`lore\n${record}\n\`\`\`\n\`\`\`lore\nVAULT: Oren died in the Collapse.\nLINE: I saw Oren last week.\nNOTE: The Collapse\n\`\`\``;
+		expect(parseLoreBlock(reply)?.[0]?.says).toBe('Kael is an only child.');
+		expect(parseLoreBlock(reply)).toHaveLength(1);
+	});
+
+	it('takes a reply cut off inside a later block as no result, so its flags are not lost to a clean card', () => {
+		expect(parseLoreBlock(`\`\`\`lore\n\`\`\`\n\n\`\`\`lore\n${record}`)).toBeNull();
+	});
+
 	it('takes what small models write around the fields', () => {
 		const messy = '```lore  \n**LINE:** "My sister waits at the gate."\n**vault**: Kael is\nan only child.\n- NOTE: [[Characters/Kael.md]]\nFix: `My captain waits at the gate.`\n---\n```  ';
 		expect(parseLoreBlock(messy)).toEqual([{ line: 'My sister waits at the gate.', says: 'Kael is an only child.', note: 'Characters/Kael', fix: 'My captain waits at the gate.' }]);
@@ -133,6 +150,14 @@ describe('groundLoreCheck', () => {
 		const { issues, leftOut } = groundLoreCheck([flag()], ground());
 		expect(leftOut).toBeUndefined();
 		expect(issues).toMatchObject([{ line: 'My sister waits at the gate.', says: 'Kael is an only child.', note: 'Kael', notePath: 'Characters/Kael.md', fix: 'My captain waits at the gate.' }]);
+	});
+
+	it('lists or counts every record of a reply split over several blocks', () => {
+		const block = (line: string, says: string) => `\`\`\`lore\nLINE: ${line}\nVAULT: ${says}\nNOTE: Kael\n\`\`\``;
+		const reply = [block('Words nobody wrote.', 'Kael is exiled.'), block('My sister waits at the gate.', 'Kael is an only child.'), block('I saw Oren last week.', 'Kael never met Oren.')].join('\n\n');
+		const { issues, leftOut } = groundLoreCheck(parseLoreBlock(reply)!, ground());
+		expect(issues.map((i) => i.line)).toEqual(['My sister waits at the gate.', 'I saw Oren last week.']);
+		expect(leftOut).toBe(1);
 	});
 
 	it('leaves out and counts a line that is not in the checked text', () => {
