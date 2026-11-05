@@ -298,6 +298,37 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck(raw!, ground()).issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
 	});
 
+	it('leaves out a record that names only a character cue, so Fix it cannot overwrite the cue', () => {
+		const raw = parseLoreBlock('```lore\nLINE: Mira\nVAULT: Kael was born in Ashfall.\nNOTE: Kael\nFIX: You were born in Ashfall, Kael.\n```');
+		expect(groundLoreCheck(raw!, ground())).toEqual({ issues: [], leftOut: 1 });
+	});
+
+	it.each([
+		['with an extension', 'MIRA (V.O.)\nI saw Oren last week.\n', 'Mira (V.O.)'],
+		['with a colon', 'MIRA:\nI saw Oren last week.\n', 'Mira'],
+		['over a line in capitals', 'MIRA\nNO.\n', 'Mira'],
+		['at the end of the text', 'KAEL\nAgain.\n\nMIRA\n', 'Mira'],
+		['in bold', '**Mira**\n\nI saw Oren last week.\n', 'Mira'],
+		['in bold with a colon', '**Mira:**\nI saw Oren last week.\n', 'Mira'],
+		['quoted as written', 'MIRA\nI saw Oren last week.\n', 'MIRA'],
+	])('leaves out a cue %s', (_, scope, line) => {
+		expect(groundLoreCheck([flag({ line })], ground({ scope }))).toEqual({ issues: [], leftOut: 1 });
+	});
+
+	it.each([
+		['a scene heading', 'INT. ASHFALL\nKael kneels.\n', 'INT. ASHFALL'],
+		['a scene heading written in full', 'EXT. ASHFALL - DAY\n\nKael kneels.\n', 'Ashfall'],
+		['a transition', 'CUT TO:\nKael kneels.\n', 'CUT TO:'],
+		['a title in capitals', 'TEN YEARS LATER\n\nKael kneels.\n', 'TEN YEARS LATER'],
+		['dialogue in capitals', 'KAEL\nMIRA IS DEAD\n\nKael kneels.\n', 'MIRA IS DEAD'],
+		['an action line that opens with a name', 'Mira waits at the gate.\n', 'Mira'],
+		['a line with its cue on it', '**Mira:** I saw Oren last week.\n', 'I saw Oren last week.'],
+	])('keeps a flag on %s', (_, scope, line) => {
+		const { issues, leftOut } = groundLoreCheck([flag({ line, fix: undefined })], ground({ scope }));
+		expect(issues).toHaveLength(1);
+		expect(leftOut).toBeUndefined();
+	});
+
 	it('still leaves out a paraphrase that only shares its end with a line', () => {
 		const { issues, leftOut } = groundLoreCheck([flag({ line: 'Kael says that my sister waits by the gate.' })], ground());
 		expect(issues).toEqual([]);

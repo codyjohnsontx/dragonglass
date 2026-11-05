@@ -1,6 +1,6 @@
 import type { ContextItem } from './context';
 import { attr } from './delimiters';
-import { isScriptNote } from './drafting';
+import { isBareCue, isScriptNote } from './drafting';
 import type { StoredMessage } from '../persistence/conversation';
 import { DEFAULT_SETTINGS } from '../settings';
 import { baseName, InvalidPathError, normalizeVaultPath, validateVaultPath } from '../vault/paths';
@@ -206,6 +206,12 @@ export interface LoreGround {
 	newId: () => string;
 }
 
+/** Whether a line of the text is a character cue on its own. The rules ask for the spoken line under it, and Fix it would overwrite the cue. */
+function isCueLine(scope: string, line: string): boolean {
+	const lines = scope.trimEnd().split('\n');
+	return lines.some((l, i) => l.trim() === line && isBareCue(lines, i));
+}
+
 /** Whether a note can be lore for a check: the script and script pages never are. */
 export function isLoreNote(path: string, g: Pick<LoreGround, 'scriptPath' | 'scriptFolder'>): boolean {
 	return path !== g.scriptPath && !isScriptNote(path, g.scriptFolder);
@@ -213,7 +219,8 @@ export function isLoreNote(path: string, g: Pick<LoreGround, 'scriptPath' | 'scr
 
 /**
  * Keep the flags that can be verified. A line must be in the checked text, and
- * be one line: a fragment that fits several names none of them. A note must
+ * be one line: a fragment that fits several names none of them, and a cue names
+ * no line, since it says nothing that could contradict a note. A note must
  * exist, must be lore, and must have been shown to the model. A flag that fails is counted
  * in `leftOut`, not shown: an issue the list cannot back is worse than one it
  * misses. A flag on a line the canon note quotes is dropped without a count,
@@ -231,7 +238,7 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 		const match = new Set(found.map((f) => f.line)).size === 1 ? found[0] : undefined;
 		const notePath = g.resolve(r.note);
 		const lore = notePath !== null && isLoreNote(notePath, g) && g.shown.has(notePath);
-		if (!match || !lore) {
+		if (!match || !lore || isCueLine(g.scope, match.line)) {
 			leftOut++;
 			continue;
 		}

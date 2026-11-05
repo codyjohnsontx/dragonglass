@@ -325,6 +325,9 @@ what can be verified: the line must be in the text checked, and the note must
 exist, must not be the script or a script page, and must have been shown to
 the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.
 A quoted fragment widens to its whole line, or is left out when it fits several.
+A line that is only a character cue is left out too, while a scene heading stays
+(`isBareCue`): a model that quotes `Mira` for the dialogue under `MIRA` has not
+named the line, and Fix it would overwrite the cue.
 Fix it replaces the whole line, so a fix for a fragment must carry the rest of
 it. Only a prose line's quote marks are added back; a fix missing anything else
 of the line is dropped, as is one that leaves off the cue of a line written with

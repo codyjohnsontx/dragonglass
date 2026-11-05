@@ -435,7 +435,9 @@ four planted contradictions, five runs: it found 15 of the 20 and at least two
 in every run, at about 75 seconds a check. On a scene with nothing wrong it
 still flagged at least one line in every run, so read each claim against its
 note before acting on it. A canon change in the owner's words kept its line
-from being flagged in all five runs.
+from being flagged in all five runs, but a later test with a changed birthplace
+still had an agreeing line flagged in 5 of 7 runs, 2 of them as issues. Use
+Intentional on a false flag: a line it records is never flagged again.
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
