@@ -311,6 +311,13 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck([flag(), flag({ says: 'Again.' })], ground()).issues).toHaveLength(1);
 	});
 
+	it('counts a different claim on a listed line as left out, and an exact repeat of any claim not at all', () => {
+		const other = flag({ says: 'Mira died in the Collapse.' });
+		const { issues, leftOut } = groundLoreCheck([flag(), flag(), other, other], ground());
+		expect(issues.map((i) => i.says)).toEqual(['Kael is an only child.']);
+		expect(leftOut).toBe(1);
+	});
+
 	it('does not flag a line the canon note quotes, and does not count it as left out', () => {
 		const canon = `# Sequel canon\n\n${canonEntry('Script/Scene.md', { line: 'My sister waits at the gate.', says: 'only child', note: 'Kael' })}\n`;
 		expect(groundLoreCheck([flag()], ground({ canonText: canon }))).toEqual({ issues: [] });
@@ -584,7 +591,7 @@ describe('the issue list', () => {
 
 	it('says only what limits the check', () => {
 		expect(loreNotes({ scriptPath: 's', issues: [] })).toEqual([]);
-		expect(loreNotes({ scriptPath: 's', issues: [], leftOut: 1 })).toEqual(['1 flag was left out: the line or the note cited could not be verified.']);
+		expect(loreNotes({ scriptPath: 's', issues: [], leftOut: 1 })).toEqual(['1 flag was left out: the line or the note cited could not be verified, or the line already has an issue.']);
 		expect(loreNotes({ scriptPath: 's', issues: [ISSUE], leftOut: 2 })[0]).toMatch(/^2 more flags were/);
 		expect(loreNotes({ scriptPath: 's', issues: [], shown: { chars: 250, of: 1000 } })).toEqual(["Only the first 25% fit in the model's context. Select the rest to check it."]);
 		expect(loreNotes({ scriptPath: 's', issues: [], canonShown: { chars: 250, of: 1000 } })).toEqual(["Only the first 25% of the sequel canon note fit in the model's context, so a change further down can still be flagged."]);

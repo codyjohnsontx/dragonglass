@@ -328,7 +328,8 @@ it. Only a prose line's quote marks are added back; a fix missing anything else
 of the line is dropped, as is one that leaves off the cue of a line written with
 one, plain or bold. A character name in a fix for any other line is removed. A
 character cue is dropped from a dialogue quote: `KAEL:` anywhere, and words with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
-canon note quotes is dropped without a count, as is a repeat on the same line.
+canon note quotes is dropped without a count, as is an exact repeat. A line is
+listed once, so a different claim on a line already listed goes in `leftOut`.
 A fix that still holds the whole line corrects nothing and is dropped, which
 leaves the issue with Intentional only.
 The result is a `LoreCheckRecord` on the assistant message, and `content` still

@@ -95,7 +95,7 @@ export function loreNotes(check: LoreCheckRecord): string[] {
 	const cut = check.loreCut ?? 0;
 	if (cut > 0) notes.push(`${cut} ${cut === 1 ? 'note' : 'notes'} the script names did not fit in the model's context in full, so a contradiction with ${cut === 1 ? 'it' : 'them'} can be missed.`);
 	const left = check.leftOut ?? 0;
-	if (left > 0) notes.push(`${left}${check.issues.length > 0 ? ' more' : ''} ${left === 1 ? 'flag was' : 'flags were'} left out: the line or the note cited could not be verified.`);
+	if (left > 0) notes.push(`${left}${check.issues.length > 0 ? ' more' : ''} ${left === 1 ? 'flag was' : 'flags were'} left out: the line or the note cited could not be verified, or the line already has an issue.`);
 	return notes;
 }
 

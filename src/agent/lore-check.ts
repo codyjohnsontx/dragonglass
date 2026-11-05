@@ -53,7 +53,7 @@ export interface LoreCheckRecord {
 	/** The script note checked. */
 	scriptPath: string;
 	issues: LoreIssue[];
-	/** Flags left out because their line or their note could not be verified. */
+	/** Flags left out: their line or their note could not be verified, or their line already has an issue. */
 	leftOut?: number;
 	/** The model was shown no lore note, so finding nothing means nothing. */
 	readNoLore?: true;
@@ -203,10 +203,12 @@ export function isLoreNote(path: string, g: Pick<LoreGround, 'scriptPath' | 'scr
  * exist, must be lore, and must have been shown to the model. A flag that fails is counted
  * in `leftOut`, not shown: an issue the list cannot back is worse than one it
  * misses. A flag on a line the canon note quotes is dropped without a count,
- * since that change is deliberate, as is a repeat of a flag on the same line.
+ * since that change is deliberate, as is an exact repeat of a flag. A line is
+ * listed once, so a different claim on a line already listed is counted too.
  */
 export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<LoreCheckRecord, 'issues' | 'leftOut'> {
 	const issues: LoreIssue[] = [];
+	const seen = new Set<string>();
 	let leftOut = 0;
 	for (const r of raw) {
 		let found = matchLines(g.scope, r.line);
@@ -220,7 +222,13 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 			continue;
 		}
 		if (g.canonText !== null && inCanon(g.canonText, match.line)) continue;
-		if (issues.some((i) => i.line === match.line)) continue;
+		const claim = `${match.line}\n${notePath}\n${r.says}`;
+		if (seen.has(claim)) continue;
+		seen.add(claim);
+		if (issues.some((i) => i.line === match.line)) {
+			leftOut++;
+			continue;
+		}
 		const issue: LoreIssue = { id: g.newId(), line: match.line, says: r.says, note: baseName(notePath), notePath };
 		const fix = r.fix === undefined || citesNote(r.fix, r.note, match.line) ? undefined : correctedLine(match, r.fix, cue);
 		if (fix !== undefined && !keepsLine(fix, match.line)) issue.fix = fix;
