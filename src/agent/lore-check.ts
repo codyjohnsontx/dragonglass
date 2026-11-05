@@ -2,6 +2,7 @@ import type { ContextItem } from './context';
 import { attr } from './delimiters';
 import { isScriptNote } from './drafting';
 import type { StoredMessage } from '../persistence/conversation';
+import { DEFAULT_SETTINGS } from '../settings';
 import { baseName, InvalidPathError, normalizeVaultPath, validateVaultPath } from '../vault/paths';
 import { ChangeProposal, ProposalEngine, ProposalError, rejectNewPlaceholders } from '../vault/proposals';
 import type { VaultPort } from '../vault/port';
@@ -58,6 +59,8 @@ export interface LoreCheckRecord {
 	readNoLore?: true;
 	/** The script did not fit: how much of it the model saw. */
 	shown?: { chars: number; of: number };
+	/** The sequel canon note did not fit: how much of it the model saw. */
+	canonShown?: { chars: number; of: number };
 }
 
 /** A record as the model wrote it, before it is checked. */
@@ -102,8 +105,8 @@ export function parseLoreBlock(content: string): RawIssue[] | null {
 			field = null;
 		} else if (text && field) {
 			const record = records[records.length - 1]!;
-			// A Fountain cue copied with its dialogue: the dialogue is the line.
-			const cueAlone = field === 'line' && CUE_ALONE.test(record.line ?? '');
+			// A Fountain cue copied with its dialogue: the dialogue is the value.
+			const cueAlone = (field === 'line' || field === 'fix') && CUE_ALONE.test(record[field] ?? '');
 			record[field] = cueAlone ? text : `${record[field] ?? ''} ${text}`.trim();
 		}
 	}
@@ -214,26 +217,21 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 }
 
 /**
- * The whole corrected line, or undefined when it cannot be told. What the line
- * holds around the quote is added back unless the fix carries it. Where that
- * text has words, the fix's length decides: about the line's, the model
- * rewrote the line and changed that text too, so the fix stands alone; about
- * the part it covers, it is a fragment; between the two, either reading can
- * garble the line, so there is no fix. `cue` is what the quote had in front of
- * the line's text, which the fix may repeat.
+ * The whole corrected line, or undefined when it cannot be told. A fix for
+ * part of a line must carry the rest of the line. Only text without words,
+ * such as the outer quotes of a prose line, is added back: where words are
+ * missing, the fix may be a fragment or a rewrite of them, and guessing garbles
+ * the line. A character name is dropped unless the line is written with one;
+ * `cue` is what the quote had in front of the line's text, which the fix may
+ * repeat.
  */
 function correctedLine(match: LineMatch, fix: string, cue: string): string | undefined {
-	const body = !cue ? fix : fix.toLowerCase().startsWith(cue.toLowerCase()) ? fix.slice(cue.length) : fix.replace(INLINE_CUE, '');
+	const uncued = cue && fix.toLowerCase().startsWith(cue.toLowerCase()) ? fix.slice(cue.length) : fix;
+	const body = INLINE_CUE.test(match.line) ? uncued : uncued.replace(INLINE_CUE, '');
 	const plain = plainQuotes(body);
 	const head = plain.startsWith(plainQuotes(match.before)) ? '' : match.before;
 	const tail = plain.endsWith(plainQuotes(match.after)) ? '' : match.after;
-	const missing = [head, tail].filter((side) => /[\p{L}\p{N}]/u.test(side)).join('').length;
-	if (missing > 0) {
-		const margin = missing / 4;
-		if (body.length >= match.line.length - margin) return body;
-		if (body.length > match.line.length - missing + margin) return undefined;
-	}
-	return `${head}${body}${tail}`;
+	return /[\p{L}\p{N}]/u.test(head + tail) ? undefined : `${head}${body}${tail}`;
 }
 
 /**
@@ -348,7 +346,7 @@ export function loreCheckRules(scriptPath: string, toolsEnabled: boolean, canon:
 		'NOTE: the name of the lore note that says it',
 		'FIX: the whole line rewritten to agree with the lore, keeping its voice',
 		'```',
-		'- LINE is the one line that is wrong: for dialogue, the spoken line, without the character name above it. List only lines that are wrong; a line that agrees with the lore is not listed at all.',
+		'- LINE is the one line that is wrong: for dialogue, the spoken line, without the character name above it. FIX has no character name either. List only lines that are wrong; a line that agrees with the lore is not listed at all.',
 		'- With no contradictions, the block is empty. Never invent one; a clean script is a good result.',
 	];
 }
@@ -394,19 +392,16 @@ export async function proposeLoreFix(engine: ProposalEngine, vault: VaultPort, c
 
 // --------------------------------------------------------- sequel canon
 
-/** Where the canon note lives when the setting is empty or not a usable path. */
-export const DEFAULT_CANON_NOTE = 'Sequel canon.md';
-
 const CANON_INTRO = '# Sequel canon\n\nDeliberate changes to the original lore. Dragonglass reads this note with every message: where it and another note differ, this note wins for drafting and for the lore check.\n\n';
 
 /** The canon note's path from the setting: `.md` added, and the default for an empty or refused path. */
 export function canonNotePath(setting: string, configDir: string): string {
 	const path = normalizeVaultPath(setting);
-	if (path === '') return DEFAULT_CANON_NOTE;
+	if (path === '') return DEFAULT_SETTINGS.canonNote;
 	try {
 		return validateVaultPath(/\.md$/i.test(path) ? path : `${path}.md`, { configDir });
 	} catch (e) {
-		if (e instanceof InvalidPathError) return DEFAULT_CANON_NOTE;
+		if (e instanceof InvalidPathError) return DEFAULT_SETTINGS.canonNote;
 		throw e;
 	}
 }

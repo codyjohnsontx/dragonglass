@@ -82,11 +82,13 @@ export function liveProposal(issue: LoreIssue, proposals: Readonly<Record<string
 export function loreNotes(check: LoreCheckRecord): string[] {
 	const notes: string[] = [];
 	if (check.readNoLore) notes.push('The model read no lore notes, so nothing was checked. Run the check again.');
-	if (check.shown) {
-		const percent = Math.max(1, Math.floor((check.shown.chars / check.shown.of) * 100));
-		notes.push(`Only the first ${percent}% fit in the model's context. Select the rest to check it.`);
-	}
+	if (check.shown) notes.push(`Only the first ${percentShown(check.shown)}% fit in the model's context. Select the rest to check it.`);
+	if (check.canonShown) notes.push(`Only the first ${percentShown(check.canonShown)}% of the sequel canon note fit in the model's context, so a change further down can still be flagged.`);
 	const left = check.leftOut ?? 0;
 	if (left > 0) notes.push(`${left}${check.issues.length > 0 ? ' more' : ''} ${left === 1 ? 'flag was' : 'flags were'} left out: the line or the note cited could not be verified.`);
 	return notes;
+}
+
+function percentShown(shown: { chars: number; of: number }): number {
+	return Math.max(1, Math.floor((shown.chars / shown.of) * 100));
 }

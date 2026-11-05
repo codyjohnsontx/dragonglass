@@ -1,5 +1,5 @@
 import { App, Plugin } from 'obsidian';
-import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, shownChars, toProviderMessages, userMessage, vaultMap } from './agent/context';
+import { autoReadBudget, buildSystemPrompt, ContextItem, formatContextBlock, noteTokenBudget, shownChars, toProviderMessages, userMessage, vaultMap, withoutLoreLeftNoRoom } from './agent/context';
 import { RunEvent, runAgent } from './agent/runtime';
 import { ToolRegistry } from './agent/tools';
 import { Conversation, deriveTitle, StoredMessage } from './persistence/conversation';
@@ -182,16 +182,16 @@ export class DragonglassCore {
 			return;
 		}
 		const lore = opts.loreCheck;
+		const contextWindow = await this.contextWindow(provider, model, opts.signal);
+		const noteTokens = noteTokenBudget(contextWindow);
 		const canon = await canonContext(this.vault, this.canonNote());
 		const loreNotes = lore ? await loreForScript(this.vault, opts.context[0]?.content.slice(0, this.settings.maxCharsPerNote) ?? '', { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder(), canonPath: this.canonNote() }) : [];
-		const context = [...opts.context, ...loreNotes, ...(canon ? [canon] : [])];
+		const context = withoutLoreLeftNoRoom([...opts.context, ...loreNotes, ...(canon ? [canon] : [])], this.settings.maxCharsPerNote, noteTokens);
 		const userMsg = userMessage(newId(), opts.text, context, Date.now());
 		if (conv.messages.length === 0) conv.title = deriveTitle(opts.text);
 		conv.messages.push(userMsg);
 		this.store.touch(conv);
 
-		const contextWindow = await this.contextWindow(provider, model, opts.signal);
-		const noteTokens = noteTokenBudget(contextWindow);
 		const contextBlock = [formatContextBlock(context, this.settings.maxCharsPerNote, noteTokens), lore ? '' : revisionReminder(conv.messages)].filter(Boolean).join('\n\n');
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
@@ -298,8 +298,10 @@ export class DragonglassCore {
 	private loreResult(conv: Conversation, userId: string, lore: NonNullable<SendOptions['loreCheck']>, context: ContextItem[], canon: ContextItem | null, raw: RawIssue[], noteTokens: number | undefined): LoreCheckRecord {
 		const [script] = context;
 		const shown = shownPaths(conv.messages, userId);
-		const chars = shownChars(context, this.settings.maxCharsPerNote, noteTokens)[0] ?? 0;
+		const sent = shownChars(context, this.settings.maxCharsPerNote, noteTokens);
+		const chars = sent[0] ?? 0;
 		const total = script?.content.length ?? 0;
+		const canonChars = canon ? (sent[context.indexOf(canon)] ?? 0) : 0;
 		const notes = { scriptPath: lore.scriptPath, scriptFolder: this.scriptFolder() };
 		const grounded = groundLoreCheck(raw, {
 			...notes,
@@ -315,6 +317,7 @@ export class DragonglassCore {
 			...grounded,
 			...(readLore ? {} : { readNoLore: true as const }),
 			...(chars < total ? { shown: { chars, of: total } } : {}),
+			...(canon && canonChars < canon.content.length ? { canonShown: { chars: canonChars, of: canon.content.length } } : {}),
 		};
 	}
 

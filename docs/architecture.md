@@ -309,8 +309,9 @@ its selection (`core.loreScript`, `core.checkLore`, which is `send` with a
 script: it is what is open. The note or selection goes as the turn's context,
 and `loreForScript` adds the notes it names, by note name or alias as whole
 words in any case, most mentioned first, up to 12, leaving out the script,
-script pages and the canon note. They share the context's note budget, and
-the model still has the read tools for anything else. It has no write or web
+script pages and the canon note. They share what the script and the canon note
+leave of the context's note budget, one left no room is not sent (so it does not
+count as read), and the model still has the read tools for anything else. It has no write or web
 tools, and `loreCheckRules` replaces the drafting rules for the turn.
 
 The model answers with one fenced block opened with ```` ```lore ````, one
@@ -321,10 +322,10 @@ what can be verified: the line must be in the text checked, and the note must
 exist, must not be the script or a script page, and must have been shown to
 the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.
 A quoted fragment widens to its whole line, or is left out when it fits several.
-The fix keeps whatever the line holds around the fragment that it does not
-already carry. Where that text has words, a fix about the line's length stands
-alone as a rewrite, one about the fragment's length is spliced in, and one in
-between is dropped, since either reading could garble the line. A character
+A fix for a fragment must carry the rest of the line. Only text without words,
+such as a prose line's outer quotes, is added back; a fix missing any of the
+line's words is dropped, since it could be a fragment or a rewrite. A character
+name in a fix is dropped unless the line is written with one. A character
 cue is dropped from a dialogue quote: `KAEL:` anywhere, and words with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
 canon note quotes is dropped without a count, as is a repeat on the same line.
 A fix that still holds the whole line corrects nothing and is dropped, which
@@ -336,7 +337,8 @@ holds the whole reply for the model's history.
 then each issue as its line, what the vault says with the note linked, and
 Fix it and Intentional. Below the list go only the limits of the check: flags
 left out, how much of a script too long for the context was shown (selecting
-the rest checks it), and that no lore note was read, when that is so, in
+the rest checks it), how much of a canon note too long for it was shown
+(`canonShown`), and that no lore note was read, when that is so, in
 place of "no contradictions". The sources list under it, headed "Read for this
 check", is everything sent or read but the script.
 
@@ -358,7 +360,7 @@ The **sequel canon note** is one note at the `canonNote` setting
 user-written or built through Intentional. While it exists and has text,
 `canonContext` adds it to every send as a `canon` context item, even when the
 note is also open or attached, so the rule below always has its block. It shares
-the note budget and is framed `<<<canon path="…">>>`, defused. It adds no chip,
+the note budget, ahead of the lore notes on a check, and is framed `<<<canon path="…">>>`, defused. It adds no chip,
 and goes in the user's `sources` record, so citing it counts as read.
 `canonRule` (drafting) and `loreCheckRules` tell the model it wins. An
 Intentional entry quotes the script line, which is what `inCanon` looks for;

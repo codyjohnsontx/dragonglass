@@ -603,7 +603,7 @@ measuring. With the read tools alone the model chooses what to look up, and a
 small local model chooses badly: it made one useless call in one run and then
 cited no note at all. So the check also sends the notes the script names
 (`loreForScript`): any note whose name or alias appears as a whole word, most
-mentioned first, up to 12, in the same token budget as other context. That
+mentioned first, up to 12. That
 needs no model judgement, costs nothing beyond the note text, and leaves the
 tools for what the script does not name. The cost is privacy, so it is in the
 settings text and the README: a check sends those notes to the provider without
@@ -615,6 +615,17 @@ and a clean scene over 12 lore notes, five runs each. With the tools alone it
 found 11 of the 20 plants at about 150 seconds a check, and one run found none.
 With the named notes it found 15 of 20 at about 75 seconds, and every run found
 at least two. That is why the notes go along.
+
+They come after the script and the canon note in the token budget. An even
+split across every item let a dozen long notes cut a scene that fit on its own,
+and selecting the rest met the same split; it cut the canon note too, newest
+entries first, so a change in the owner's words could fall out of what is meant
+to override the lore. So the script and the canon note get their caps first and
+the lore notes share the remainder, on the one allocation (`contextCaps`) behind
+both `formatContextBlock` and `shownChars`. A lore note left no room is not sent
+at all, because a note sent empty would still count as read and could back a
+flag or a clean result. If the canon note is still cut, the card says how much
+reached the model, as it does for the script.
 
 The same runs show what a small local model does to a clean script: it flags
 something. Every run on the clean scene flagged at least one line, seven in all,
@@ -636,6 +647,14 @@ script. And between a tenth and nearly a third of the fixes were the wrong line
 with a remark added, so a fix that still holds the whole line is dropped and the
 issue keeps only Intentional. Those figures replay the recorded replies through
 the final parser, since neither change alters what the model is sent.
+
+A fix for a quoted fragment is only used if it can be proved whole. Telling a
+fragment from a rewrite by comparing the fix's length with the line's garbled
+some lines and silently dropped text from others, whatever the thresholds. So
+text without words around the quote, such as a prose line's outer quotes, is
+added back, a fix that carries the line's words stands as the corrected line,
+and any other fix is dropped, leaving Intentional. That loses Fix it where a
+model answers a fragment with a fragment, which the rules do not ask for.
 
 How canon overrides: as data the model reads, and as a filter where a filter
 can be exact. The canon note goes with every send as its own context item,

@@ -222,7 +222,8 @@ function sanitizeLoreCheck(m: StoredMessage): StoredMessage {
 	if (!c || typeof c !== 'object') return { ...m, loreCheck: undefined };
 	const r = c as Record<string, unknown>;
 	if (typeof r['scriptPath'] !== 'string' || !Array.isArray(r['issues'])) return { ...m, loreCheck: undefined };
-	const shown = r['shown'] as Record<string, unknown> | undefined;
+	const shown = shownRecord(r['shown']);
+	const canonShown = shownRecord(r['canonShown']);
 	return {
 		...m,
 		loreCheck: {
@@ -230,9 +231,15 @@ function sanitizeLoreCheck(m: StoredMessage): StoredMessage {
 			issues: r['issues'].filter(isLoreIssue),
 			...(r['readNoLore'] === true ? { readNoLore: true as const } : {}),
 			...(typeof r['leftOut'] === 'number' ? { leftOut: r['leftOut'] } : {}),
-			...(typeof shown?.['chars'] === 'number' && typeof shown['of'] === 'number' ? { shown: { chars: shown['chars'], of: shown['of'] } } : {}),
+			...(shown ? { shown } : {}),
+			...(canonShown ? { canonShown } : {}),
 		},
 	};
+}
+
+function shownRecord(v: unknown): { chars: number; of: number } | null {
+	const s = v as Record<string, unknown> | undefined;
+	return typeof s?.['chars'] === 'number' && typeof s['of'] === 'number' ? { chars: s['chars'], of: s['of'] } : null;
 }
 
 function isLoreIssue(v: unknown): v is LoreIssue {

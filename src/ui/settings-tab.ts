@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, SettingDefinitionItem, SettingDefinitionRender } from 'obsidian';
 import type DragonglassPlugin from '../main';
 import { ProviderId } from '../providers/types';
-import { DragonglassSettings, MIN_NUM_CTX } from '../settings';
+import { DEFAULT_SETTINGS, DragonglassSettings, MIN_NUM_CTX } from '../settings';
 import { ModelSuggest } from './model-suggest';
 
 const CLOUD_MODEL_DESC = 'Pick from the list or type any model id. The list shows the chat models your key can use, or current models until the key works.';
@@ -261,7 +261,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 						control: {
 							type: 'text',
 							key: 'canonNote',
-							placeholder: 'Sequel canon.md',
+							placeholder: DEFAULT_SETTINGS.canonNote,
 							validate: (v) => (v.trim().startsWith('/') || v.includes('..') ? 'Enter a note path relative to the vault, such as Sequel canon.md or Writing/Sequel canon.md' : undefined),
 						},
 					},

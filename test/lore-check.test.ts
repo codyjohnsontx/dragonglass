@@ -6,7 +6,6 @@ import {
 	canonContext,
 	canonEntry,
 	canonNotePath,
-	DEFAULT_CANON_NOTE,
 	groundLoreCheck,
 	inCanon,
 	loreForScript,
@@ -117,8 +116,8 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck([flag({ note: 'Scene 2' })], ground({ scriptFolder: '' })).leftOut).toBeUndefined();
 	});
 
-	it('widens a quoted fragment to its whole line, and the fix with it', () => {
-		const { issues } = groundLoreCheck([flag({ line: 'my sister', fix: 'My captain' })], ground());
+	it('widens a quoted fragment to its whole line', () => {
+		const { issues } = groundLoreCheck([flag({ line: 'my sister', fix: 'My captain waits at the gate.' })], ground());
 		expect(issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
 	});
 
@@ -130,28 +129,29 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck([flag({ line, fix })], ground()).issues[0]?.fix).toBe(fix);
 	});
 
-	it('adds only the side of the line a fragment fix leaves out', () => {
-		expect(groundLoreCheck([flag({ line: 'waits at', fix: 'My sister stands at' })], ground()).issues[0]?.fix).toBe('My sister stands at the gate.');
-		expect(groundLoreCheck([flag({ line: 'waits at', fix: 'stands at the gate.' })], ground()).issues[0]?.fix).toBe('My sister stands at the gate.');
+	it('takes a fix that differs from the rest of the line only in its apostrophes', () => {
+		const scope = 'It’s my sister at the gate, isn’t it?';
+		const fix = "It's my captain at the gate, isn't it?";
+		expect(groundLoreCheck([flag({ line: 'my sister', fix })], ground({ scope })).issues[0]).toMatchObject({ line: scope, fix });
 	});
 
 	it.each([
-		['after the quote', 'You were born in Frosthaven, Kael. Nobody here forgets it.', 'You were born in Frosthaven, Kael.', 'You were born in Ashfall, Kael. Nobody here doubts it.'],
-		['before the quote', 'I swear it, my sister waits.', 'my sister waits.', 'I swore it, my captain waits.'],
-		['on one side while keeping the other', 'My sister waits at the gate.', 'waits at', 'My captain stands at the gate.'],
-		['only in its apostrophes', 'It’s my sister at the gate, isn’t it?', 'my sister', "It's my captain at the gate, isn't it?"],
-	])('takes a whole-line fix that changes the text %s as it stands, without splicing', (_, scope, line, fix) => {
-		expect(groundLoreCheck([flag({ line, fix })], ground({ scope })).issues[0]).toMatchObject({ line: scope, fix });
-	});
-
-	it('offers no fix when it cannot be told whether the fix is a fragment or the whole line', () => {
-		const { issues } = groundLoreCheck([flag({ line: 'waits at', fix: 'stands at the door.' })], ground());
+		['a fragment for a fragment', 'My sister waits at the gate.', 'My sister', 'My captain'],
+		['a short rewrite', 'My sister waits at the gate.', 'My sister', 'I wait alone.'],
+		['a fragment that grew', 'Kael, my sister waits at the gate.', 'my sister waits at the gate.', 'my old commander waits at the gate.'],
+		['a rewrite of the text after the quote', 'You were born in Frosthaven, Kael. Nobody here forgets it.', 'You were born in Frosthaven, Kael.', 'You were born in Ashfall, Kael. Nobody here doubts it.'],
+		['a rewrite of the text before the quote', 'I swear it, my sister waits.', 'my sister waits.', 'I swore it, my captain waits.'],
+		['a fix that keeps only one side', 'My sister waits at the gate.', 'waits at', 'My sister stands at'],
+	])('keeps the issue but offers no fix for %s, which does not carry the rest of the line', (_, scope, line, fix) => {
+		const { issues } = groundLoreCheck([flag({ line, fix })], ground({ scope }));
 		expect(issues).toHaveLength(1);
+		expect(issues[0]?.line).toBe(scope);
 		expect(issues[0]?.fix).toBeUndefined();
 	});
 
-	it('takes a fragment fix with a dollar sign literally', () => {
-		expect(groundLoreCheck([flag({ line: 'My sister', fix: "$& and $'" })], ground()).issues[0]?.fix).toBe("$& and $' waits at the gate.");
+	it('takes a fix with a dollar sign literally', () => {
+		const scope = '"My sister waits."\n';
+		expect(groundLoreCheck([flag({ line: 'My sister waits.', fix: "$& and $'" })], ground({ scope })).issues[0]?.fix).toBe('"$& and $\'"');
 	});
 
 	it('keeps the quotes of a prose line a model quoted without them', () => {
@@ -178,6 +178,21 @@ describe('groundLoreCheck', () => {
 	])('matches dialogue with a cue in front %s, in the line and the fix', (_, line, fix) => {
 		const { issues } = groundLoreCheck([flag({ line, fix })], ground());
 		expect(issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
+	});
+
+	it('drops a character cue the fix copied alone on its row', () => {
+		const raw = parseLoreBlock('```lore\nLINE: KAEL\nMy sister waits at the gate.\nVAULT: Kael is an only child.\nNOTE: Kael\nFIX: KAEL\nMy captain waits at the gate.\n```');
+		expect(groundLoreCheck(raw!, ground()).issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
+	});
+
+	it('drops a character cue from a fix when the quote had none', () => {
+		expect(groundLoreCheck([flag({ fix: 'KAEL: My captain waits at the gate.' })], ground()).issues[0]?.fix).toBe('My captain waits at the gate.');
+	});
+
+	it('keeps a character cue in the fix of a line written with one', () => {
+		const scope = 'KAEL: My sister waits at the gate.\n';
+		const { issues } = groundLoreCheck([flag({ line: 'KAEL: My sister waits at the gate.', fix: 'KAEL: My captain waits at the gate.' })], ground({ scope }));
+		expect(issues[0]).toMatchObject({ line: 'KAEL: My sister waits at the gate.', fix: 'KAEL: My captain waits at the gate.' });
 	});
 
 	it('takes a lower-case cue left alone on the LINE row, through to the line', () => {
@@ -385,12 +400,11 @@ describe('the canon note in a send', () => {
 	const active: ContextItem = { kind: 'active', label: 'Active note', path: 'Script/Scene.md', content: SCRIPT };
 
 	it('resolves the setting to a note path, falling back to the default', () => {
-		expect(DEFAULT_SETTINGS.canonNote).toBe(DEFAULT_CANON_NOTE);
 		expect(mergeSettings({ canonNote: 'Writing/Canon' }).canonNote).toBe('Writing/Canon');
-		expect(mergeSettings({ canonNote: 3 }).canonNote).toBe(DEFAULT_CANON_NOTE);
+		expect(mergeSettings({ canonNote: 3 }).canonNote).toBe(DEFAULT_SETTINGS.canonNote);
 		expect(canonNotePath('Writing/Canon', '.obsidian')).toBe('Writing/Canon.md');
 		expect(canonNotePath(' /Writing/Canon.md ', '.obsidian')).toBe('Writing/Canon.md');
-		for (const bad of ['', '   ', '../Canon', '.obsidian/Canon']) expect(canonNotePath(bad, '.obsidian')).toBe(DEFAULT_CANON_NOTE);
+		for (const bad of ['', '   ', '../Canon', '.obsidian/Canon']) expect(canonNotePath(bad, '.obsidian')).toBe(DEFAULT_SETTINGS.canonNote);
 	});
 
 	it('goes along while the note exists and has text', async () => {
@@ -408,6 +422,21 @@ describe('the canon note in a send', () => {
 		const long = { ...active, content: 'y'.repeat(9_000) };
 		expect(shownChars([long, { ...canon, content: 'z'.repeat(9_000) }], 20_000, 1_000)[0]).toBeLessThan(9_000);
 		expect(shownChars([long], 20_000, 1_000)[0]).toBeGreaterThan(shownChars([long, { ...canon, content: 'z'.repeat(9_000) }], 20_000, 1_000)[0]!);
+	});
+
+	it('on a check, comes before the lore notes in the budget with the script, on the allocation the block uses', () => {
+		const script = { ...active, content: 's'.repeat(4_000) };
+		const canon: ContextItem = { kind: 'canon', label: 'Sequel canon', path: CANON, content: 'c'.repeat(2_000) };
+		const lore: ContextItem[] = Array.from({ length: 12 }, (_, i) => ({ kind: 'lore', label: `L${i}`, path: `L${i}.md`, content: 'l'.repeat(12_000) }));
+		const items = [script, ...lore, canon];
+		const chars = shownChars(items, 20_000, 2_000);
+		expect(chars[0]).toBe(4_000);
+		expect(chars.at(-1)).toBe(2_000);
+		const block = formatContextBlock(items, 20_000, 2_000);
+		for (const shown of chars.slice(1, -1)) {
+			expect(shown).toBeGreaterThan(0);
+			expect(block).toContain(`showing ${shown} of 12000`);
+		}
 	});
 
 	it('counts as read for citations, and adds no chip to the user message', () => {
@@ -432,6 +461,7 @@ describe('the canon note in a send', () => {
 		expect(prompt).toMatch(/agrees with it is not a contradiction/);
 		expect(prompt).toContain('[[Scene]]');
 		expect(prompt).not.toContain('```draft');
+		expect(prompt).toMatch(/FIX has no character name/);
 		expect(buildSystemPrompt({ toolsEnabled: true, maxCharsPerNote: 100, loreCheck: 'Script/Scene.md' })).not.toContain('canon');
 	});
 });
@@ -456,6 +486,7 @@ describe('the issue list', () => {
 		expect(loreNotes({ scriptPath: 's', issues: [], leftOut: 1 })).toEqual(['1 flag was left out: the line or the note cited could not be verified.']);
 		expect(loreNotes({ scriptPath: 's', issues: [ISSUE], leftOut: 2 })[0]).toMatch(/^2 more flags were/);
 		expect(loreNotes({ scriptPath: 's', issues: [], shown: { chars: 250, of: 1000 } })).toEqual(["Only the first 25% fit in the model's context. Select the rest to check it."]);
+		expect(loreNotes({ scriptPath: 's', issues: [], canonShown: { chars: 250, of: 1000 } })).toEqual(["Only the first 25% of the sequel canon note fit in the model's context, so a change further down can still be flagged."]);
 		expect(loreNotes({ scriptPath: 's', issues: [], readNoLore: true })[0]).toMatch(/read no lore notes/);
 	});
 });
@@ -464,7 +495,7 @@ describe('stored lore checks', () => {
 	const conv = (loreCheck: unknown) => ({ id: 'c', messages: [{ id: 'm', role: 'assistant', content: 'x', loreCheck }] });
 
 	it('survive a reload, proposal ids included', () => {
-		const check = { scriptPath: 's.md', issues: [{ ...ISSUE, proposalId: 'p' }], leftOut: 1, readNoLore: true, shown: { chars: 1, of: 2 } };
+		const check = { scriptPath: 's.md', issues: [{ ...ISSUE, proposalId: 'p' }], leftOut: 1, readNoLore: true, shown: { chars: 1, of: 2 }, canonShown: { chars: 3, of: 4 } };
 		expect(sanitizeConversation(conv(check))?.messages[0]?.loreCheck).toEqual(check);
 	});
 
@@ -499,7 +530,7 @@ describe('a send through core', () => {
 	const CANON = 'Sequel canon.md';
 
 	/** A core over `files` with `open` as the open note, whose provider plays `replies` in order. */
-	function setup(files: Record<string, string>, open: string, replies: StreamEvent[][]) {
+	function setup(files: Record<string, string>, open: string, replies: StreamEvent[][], contextWindow?: number) {
 		const file = (path: string) => Object.assign(new TFile(), { path, basename: path.replace(/^.*\//, '').replace(/\.md$/, ''), extension: 'md', stat: { size: 0, mtime: 0 } });
 		const noEvent = () => ({});
 		const app = {
@@ -523,6 +554,7 @@ describe('a send through core', () => {
 		const provider = {
 			id: 'ollama',
 			capabilities: { toolCalling: true },
+			contextWindow: () => Promise.resolve(contextWindow),
 			async *chat(request: ChatRequest) {
 				requests.push(request);
 				await Promise.resolve();
@@ -561,6 +593,38 @@ describe('a send through core', () => {
 		const result = conv.messages.at(-1)?.loreCheck;
 		expect(result?.issues).toMatchObject([{ line: 'She waits.', notePath: CANON }]);
 		expect(result?.readNoLore).toBeUndefined();
+	});
+
+	it('shows the whole scene when the notes it names would not fit beside it', async () => {
+		const names = Array.from({ length: 12 }, (_, i) => `Name${i}`);
+		const scene = `${names.join(' ')} ${'word '.repeat(1_200)}`;
+		const files = { 'Script/Scene 13.md': scene, ...Object.fromEntries(names.map((n) => [`${n}.md`, 'lore '.repeat(6_000)])) };
+		const { core, conv, requests } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')], 16_384);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(conv.messages.at(-1)?.loreCheck).toEqual({ scriptPath: 'Script/Scene 13.md', issues: [] });
+		expect(requests[0]?.messages[1]?.content).toContain(scene);
+		expect(requests[0]?.messages[1]?.content).toContain('<<<note path="Name0.md">>>');
+	});
+
+	it('says how much of the canon note reached the model when it was cut', async () => {
+		const canon = 'change '.repeat(4_000);
+		const files = { 'Script/Scene 13.md': 'She waits.', 'Lore.md': 'Nothing on her.', [CANON]: canon };
+		const { core, conv } = setup(files, 'Script/Scene 13.md', [read('Lore.md'), say('```lore\n```')], 2_000);
+		await core.checkLore(conv, await core.loreScript(), check);
+		const result = conv.messages.at(-1)?.loreCheck;
+		expect(result?.shown).toBeUndefined();
+		expect(result?.canonShown?.of).toBe(canon.length);
+		expect(result?.canonShown?.chars).toBeLessThan(canon.length);
+	});
+
+	it('does not send a lore note left no room, or count it as read', async () => {
+		const scene = `Kael ${'word '.repeat(800)}`;
+		const files = { 'Script/Scene 13.md': scene, 'Kael.md': 'Only child.' };
+		const { core, conv, requests } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')], 500);
+		await core.checkLore(conv, await core.loreScript(), check);
+		expect(requests[0]?.messages[1]?.content).not.toContain('Kael.md');
+		expect(conv.messages[0]?.sources).toEqual([{ kind: 'vault', path: 'Script/Scene 13.md', seen: 'full' }]);
+		expect(conv.messages.at(-1)?.loreCheck).toMatchObject({ issues: [], readNoLore: true });
 	});
 
 	it('counts a lore note it read, and reports a clean result', async () => {
