@@ -323,8 +323,8 @@ and this turn's attached context. Only cited notes are listed, minus notes
 the same turn proposed changing: a link to one names the change, not a
 source. A turn that ends in a draft citing no note lists instead the
 notes this turn's tool results showed, in the order shown (`draftRead` on
-the list), since the notes that shaped a scene should show whatever the
-model typed. A turn whose user message has no `sources` record was saved
+the list), each with the status a citation of it would get, since the notes
+that shaped a scene should show whatever the model typed. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always

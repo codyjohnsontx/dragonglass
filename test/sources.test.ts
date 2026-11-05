@@ -135,6 +135,37 @@ describe('answerSources', () => {
 		});
 	});
 
+	it('gives a note listed under a draft the status a citation of it would get', () => {
+		const t1 = ask('Who is Kael?');
+		const s1 = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });
+		const r1 = msg('tool', 'Kael...', { toolCallId: 't1', sources: [read('Characters/Kael.md')] });
+		const a1 = msg('assistant', 'Gruff but loyal [[Kael]].');
+		const t2 = ask('Draft the scene at Ashfall with Kael and Mira', null, ['Characters/Mira.md']);
+		const s2 = msg('assistant', '', { toolCalls: [{ id: 't2', name: 'search_notes', argumentsJson: '{}' }] });
+		const r2 = msg('tool', 'results', { toolCallId: 't2', sources: [excerpt('Characters/Kael.md'), excerpt('Characters/Mira.md'), excerpt('Places/Ashfall.md')] });
+		const draft = msg('assistant', '```draft\nEXT. ASHFALL - DAY\n```', { draft: { thread: 'd1', text: 'EXT. ASHFALL - DAY' } });
+		expect(answerSources([t1, s1, r1, a1, t2, s2, r2, draft], {}, resolve).lists.get(draft.id)?.vault).toEqual([
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'read' },
+			{ link: 'Mira', path: 'Characters/Mira.md', status: 'read' },
+			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'excerpt' },
+		]);
+	});
+
+	it('leaves an excerpt under a draft unflagged after a turn saved before sources were recorded', () => {
+		const old = msg('user', 'What is Kael like?', { context: { activeNotePath: null, selection: null, attachments: [] } });
+		const oldStep = msg('assistant', '', { toolCalls: [{ id: 'o1', name: 'read_note', argumentsJson: '{}' }] });
+		const oldTool = msg('tool', 'Kael is gruff but loyal.', { toolCallId: 'o1' });
+		const oldAnswer = msg('assistant', 'Gruff but loyal [[Kael]].');
+		const now = ask('Draft Kael at Ashfall');
+		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'search_notes', argumentsJson: '{}' }] });
+		const tool = msg('tool', 'results', { toolCallId: 't1', sources: [excerpt('Characters/Kael.md'), read('Places/Ashfall.md')] });
+		const draft = msg('assistant', '```draft\nEXT. ASHFALL - DAY\n```', { draft: { thread: 'd1', text: 'EXT. ASHFALL - DAY' } });
+		expect(answerSources([old, oldStep, oldTool, oldAnswer, now, step, tool, draft], {}, resolve).lists.get(draft.id)?.vault).toEqual([
+			{ link: 'Kael', path: 'Characters/Kael.md', status: 'unchecked' },
+			{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'read' },
+		]);
+	});
+
 	it('keeps only the cited notes under a draft that cites some, and no list under a plain reply that cites none', () => {
 		const user = ask('Draft it');
 		const step = msg('assistant', '', { toolCalls: [{ id: 't1', name: 'read_note', argumentsJson: '{}' }] });

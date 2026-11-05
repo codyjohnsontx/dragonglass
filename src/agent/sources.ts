@@ -160,7 +160,8 @@ export function sanitizeSources(raw: unknown): Source[] {
  * and gets no list; after one, a cited note the record does not show as read
  * is unchecked rather than unread, since the unrecorded turn may have shown it.
  * A turn that ends in a draft citing no note lists the notes this turn's tool
- * results showed, in the order shown, minus notes the turn proposed changing.
+ * results showed, in the order shown, minus notes the turn proposed changing,
+ * each with the status the same rules give a cited note.
  */
 export function answerSources(
 	messages: StoredMessage[],
@@ -176,7 +177,7 @@ export function answerSources(
 	let i = 0;
 	while (i < messages.length) {
 		const turnContext = new Map<string, 'full' | 'excerpt'>();
-		const turnTools = new Map<string, 'full' | 'excerpt'>();
+		const turnTools = new Set<string>();
 		const proposed = new Set<string>();
 		const assistants: StoredMessage[] = [];
 		const user = messages[i]?.role === 'user' ? messages[i]! : null;
@@ -197,7 +198,7 @@ export function answerSources(
 			for (const s of sanitizeSources(m.sources)) {
 				if (s.kind === 'vault') {
 					if (s.seen === 'full' || !seenEver.has(s.path)) seenEver.set(s.path, s.seen);
-					if (s.seen === 'full' || !turnTools.has(s.path)) turnTools.set(s.path, s.seen);
+					turnTools.add(s.path);
 				} else {
 					const at = webEver.findIndex((w) => w.n === s.n);
 					if (at >= 0) webEver[at] = s;
@@ -209,15 +210,17 @@ export function answerSources(
 		const web = [...webEver];
 		for (const a of assistants) webByMessage.set(a.id, web);
 		if (!turnRecorded) continue;
-		const seen = (path: string) => {
+		const status = (path: string): VaultCitationStatus => {
 			const sent = turnContext.get(path);
 			const shown = seenEver.get(path);
-			return sent === 'full' || shown === 'full' ? 'full' : (sent ?? shown);
+			if (sent === 'full' || shown === 'full') return 'read';
+			if (!historyRecorded) return 'unchecked';
+			return sent || shown ? 'excerpt' : 'unread';
 		};
-		const list = buildList(assistants.map((a) => a.content).join('\n\n'), seen, historyRecorded, proposed, web, resolve);
+		const list = buildList(assistants.map((a) => a.content).join('\n\n'), status, proposed, web, resolve);
 		if (list.vault.length === 0 && assistants.some((a) => a.draft)) {
-			for (const [path, shown] of turnTools) {
-				if (!proposed.has(path)) list.vault.push({ link: baseName(path), path, status: shown === 'full' ? 'read' : 'excerpt' });
+			for (const path of turnTools) {
+				if (!proposed.has(path)) list.vault.push({ link: baseName(path), path, status: status(path) });
 			}
 			if (list.vault.length > 0) list.draftRead = true;
 		}
@@ -228,8 +231,7 @@ export function answerSources(
 
 function buildList(
 	answer: string,
-	seen: (path: string) => 'full' | 'excerpt' | undefined,
-	historyRecorded: boolean,
+	status: (path: string) => VaultCitationStatus,
 	proposed: Set<string>,
 	web: WebSource[],
 	resolve: LinkResolver,
@@ -242,10 +244,7 @@ function buildList(
 		if (isProposed(link, path, proposed)) continue;
 		if (path !== null && citedPaths.has(path)) continue;
 		if (path !== null) citedPaths.add(path);
-		const shown = path === null ? undefined : seen(path);
-		const status: VaultCitationStatus =
-			path === null ? 'missing' : shown === 'full' ? 'read' : !historyRecorded ? 'unchecked' : shown === 'excerpt' ? 'excerpt' : 'unread';
-		vault.push({ link, path, status });
+		vault.push({ link, path, status: path === null ? 'missing' : status(path) });
 	}
 	const byNumber = new Map(web.map((w) => [w.n, w]));
 	const webEntries = [...cited.web].sort((a, b) => a - b).map((n) => ({ n, source: byNumber.get(n) ?? null }));
