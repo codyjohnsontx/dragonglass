@@ -333,8 +333,10 @@ rewritten as a new version; the card shows the latest with arrows to step back
 through the earlier ones, so you can compare or go back. **Copy** copies the
 version shown. **Insert into …** puts it into the note you have open:
 over the selected text if there is one, otherwise at the cursor, with a blank
-line either side. The insert is a proposal like any other edit: the diff shows
-under the card, and nothing is written until you approve it.
+line either side. The note must be in editing view, since Reading view has no
+cursor; Insert asks you to switch if it is not. The insert is a proposal like
+any other edit: the diff shows under the card, and nothing is written until you
+approve it.
 
 Right after a draft, a message that names no note is taken as being about the
 draft, and the model cannot propose note edits on that turn. To change a note

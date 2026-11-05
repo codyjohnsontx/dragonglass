@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { App, Plugin } from 'obsidian';
 import { MarkdownView, TFile } from 'obsidian';
 import { ObsidianVaultPort } from '../src/vault/obsidian-port';
+import { ProposalError } from '../src/vault/proposals';
 
 interface FakeLeaf {
 	view: unknown;
@@ -79,7 +80,7 @@ describe('ObsidianVaultPort.getActiveContext', () => {
  * as on the blur from clicking Insert: Obsidian's `save()` then returns at
  * once, and the vault holds the old text until that write lands.
  */
-function savingEditorPort(writeMs: number) {
+function savingEditorPort(writeMs: number, mode: 'source' | 'preview' = 'source') {
 	const file = Object.assign(new TFile(), { path: 'Script/Scene.md' });
 	let disk = 'KAEL\nAgain.\n';
 	const typed = 'KAEL\nAgain. Now.\n';
@@ -88,6 +89,7 @@ function savingEditorPort(writeMs: number) {
 	leaf.view = Object.assign(new MarkdownView(), {
 		leaf,
 		file,
+		getMode: () => mode,
 		save: () => Promise.resolve(),
 		editor: {
 			getSelection: () => '',
@@ -112,6 +114,13 @@ describe('ObsidianVaultPort.getInsertTarget', () => {
 		const target = await port.getInsertTarget();
 		expect(target?.content).toBe(typed);
 		expect(await port.readNote('Script/Scene.md')).toBe(typed);
+	});
+
+	it('refuses a note in Reading mode at once, with what to do instead of the hidden editor\'s state', async () => {
+		const { port } = savingEditorPort(0, 'preview');
+		const refusal = port.getInsertTarget();
+		await expect(refusal).rejects.toBeInstanceOf(ProposalError);
+		await expect(refusal).rejects.toThrow(/Switch the note to editing/);
 	});
 });
 

@@ -116,7 +116,7 @@ export interface VaultPort {
 	listPluginFiles(relativeDir: string): Promise<string[]>;
 	deletePluginFile(relativePath: string): Promise<void>;
 	getActiveContext(): ActiveContext;
-	/** The open note's editor state for an insert, after saving its pending edits; null with no note open. */
+	/** The open note's editor state for an insert, after saving its pending edits; null with no note open. Throws a `ProposalError` when the note cannot take an insert as it is shown. */
 	getInsertTarget(): Promise<InsertTarget | null>;
 	/** Hear about vault changes from now on; returns a function that stops listening. */
 	onChange(listener: (change: VaultChange) => void): () => void;

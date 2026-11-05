@@ -544,8 +544,11 @@ shared, so it asks which note the scene is for when it should match one and
 can read a note the user names with the read tools.
 
 How Insert writes: a direct editor replace, or a proposal. Writes still never
-write (decision 5). The insert reads the editor at the click (selection or
-cursor), after saving the view's pending edits and waiting briefly for a
+write (decision 5). In Reading mode Insert refuses and asks to switch to
+editing: there is no visible cursor to honour, the hidden editor sits at the
+top of the note and goes stale when the note changes, and falling back to the
+end of the note is a placement nobody asked for. Otherwise the insert reads the
+editor at the click (selection or cursor), after saving the view's pending edits and waiting briefly for a
 save already under way (the blur from the click starts one) to reach the
 vault, builds the whole new note
 text and goes through `ProposalEngine.proposeRewrite`, which refuses when

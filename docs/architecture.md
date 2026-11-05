@@ -279,7 +279,9 @@ turn's final render.
 Insert reads the open Markdown view at the click through
 `VaultPort.getInsertTarget` (`obsidian-port.ts` saves the view's pending
 edits first, then takes the editor text and the selection offsets, both at
-the cursor when nothing is selected). `insertDraftText` puts the draft over
+the cursor when nothing is selected). A view in Reading mode is refused, since
+its hidden editor shows no cursor and goes stale when the note changes.
+`insertDraftText` puts the draft over
 `[from, to)` on lines of its own with a blank line each side, except at the
 ends of the note, and `proposeDraftInsert` turns that into a
 `ProposalEngine.proposeRewrite` proposal: the engine re-reads the note and

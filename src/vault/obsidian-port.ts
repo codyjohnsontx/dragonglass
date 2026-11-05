@@ -2,6 +2,7 @@ import type { CachedMetadata } from 'obsidian';
 import { App, MarkdownView, normalizePath, Plugin, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 import { ActiveContext, InsertTarget, LinkRef, NoteLinks, NoteMetadata, VaultChange, VaultFileInfo, VaultFolderInfo, VaultPort } from './port';
 import { parentFolder } from './paths';
+import { ProposalError } from './proposals';
 import { StoreBackend } from '../persistence/store';
 
 /** How long an insert waits for an editor save already in flight to reach the vault, and how often it looks. */
@@ -233,12 +234,14 @@ export class ObsidianVaultPort implements VaultPort, StoreBackend {
 	 * writing (the blur from clicking Insert starts one), `save()` returns
 	 * before that write lands, so this waits a short while for the vault to
 	 * catch up. A save that fails or never lands leaves the text as it is and
-	 * the proposal engine reports the mismatch.
+	 * the proposal engine reports the mismatch. Reading mode is refused: its
+	 * hidden editor shows no cursor and is not kept up to date.
 	 */
 	async getInsertTarget(): Promise<InsertTarget | null> {
 		const view = this.markdownView();
 		const file = view?.file;
 		if (!view || !file) return null;
+		if (view.getMode() === 'preview') throw new ProposalError('Switch the note to editing, place the cursor or select the text to replace, then Insert.');
 		try {
 			await view.save();
 		} catch {
