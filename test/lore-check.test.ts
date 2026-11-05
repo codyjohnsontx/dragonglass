@@ -135,6 +135,21 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck([flag({ line: 'waits at', fix: 'stands at the gate.' })], ground()).issues[0]?.fix).toBe('My sister stands at the gate.');
 	});
 
+	it.each([
+		['after the quote', 'You were born in Frosthaven, Kael. Nobody here forgets it.', 'You were born in Frosthaven, Kael.', 'You were born in Ashfall, Kael. Nobody here doubts it.'],
+		['before the quote', 'I swear it, my sister waits.', 'my sister waits.', 'I swore it, my captain waits.'],
+		['on one side while keeping the other', 'My sister waits at the gate.', 'waits at', 'My captain stands at the gate.'],
+		['only in its apostrophes', 'It’s my sister at the gate, isn’t it?', 'my sister', "It's my captain at the gate, isn't it?"],
+	])('takes a whole-line fix that changes the text %s as it stands, without splicing', (_, scope, line, fix) => {
+		expect(groundLoreCheck([flag({ line, fix })], ground({ scope })).issues[0]).toMatchObject({ line: scope, fix });
+	});
+
+	it('offers no fix when it cannot be told whether the fix is a fragment or the whole line', () => {
+		const { issues } = groundLoreCheck([flag({ line: 'waits at', fix: 'stands at the door.' })], ground());
+		expect(issues).toHaveLength(1);
+		expect(issues[0]?.fix).toBeUndefined();
+	});
+
 	it('takes a fragment fix with a dollar sign literally', () => {
 		expect(groundLoreCheck([flag({ line: 'My sister', fix: "$& and $'" })], ground()).issues[0]?.fix).toBe("$& and $' waits at the gate.");
 	});
@@ -182,6 +197,13 @@ describe('groundLoreCheck', () => {
 		['adds a note', 'my sister waits at the gate. (Note: Kael is an only child.)'],
 	])('drops a fix that keeps the wrong line and %s', (_, fix) => {
 		const { issues } = groundLoreCheck([flag({ fix })], ground());
+		expect(issues).toHaveLength(1);
+		expect(issues[0]?.fix).toBeUndefined();
+	});
+
+	it('drops a fix that keeps the wrong line in other apostrophes', () => {
+		const line = 'It’s my sister at the gate.';
+		const { issues } = groundLoreCheck([flag({ line, fix: "It's my sister at the gate. She is new." })], ground({ scope: line }));
 		expect(issues).toHaveLength(1);
 		expect(issues[0]?.fix).toBeUndefined();
 	});
@@ -349,6 +371,7 @@ describe('Intentional', () => {
 		await engine.apply(await proposeCanonEntry(engine, vault, 'c', CANON, 'Script/Scene.md', ISSUE));
 		expect(inCanon(vault.files.get(CANON)!, ISSUE.line)).toBe(true);
 		expect(inCanon(vault.files.get(CANON)!, 'Another line.')).toBe(false);
+		expect(inCanon('- "It\'s my sister." is deliberate.', 'It’s my sister.')).toBe(true);
 	});
 
 	it('explains a line with placeholder text in the user\'s terms', async () => {

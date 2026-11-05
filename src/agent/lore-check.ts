@@ -213,12 +213,26 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 	return { issues, ...(leftOut > 0 ? { leftOut } : {}) };
 }
 
-/** The whole corrected line: the fix, with whatever the line holds around the quote that the fix does not already carry. `cue` is what the quote had in front of the line's text, which the fix may repeat. */
-function correctedLine(match: LineMatch, fix: string, cue: string): string {
+/**
+ * The whole corrected line, or undefined when it cannot be told. What the line
+ * holds around the quote is added back unless the fix carries it. Where that
+ * text has words, the fix's length decides: about the line's, the model
+ * rewrote the line and changed that text too, so the fix stands alone; about
+ * the part it covers, it is a fragment; between the two, either reading can
+ * garble the line, so there is no fix. `cue` is what the quote had in front of
+ * the line's text, which the fix may repeat.
+ */
+function correctedLine(match: LineMatch, fix: string, cue: string): string | undefined {
 	const body = !cue ? fix : fix.toLowerCase().startsWith(cue.toLowerCase()) ? fix.slice(cue.length) : fix.replace(INLINE_CUE, '');
-	const lower = body.toLowerCase();
-	const head = lower.startsWith(match.before.toLowerCase()) ? '' : match.before;
-	const tail = lower.endsWith(match.after.toLowerCase()) ? '' : match.after;
+	const plain = plainQuotes(body);
+	const head = plain.startsWith(plainQuotes(match.before)) ? '' : match.before;
+	const tail = plain.endsWith(plainQuotes(match.after)) ? '' : match.after;
+	const missing = [head, tail].filter((side) => /[\p{L}\p{N}]/u.test(side)).join('').length;
+	if (missing > 0) {
+		const margin = missing / 4;
+		if (body.length >= match.line.length - margin) return body;
+		if (body.length > match.line.length - missing + margin) return undefined;
+	}
 	return `${head}${body}${tail}`;
 }
 
@@ -242,7 +256,7 @@ function leadingCue(quote: string, scope: string): string {
 
 /** Whether a fix still holds the whole line, the same or with a note added: what it got wrong is still there, so it corrects nothing. */
 function keepsLine(fix: string, line: string): boolean {
-	return fix.toLowerCase().includes(line.replace(/[.!?…]+$/, '').toLowerCase());
+	return plainQuotes(fix).includes(plainQuotes(line.replace(/[.!?…]+$/, '')));
 }
 
 /** Whether the canon note quotes this script line, as an Intentional entry does. */
@@ -251,7 +265,7 @@ export function inCanon(canon: string, line: string): boolean {
 }
 
 function plainQuotes(text: string): string {
-	return text.replace(/[“”]/g, '"').replace(/\s+/g, ' ').toLowerCase();
+	return text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').toLowerCase();
 }
 
 /** Vault paths the turn from `userMessageId` on showed the model: attached context and tool results, read or excerpted. */

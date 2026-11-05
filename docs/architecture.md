@@ -322,8 +322,10 @@ exist, must not be the script or a script page, and must have been shown to
 the model this turn (`shownPaths`). A flag that fails is counted in `leftOut`.
 A quoted fragment widens to its whole line, or is left out when it fits several.
 The fix keeps whatever the line holds around the fragment that it does not
-already carry, and a character cue is dropped from a dialogue quote: `KAEL:` anywhere, and words
-with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
+already carry. Where that text has words, a fix about the line's length stands
+alone as a rewrite, one about the fragment's length is spliced in, and one in
+between is dropped, since either reading could garble the line. A character
+cue is dropped from a dialogue quote: `KAEL:` anywhere, and words with no colon when what follows is a whole line of the script (`leadingCue`). A flag on a line the
 canon note quotes is dropped without a count, as is a repeat on the same line.
 A fix that still holds the whole line corrects nothing and is dropped, which
 leaves the issue with Intentional only.
