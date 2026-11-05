@@ -340,8 +340,8 @@ approve it.
 
 Right after a draft, a message that names no note is taken as being about the
 draft, and the model cannot propose note edits on that turn. To change a note
-then, name it with a `[[link]]`, a path, the word "note" or the open note's
-title.
+then, name it with a `[[link]]`, a `.md` path, the word "note" or the open
+note's title.
 
 An optional **Script folder** setting (Settings → Dragonglass AI → Writing)
 names the folder that holds your screenplay. Notes in it are the script, not
@@ -387,11 +387,16 @@ vault:
   new folder reverted, a property change applied and
   reverted exactly, a stale property change refused, and `replace_section`
   refusing a missing or ambiguous heading.
+- Scene drafting: a draft card with the notes that shaped it listed under it,
+  revisions stepped through in the card, Insert at the cursor or over a
+  selection through the review, a stale review refused, and script pages left
+  out of search.
 - Conversation history persists across plugin reload.
 
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above
 except the folder, move, property and section changes, which have run only
-with the scripted model).
+with the scripted model, and for drafting only a draft, a revision and Insert
+at the cursor).
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,

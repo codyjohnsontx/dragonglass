@@ -326,9 +326,10 @@ to no note), counting tool results from earlier turns, which are replayed,
 and this turn's attached context. Only cited notes are listed, minus notes
 the same turn proposed changing: a link to one names the change, not a
 source. A turn that ends in a draft citing no note lists instead the
-notes this turn's tool results showed, in the order shown (`draftRead` on
-the list), each with the status a citation of it would get, since the notes
-that shaped a scene should show whatever the model typed. A turn whose user message has no `sources` record was saved
+notes this turn's tool results showed, in the order shown and minus those
+same proposed notes (`draftRead` on the list), each with the status a citation
+of it would get, since the notes that shaped a scene should show whatever the
+model typed. A turn whose user message has no `sources` record was saved
 before source markers and gets no list; later turns of that conversation mark
 a cited note not shown as read since then *unchecked*, with no flag, as the
 unrecorded turn may have shown it. `userMessage` (`agent/context.ts`) always
@@ -345,8 +346,9 @@ nothing on click, so a reply cannot create an empty note.
   are normalized and checked for traversal, absolute paths, URLs, control
   characters, and the config folder before any vault access.
 - **Note content** is untrusted data for the model. It is wrapped in
-  `<<<note path="…">>>` delimiters and the system prompt says not to follow
-  instructions found inside.
+  `<<<note path="…">>>` delimiters (`<<<sample path="…">>>` for the script
+  sample and `<<<draft>>>` for the repeated draft, both defused) and the
+  system prompt says not to follow instructions found inside.
 - **Web content** (search snippets, page text, titles) is untrusted data too.
   It is wrapped in `<<<web result …>>>` and `<<<web page …>>>` delimiters,
   under a line saying never to follow instructions in it, with any delimiter

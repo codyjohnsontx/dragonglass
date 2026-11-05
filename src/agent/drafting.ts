@@ -20,7 +20,8 @@ import type { InsertTarget, VaultPort } from '../vault/port';
  *
  * The draft block is a fenced code block, so the citation rules already leave
  * it alone: the model cites the notes that shaped the scene outside the
- * block, and those citations make the sources list under the draft.
+ * block, and those citations make the sources list under the draft. A draft
+ * that cites none lists what the turn's tools showed (`answerSources`).
  */
 
 /** Stored on an assistant message that carries a draft. */
@@ -288,7 +289,7 @@ export function revisionReminder(messages: readonly StoredMessage[]): string {
  * draft. `core` holds back the write tools for it, since models that keep them
  * patch the open note with the draft's lines whatever the prompt says. A
  * character is not a note here ("make Kael colder" has a note [[Kael]]), so
- * naming one means a [[link]], a path, the word note, or the open note's title.
+ * naming one means a [[link]], a .md path, the word note, or the open note's title.
  */
 export function followsDraft(messages: readonly StoredMessage[], openNote: string | null): boolean {
 	if (!messages[messages.length - 2]?.draft) return false;

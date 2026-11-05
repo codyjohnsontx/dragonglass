@@ -525,7 +525,7 @@ one scene of prompt on those sends and is not stored. That fixed the target
 but not the habit: the model still patched the note with the draft's lines,
 stopped only by a failed find. So a send right after a draft that names no
 note gets no write tools. The cost: "add that to his file" straight after a
-draft needs a [[link]], a path or the word note before it can propose an edit.
+draft needs a [[link]], a `.md` path or the word note before it can propose an edit.
 
 How the format is matched: a Fountain parser, a model-side guess, or a few
 line patterns. The owner asked for the note's own conventions, read from the
