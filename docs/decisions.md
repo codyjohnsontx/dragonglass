@@ -664,10 +664,13 @@ which the rules do not ask for.
 A check's reply cites in its records, so the citation rules are not sent on a
 check, and the card's list is always what was sent and read. Models link anyway,
 and a link's place in a sentence cannot tell a citation from a word the sentence
-needs: `son of [[Aldric]].` looks like `only child [[Kael]].`. So only links after
-a value's last sentence go. Inside `VAULT` a link keeps its text, which at worst
-repeats a name, and `LINE` and `FIX` stay as written, so a script line with a
-link still matches.
+needs: `son of [[Aldric]].` looks like `only child [[Kael]].`. So a link goes when
+it follows a value's last sentence, or when it names the record's own `NOTE`, in
+which case it only cites that note again. In `LINE` and `FIX` that second rule
+holds only where the matched script line does not have the link, so a script line
+with a link still matches. Any other link keeps its text in `VAULT` and stays as
+written in `LINE` and `FIX`. The price is a sentence that names its own note as a
+word, such as `[[Kael]] has no sister.` citing Kael, which loses that word.
 
 How canon overrides: as data the model reads, and as a filter where a filter
 can be exact. The canon note goes with every send as its own context item,

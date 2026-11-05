@@ -76,7 +76,16 @@ describe('parseLoreBlock', () => {
 		['[[Kael]] has no sister.', 'Kael has no sister.'],
 		['He serves [[Characters/Kael.md|the captain]] well.', 'He serves the captain well.'],
 	])('keeps the words of a link in the claim: %s', (vault, says) => {
-		expect(parseLoreBlock(`\`\`\`lore\nLINE: a\nVAULT: ${vault}\nNOTE: Kael\n\`\`\``)?.[0]?.says).toBe(says);
+		expect(parseLoreBlock(`\`\`\`lore\nLINE: a\nVAULT: ${vault}\nNOTE: Chronicle\n\`\`\``)?.[0]?.says).toBe(says);
+	});
+
+	it.each([
+		['Kael is an only child [[Kael]].', 'Kael', 'Kael is an only child.'],
+		['Kael is an only child [[Kael]]', 'Kael', 'Kael is an only child'],
+		['Kael is an only child [[Characters/Kael.md|his page]], says [[Mira]].', '[[Characters/Kael.md]]', 'Kael is an only child, says Mira.'],
+		['Kael is an only child [[kael#Family]].', 'Kael', 'Kael is an only child.'],
+	])('drops a link to the record\'s own note from the claim: %s', (vault, note, says) => {
+		expect(parseLoreBlock(`\`\`\`lore\nLINE: a\nVAULT: ${vault}\nNOTE: ${note}\n\`\`\``)?.[0]?.says).toBe(says);
 	});
 
 	it.each(['I met [[Mira]] at the gate.', 'Kael walks to [[Frosthaven]].'])('leaves a line with a link as written, so it still matches the script: %s', (line) => {
@@ -142,6 +151,29 @@ describe('groundLoreCheck', () => {
 	it('treats the open note as the script even with no script folder set', () => {
 		expect(groundLoreCheck([flag({ note: 'Scene' })], ground({ scriptFolder: '' })).leftOut).toBe(1);
 		expect(groundLoreCheck([flag({ note: 'Scene 2' })], ground({ scriptFolder: '' })).leftOut).toBeUndefined();
+	});
+
+	it('drops a link to the cited note from a line the script does not write with it', () => {
+		const { issues, leftOut } = groundLoreCheck([flag({ line: 'My sister waits at the gate [[Kael]].' })], ground());
+		expect(leftOut).toBeUndefined();
+		expect(issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
+	});
+
+	it('drops a link to the cited note from a fix when the line does not have it', () => {
+		expect(groundLoreCheck([flag({ fix: 'My captain waits at the gate [[Kael]].' })], ground()).issues[0]?.fix).toBe('My captain waits at the gate.');
+	});
+
+	it('keeps a link to the cited note that the script line holds, in the line and the fix', () => {
+		const line = 'I serve [[Kael]] well.';
+		const { issues, leftOut } = groundLoreCheck([flag({ line, fix: 'I served [[Kael]] well.' })], ground({ scope: `${line}\n` }));
+		expect(leftOut).toBeUndefined();
+		expect(issues[0]).toMatchObject({ line, fix: 'I served [[Kael]] well.' });
+	});
+
+	it('offers no fix when the fix is only a link to the cited note', () => {
+		const { issues } = groundLoreCheck([flag({ fix: '[[Kael]]' })], ground());
+		expect(issues).toHaveLength(1);
+		expect(issues[0]?.fix).toBeUndefined();
 	});
 
 	it('widens a quoted fragment to its whole line', () => {
