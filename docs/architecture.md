@@ -343,9 +343,9 @@ the rest checks it), how much of a canon note too long for it was shown
 and that no lore note was read, when that is so, in
 place of "no contradictions". A clean result over cut text says so instead of
 claiming the vault (`cleanMessage`). A `[[link]]` after a record's last sentence is
-taken off as a citation, as is a link to the record's own `NOTE` anywhere in
-`VAULT`, and in `LINE` and `FIX` unless the matched script line holds it. Any
-other link keeps its text in `VAULT`, and stays as written in `LINE` and `FIX`. The sources list under it, headed "Read for this
+taken off as a citation. Any other link keeps its text in `VAULT` and stays as
+written in `LINE` and `FIX`, so a line with a link still matches the script. A
+fix that links the record's own `NOTE` where the script line does not is dropped. The sources list under it, headed "Read for this
 check", is everything sent or read but the script.
 
 **Fix it** (`proposeLoreFix`) replaces that line in the note as it is now

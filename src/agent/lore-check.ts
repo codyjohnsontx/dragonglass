@@ -115,8 +115,8 @@ export function parseLoreBlock(content: string): RawIssue[] | null {
 	const out: RawIssue[] = [];
 	for (const r of records) {
 		const line = unquote(withoutEndLinks(r.line ?? ''));
+		const says = withoutEndLinks(r.vault ?? '').replace(/\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]/g, '$1').trim();
 		const note = cleanLink(r.note ?? '');
-		const says = withoutNoteLinks(withoutEndLinks(r.vault ?? ''), note, '').replace(/\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]/g, '$1').trim();
 		// A record that names no note is the model saying the lore has nothing on it.
 		if (!line || !says || NO_FIX.test(note)) continue;
 		const fix = unquote(withoutEndLinks(r.fix ?? ''));
@@ -132,10 +132,10 @@ function withoutEndLinks(text: string): string {
 	return text.replace(/([.!?…"”'’`)])(?:\s*\[\[[^\]\n]*\]\])+\s*$/, '$1');
 }
 
-/** `text` without its [[links]] to the note a record cites, which only cite it again, keeping any that `held` has as written. */
-function withoutNoteLinks(text: string, note: string, held: string): string {
+/** Whether a fix links the note its record cites where the script line does not: a citation, which must not reach the script. */
+function citesNote(fix: string, note: string, line: string): boolean {
 	const name = baseName(note).toLowerCase();
-	return text.replace(/\s*\[\[([^\]\n]*)\]\]/g, (link, target: string) => (baseName(cleanLink(target)).toLowerCase() === name && !held.includes(link.trim()) ? '' : link));
+	return [...fix.matchAll(/\[\[[^\]\n]*\]\]/g)].some(([link]) => baseName(cleanLink(link)).toLowerCase() === name && !line.includes(link));
 }
 
 /** A value without the quotes or backticks a model wraps around it. */
@@ -209,10 +209,9 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 	const issues: LoreIssue[] = [];
 	let leftOut = 0;
 	for (const r of raw) {
-		const quote = matchLines(g.scope, r.line).length > 0 ? r.line : withoutNoteLinks(r.line, r.note, '');
-		let found = matchLines(g.scope, quote);
-		const cue = found.length === 0 ? leadingCue(quote, g.scope) : '';
-		if (cue) found = matchLines(g.scope, quote.slice(cue.length));
+		let found = matchLines(g.scope, r.line);
+		const cue = found.length === 0 ? leadingCue(r.line, g.scope) : '';
+		if (cue) found = matchLines(g.scope, r.line.slice(cue.length));
 		const match = new Set(found.map((f) => f.line)).size === 1 ? found[0] : undefined;
 		const notePath = g.resolve(r.note);
 		const lore = notePath !== null && isLoreNote(notePath, g) && g.shown.has(notePath);
@@ -223,8 +222,8 @@ export function groundLoreCheck(raw: readonly RawIssue[], g: LoreGround): Pick<L
 		if (g.canonText !== null && inCanon(g.canonText, match.line)) continue;
 		if (issues.some((i) => i.line === match.line)) continue;
 		const issue: LoreIssue = { id: g.newId(), line: match.line, says: r.says, note: baseName(notePath), notePath };
-		const fix = r.fix === undefined ? undefined : correctedLine(match, withoutNoteLinks(r.fix, r.note, match.line), cue);
-		if (fix && !keepsLine(fix, match.line)) issue.fix = fix;
+		const fix = r.fix === undefined || citesNote(r.fix, r.note, match.line) ? undefined : correctedLine(match, r.fix, cue);
+		if (fix !== undefined && !keepsLine(fix, match.line)) issue.fix = fix;
 		issues.push(issue);
 	}
 	return { issues, ...(leftOut > 0 ? { leftOut } : {}) };

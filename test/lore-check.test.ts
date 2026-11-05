@@ -80,12 +80,12 @@ describe('parseLoreBlock', () => {
 	});
 
 	it.each([
-		['Kael is an only child [[Kael]].', 'Kael', 'Kael is an only child.'],
-		['Kael is an only child [[Kael]]', 'Kael', 'Kael is an only child'],
-		['Kael is an only child [[Characters/Kael.md|his page]], says [[Mira]].', '[[Characters/Kael.md]]', 'Kael is an only child, says Mira.'],
-		['Kael is an only child [[kael#Family]].', 'Kael', 'Kael is an only child.'],
-	])('drops a link to the record\'s own note from the claim: %s', (vault, note, says) => {
-		expect(parseLoreBlock(`\`\`\`lore\nLINE: a\nVAULT: ${vault}\nNOTE: ${note}\n\`\`\``)?.[0]?.says).toBe(says);
+		['Mira is the sister of [[Kael]].', 'Mira is the sister of Kael.'],
+		['[[Kael]] has no sister.', 'Kael has no sister.'],
+		['Mira serves [[Kael|the Warden]] well.', 'Mira serves the Warden well.'],
+		['Kael is an only child [[Kael]].', 'Kael is an only child Kael.'],
+	])('keeps the words of a link to the record\'s own note in the claim: %s', (vault, says) => {
+		expect(parseLoreBlock(`\`\`\`lore\nLINE: a\nVAULT: ${vault}\nNOTE: Kael\n\`\`\``)?.[0]?.says).toBe(says);
 	});
 
 	it.each(['I met [[Mira]] at the gate.', 'Kael walks to [[Frosthaven]].'])('leaves a line with a link as written, so it still matches the script: %s', (line) => {
@@ -153,14 +153,23 @@ describe('groundLoreCheck', () => {
 		expect(groundLoreCheck([flag({ note: 'Scene 2' })], ground({ scriptFolder: '' })).leftOut).toBeUndefined();
 	});
 
-	it('drops a link to the cited note from a line the script does not write with it', () => {
-		const { issues, leftOut } = groundLoreCheck([flag({ line: 'My sister waits at the gate [[Kael]].' })], ground());
-		expect(leftOut).toBeUndefined();
-		expect(issues[0]).toMatchObject({ line: 'My sister waits at the gate.', fix: 'My captain waits at the gate.' });
+	it('leaves out a line with a link the script does not write', () => {
+		expect(groundLoreCheck([flag({ line: 'My sister waits at the gate [[Kael]].' })], ground())).toEqual({ issues: [], leftOut: 1 });
 	});
 
-	it('drops a link to the cited note from a fix when the line does not have it', () => {
-		expect(groundLoreCheck([flag({ fix: 'My captain waits at the gate [[Kael]].' })], ground()).issues[0]?.fix).toBe('My captain waits at the gate.');
+	it.each([
+		['a citation', 'My captain waits at the gate [[Kael]].'],
+		['a word the sentence needs', 'I serve [[Kael]], not the Council at the gate.'],
+		['another spelling of the link', 'My captain waits [[Characters/kael.md|there]] at the gate.'],
+	])('offers no fix when it links the cited note as %s and the line does not', (_, fix) => {
+		const { issues } = groundLoreCheck([flag({ fix })], ground());
+		expect(issues).toHaveLength(1);
+		expect(issues[0]?.fix).toBeUndefined();
+	});
+
+	it('keeps a fix that links another note, as written', () => {
+		const fix = 'My captain waits at [[Ashfall]].';
+		expect(groundLoreCheck([flag({ fix })], ground()).issues[0]?.fix).toBe(fix);
 	});
 
 	it('keeps a link to the cited note that the script line holds, in the line and the fix', () => {
