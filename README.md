@@ -374,8 +374,9 @@ The **sequel canon note** (`Sequel canon.md` unless you change it under
 Settings → Writing) records deliberate changes to the original lore. Write it
 yourself or let Intentional add to it. It goes with every message and overrides
 the other notes for drafting and for the lore check. A line added through
-Intentional is never flagged again; a change in your own words depends on the
-model taking it in, so a check can occasionally still flag it.
+Intentional is reliable: it is never flagged again. A change in your own words
+depends on the model taking it in, so a check can still flag a line that agrees
+with it, and how often depends on the case (figures under "What works").
 
 ## What works
 
@@ -431,13 +432,14 @@ with the scripted model, for drafting only a draft, a revision and Insert at
 the cursor, and for the lore check a check, Fix it, Intentional, a re-check and
 a draft following the canon note).
 The lore check's reliability on a laptop with qwen3:8b, on one test scene with
-four planted contradictions, five runs: it found 15 of the 20 and at least two
-in every run, at about 75 seconds a check. On a scene with nothing wrong it
-still flagged at least one line in every run, so read each claim against its
-note before acting on it. A canon change in the owner's words kept its line
-from being flagged in all five runs, but a later test with a changed birthplace
-still had an agreeing line flagged in 5 of 7 runs, 2 of them as issues. Use
-Intentional on a false flag: a line it records is never flagged again.
+four planted contradictions, five runs: it found 11 of the 20, per run 3, 2, 3,
+3 and 0, at about 76 seconds a check. On a scene with nothing wrong it flagged 4
+lines in 3 of 5 runs, so read each claim against its note before acting on it.
+A line recorded through Intentional is reliable: it was flagged in 0 of 3
+re-checks. A canon change in the owner's words depends on the case: a sister the
+lore does not have was flagged in 0 of 5 runs, while a changed birthplace still
+had an agreeing line flagged in 3 of 5 runs, against 4 of 5 with no canon note.
+Use Intentional on a false flag: a line it records is never flagged again.
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,

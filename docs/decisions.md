@@ -611,10 +611,15 @@ the model asking. Dropping the tools was rejected, since a contradiction with a
 note the script never names needs them.
 
 Measured with qwen3:8b on one fixture, a scene with four planted contradictions
-and a clean scene over 12 lore notes, five runs each. With the tools alone it
-found 11 of the 20 plants at about 150 seconds a check, and one run found none.
-With the named notes it found 15 of 20 at about 75 seconds, and every run found
-at least two. That is why the notes go along.
+and a clean scene over 12 lore notes, five runs each. With the tools alone, on
+an earlier build, it found 11 of the 20 plants at about 150 seconds a check, and
+one run found none. With the named notes, on the final build, it found 11 of 20
+at about 76 seconds, per run 3, 2, 3, 3 and 0, with no false extras. The run
+that found none paraphrased every line (`Mira remembers Oren...`), so leaving
+those flags out was correct. The notes halve the time and take the choice of
+what to read away from the model, which is why they go along. They found no more
+plants on this measure, and five runs on one fixture cannot separate small
+differences.
 
 They come after the script and the canon note in the token budget. An even
 split across every item let a dozen long notes cut a scene that fit on its own,
@@ -630,16 +635,17 @@ canon note is still cut, the card says how much reached the model, as it does
 for the script. It also counts the notes cut, dropped or past the 12, and a clean
 result over any cut text says "in what fit" rather than claiming the vault.
 
-The same runs show what a small local model does to a clean script: it flags
-something. Every run on the clean scene flagged at least one line, seven in all,
-such as "He died in the mine" against notes saying the mine fell in and killed
-him. Telling it that a contradiction means both cannot be true, and that other
-words for the same fact agree, did not help: six false flags before the rule,
-seven after. The rule stays because it says what the check means and cost no
-plants, but no wording fixed this. The card's claim beside the note link is the
-defence: a false flag is read and ignored, and nothing is written. A second
-pass that asks the model about each flag is the obvious next step and is not
-built.
+The same runs show what a small local model can do to a clean script: it flagged
+4 lines in 3 of the 5 runs, and 2 runs were fully clean. An earlier build flagged
+something in every run, such as "He died in the mine" against notes saying the
+mine fell in and killed him. On that build, telling it that a contradiction means
+both cannot be true, and that other words for the same fact agree, did not help:
+six false flags before the rule, seven after. Why the final build flags less is
+not established: the prompt changed, and this is five runs. The rule stays because
+it says what the check means, but no wording removed false flags. The card's
+claim beside the note link is the defence: a false flag is read and ignored, and
+nothing is written. A second pass that asks the model about each flag is the
+obvious next step and is not built.
 
 Two things the runs showed could be fixed in code. The model puts the character
 cue in front of the line with no colon (`MIRA I remember`), and those flags were
@@ -684,10 +690,18 @@ quotes is dropped in code (`inCanon`) and that line is never flagged again. A
 change the owner wrote in their own words has no line to match, so it rests on
 the prompt rules and the model taking them in. Matching those in code would
 mean judging meaning, which is the model's job and not one a filter can do.
-Measured the same way, with the sister as such a change: it was flagged in none
-of five runs, and the other three plants were found 11 times of 15. A draft
-followed a canon entry that contradicted a lore note, and followed the note once
-the entry was removed.
+So a line recorded through Intentional is reliable, and canon in the owner's own
+words depends on the case. Measured the same way, on the final build: a line
+recorded through Intentional was flagged in 0 of 3 re-checks in the app, while
+another line that disagreed with the lore and was not recorded was flagged in 2
+of 3, which is correct. With the sister as an owner-worded change, it was flagged
+in 0 of 5 runs, and the other three plants were found 10 times of 15. With a
+changed birthplace, a line that agrees with the canon note was flagged in 3 of 5
+runs against 4 of 5 with no canon note, so that entry barely moved the model. In
+the app the same entry left a line on the card in 2 of 3 checks, and both flags
+cited the canon note itself for a line that agrees with it. Telling those apart
+takes judgement about meaning, so this is not a parser fix. The limit is accepted
+for now; a second pass is separate work.
 
 What Fix it and Intentional are: proposals, like Insert. The proposal hangs off
 the issue rather than a tool message, so it joins no batch and is not replayed
