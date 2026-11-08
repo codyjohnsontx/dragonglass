@@ -700,8 +700,13 @@ changed birthplace, a line that agrees with the canon note was flagged in 3 of 5
 runs against 4 of 5 with no canon note, so that entry barely moved the model. In
 the app the same entry left a line on the card in 2 of 3 checks, and both flags
 cited the canon note itself for a line that agrees with it. Telling those apart
-takes judgement about meaning, so this is not a parser fix. The limit is accepted
-for now; a second pass is separate work.
+takes judgement about meaning, so this is not a parser fix. Drafts rest on the
+same delivery and are not guaranteed to follow the canon note either. With a
+changed birthplace that only the canon note held, 4 of 5 runs gave a draft and
+all 4 used it, but every run with the canon note also called write tools (15
+calls over the 5), against 1 of 3 control runs with no canon note. Those calls
+are proposals awaiting review, so nothing is written, but the fifth run gave no
+draft at all. Both limits are accepted for now; a second pass is separate work.
 
 What Fix it and Intentional are: proposals, like Insert. The proposal hangs off
 the issue rather than a tool message, so it joins no batch and is not replayed

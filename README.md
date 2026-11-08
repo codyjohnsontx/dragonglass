@@ -372,11 +372,14 @@ are listed under **Read for this check**.
 
 The **sequel canon note** (`Sequel canon.md` unless you change it under
 Settings → Writing) records deliberate changes to the original lore. Write it
-yourself or let Intentional add to it. It goes with every message and overrides
-the other notes for drafting and for the lore check. A line added through
-Intentional is reliable: it is never flagged again. A change in your own words
-depends on the model taking it in, so a check can still flag a line that agrees
-with it, and how often depends on the case (figures under "What works").
+yourself or let Intentional add to it. It goes with every message and the model
+is told it overrides the other notes for drafting and for the lore check. A line
+added through Intentional is reliable: it is never flagged again. A change in
+your own words depends on the model taking it in, so a check can still flag a
+line that agrees with it, and how often depends on the case. A draft is not
+guaranteed to follow the canon note either, and with one present a small model
+often proposes edits to your notes alongside or instead of the draft; nothing
+changes unless you approve one (figures under "What works").
 
 ## What works
 
@@ -429,8 +432,8 @@ vault:
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above
 except the folder, move, property and section changes, which have run only
 with the scripted model, for drafting only a draft, a revision and Insert at
-the cursor, and for the lore check a check, Fix it, Intentional, a re-check and
-a draft following the canon note).
+the cursor, and for the lore check a check, Fix it, Intentional and a
+re-check).
 The lore check's reliability on a laptop with qwen3:8b, on one test scene with
 four planted contradictions, five runs: it found 11 of the 20, per run 3, 2, 3,
 3 and 0, at about 76 seconds a check. On a scene with nothing wrong it flagged 4
@@ -440,6 +443,16 @@ re-checks. A canon change in the owner's words depends on the case: a sister the
 lore does not have was flagged in 0 of 5 runs, while a changed birthplace still
 had an agreeing line flagged in 3 of 5 runs, against 4 of 5 with no canon note.
 Use Intentional on a false flag: a line it records is never flagged again.
+Drafting with the canon note is not verified to follow it. Asked for a short
+scene where Kael names his birthplace, with the canon note moving it to
+Frosthaven and the script's own mentions changed to Ashfall so Frosthaven could
+only come from canon: in 5 runs with the canon note, 4 gave a draft and all 4
+had him born in Frosthaven (2 of them still mentioned Ashfall), and the fifth
+gave no draft and proposed note edits instead. The model called write tools in
+all 5 of those runs, 15 calls in total. In 3 control runs without the canon
+note, 2 gave a draft, both saying Ashfall, the third answered with a malformed
+reply and no draft, and 1 called write tools. Nothing was written in any run,
+since every write waits for review.
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
