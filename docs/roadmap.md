@@ -80,8 +80,10 @@ without redesigning the provider or tool architecture.
   checked against the script and against what the model was shown. Fix it
   proposes the corrected line through the review; Intentional proposes adding
   the change to a sequel canon note, at a configurable path, created if absent.
-  That note goes with every message and overrides the lore for drafting and
-  for the check, and a line recorded through Intentional is not flagged again.
+  That note goes with every message and the model is told it overrides the
+  lore for drafting and for the check; a line recorded through Intentional is
+  not flagged again, while canon in the owner's own words is not guaranteed
+  to hold (decision 22).
 
 ## Next
 
