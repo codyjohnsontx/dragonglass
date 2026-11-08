@@ -257,7 +257,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 					},
 					{
 						name: 'Sequel canon note',
-						desc: 'The note that records deliberate changes to the original lore. It overrides the other notes for drafting and for the lore check, and Intentional on a lore check issue adds to it, creating it here if it does not exist. While it exists it is sent with every message. Empty uses Sequel canon.md.',
+						desc: 'The note that records deliberate changes to the original lore. The model is told it overrides the other notes for drafting and for the lore check, though it does not always follow it. Intentional on a lore check issue adds to it, creating it here if it does not exist. While it exists it is sent with every message. Empty uses Sequel canon.md.',
 						control: {
 							type: 'text',
 							key: 'canonNote',

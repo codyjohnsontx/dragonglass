@@ -87,23 +87,27 @@ without redesigning the provider or tool architecture.
 
 ## Next
 
-1. **Writing assistant, build 3: brainstorm cards**: 3 to 5 short pitch
+1. **Sequel canon second pass**: test each lore flag and each draft against
+   the sequel canon note before it reaches the card, so canon in the owner's
+   own words holds (decision 22), and decide whether to withhold write tools
+   on draft requests.
+2. **Writing assistant, build 3: brainstorm cards**: 3 to 5 short pitch
    cards for a beat before drafting, each with a "draft this" button, and a
    way to combine pitches ("combine 2 and 4"). Punch-up and reader notes come
    after these.
-2. **Review outcome to the model**: tell the model on the next turn which of
+3. **Review outcome to the model**: tell the model on the next turn which of
    its proposals were approved, rejected or undone, so it does not assume a
    change it proposed was made. Today it learns only that the user must
    approve.
-3. **Propose wikilinks**: suggest links between related notes, each with its
+4. **Propose wikilinks**: suggest links between related notes, each with its
    reason, as reviewed edits.
-4. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
+5. **Canvas**: read `.canvas` JSON, propose new boards and node/edge edits as
    reviewed file operations with schema validation.
-5. **Bases**: read and propose `.base` files once the format is stable.
-6. **Semantic retrieval**: optional local embeddings (Ollama embed models)
+6. **Bases**: read and propose `.base` files once the format is stable.
+7. **Semantic retrieval**: optional local embeddings (Ollama embed models)
    fused with the keyword index, only if a measurement on a real vault shows
    they help; never required.
-7. **Cost estimates** for paid providers from a maintained price table,
+8. **Cost estimates** for paid providers from a maintained price table,
    clearly labelled as estimates.
-8. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
+9. **Mobile check**: the code avoids Node/Electron APIs, but the UI has only
    been exercised on desktop.
