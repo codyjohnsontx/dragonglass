@@ -29,7 +29,9 @@ written.
   the format of the note you have open (Fountain by default), and cites the
   notes that shaped it. Revise it in the chat; every version stays a click
   away. **Insert** puts the version you are looking at over your selection or
-  at your cursor, through the same review as any edit.
+  at your cursor, through the same review as any edit. **Check lore** flags
+  where the script contradicts the vault, with a one-click fix for each line,
+  and a sequel canon note records the changes you meant to make.
 
 ## Status
 
@@ -351,6 +353,34 @@ note is in this folder. Drafts go into the open note either
 way: inserting into a note outside that folder still works, and the review
 says so.
 
+### Checking lore
+
+**Check lore**, beside Send, checks the note you have open against the vault,
+or just the selection if there is one. The notes it names go along, found by
+note name or alias, and the model can look up more. It flags lines that
+contradict the lore on relationships, timeline or voice.
+
+Each issue shows the script line, what the vault says with a link to the note,
+and two buttons. **Fix it** proposes the corrected line. **Intentional** says
+the change is deliberate and proposes recording it in the sequel canon note,
+creating the note if needed. Both are normal proposals: the diff shows under
+the issue, and nothing is written until you approve it. Dragonglass drops any
+flag whose line is not in the script or whose note the model was not shown, and
+says how many it left out. It also says when a script was too long to fit in
+the model's context, so you can select the rest and check that. The notes used
+are listed under **Read for this check**.
+
+The **sequel canon note** (`Sequel canon.md` unless you change it under
+Settings → Writing) records deliberate changes to the original lore. Write it
+yourself or let Intentional add to it. It goes with every message and the model
+is told it overrides the other notes for drafting and for the lore check. A line
+added through Intentional is reliable: it is never flagged again. A change in
+your own words depends on the model taking it in, so a check can still flag a
+line that agrees with it, and how often depends on the case. A draft is not
+guaranteed to follow the canon note either, and with one present a small model
+often proposes edits to your notes alongside or instead of the draft; nothing
+changes unless you approve one (figures under "What works").
+
 ## What works
 
 Verified by automated tests against a fake provider server and by driving
@@ -391,12 +421,38 @@ vault:
   revisions stepped through in the card, Insert at the cursor or over a
   selection through the review, a stale review refused, and script pages left
   out of search.
+- Lore check with a scripted model: an issue list for the open note and for a
+  selection, Fix it and Intentional through the review, the canon note created
+  only on approval, reject and undo bringing the buttons back, a stale review
+  and a line that has gone both refused, flags on a missing note left out and
+  counted, results surviving a reload, and a re-check after a fix and a canon
+  entry coming back clean.
 - Conversation history persists across plugin reload.
 
 Verified live against Ollama with qwen3:8b on a laptop (every scenario above
 except the folder, move, property and section changes, which have run only
-with the scripted model, and for drafting only a draft, a revision and Insert
-at the cursor).
+with the scripted model, for drafting only a draft, a revision and Insert at
+the cursor, and for the lore check a check, Fix it, Intentional and a
+re-check).
+The lore check's reliability on a laptop with qwen3:8b, on one test scene with
+four planted contradictions, five runs: it found 11 of the 20, per run 3, 2, 3,
+3 and 0, at about 76 seconds a check. On a scene with nothing wrong it flagged 4
+lines in 3 of 5 runs, so read each claim against its note before acting on it.
+A line recorded through Intentional is reliable: it was flagged in 0 of 3
+re-checks. A canon change in the owner's words depends on the case: a sister the
+lore does not have was flagged in 0 of 5 runs, while a changed birthplace still
+had an agreeing line flagged in 3 of 5 runs, against 4 of 5 with no canon note.
+Use Intentional on a false flag: a line it records is never flagged again.
+Drafting with the canon note is not verified to follow it. Asked for a short
+scene where Kael names his birthplace, with the canon note moving it to
+Frosthaven and the script's own mentions changed to Ashfall so Frosthaven could
+only come from canon: in 5 runs with the canon note, 4 gave a draft and all 4
+had him born in Frosthaven (2 of them still mentioned Ashfall), and the fifth
+gave no draft and proposed note edits instead. The model called write tools in
+all 5 of those runs, 15 calls in total. In 3 control runs without the canon
+note, 2 gave a draft, both saying Ashfall, the third answered with a malformed
+reply and no draft, and 1 called write tools. Nothing was written in any run,
+since every write waits for review.
 Real OpenAI, Anthropic and Gemini keys were not available on the build
 machine; those wire formats are tested against shapes from the official API
 documentation. The custom endpoint has not been run against Moonshot,
@@ -435,6 +491,10 @@ in its documented shape. To verify live:
 - Desktop verified only. The code avoids desktop-only APIs but mobile has not
   been exercised.
 - Very long notes are truncated when attached or read (configurable limit).
+- The lore check is as good as the model. Dragonglass can verify that a flag
+  quotes a real line and cites a note the model saw, not that the model read
+  the note correctly, and it cannot tell you what the model missed. A small
+  local model misses some contradictions and flags some lines that are fine.
 - Web pages are read as plain text from their HTML. Pages that build their
   text with JavaScript, and PDFs, cannot be read; the model falls back to the
   search snippet.
@@ -494,6 +554,9 @@ Docs: [architecture](docs/architecture.md), [roadmap](docs/roadmap.md),
   attached, a short sample of it (its first 1,200 characters) goes along so
   drafts can match its format, whether or not you are drafting. Otherwise no
   part of it is sent, and drafts default to Fountain.
+- While the sequel canon note exists it goes with every message, whether or
+  not you are drafting. Check lore sends the open note or its selection, the
+  notes it names (up to 12) and what the model looks up.
 - API keys live in Obsidian's secret storage and are never logged or written
   to notes.
 - Note content and web content are treated as data: the model is told not to

@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
+import { debounce, ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
 import { ContextItem } from '../agent/context';
 import { draftVersions, parseDraft } from '../agent/drafting';
 import { AnswerSources, answerSources, linkWebMarkers, WebSource } from '../agent/sources';
@@ -17,6 +17,7 @@ import { copyToClipboard, CopyAnnouncer } from './copy';
 import { isSendKey, sendShortcutLabel } from './composer-keys';
 import { renderWebSearchApproval } from './web-approval';
 import { labelInsertButtons, renderDraftCard, renderDraftRef } from './draft-card';
+import { renderLoreCard } from './lore-card';
 import type { WebSearchDecision, WebSearchRequest } from '../tools/web-tools';
 
 export const VIEW_TYPE_CHAT = 'dragonglass-chat';
@@ -48,6 +49,7 @@ export class ChatView extends ItemView {
 	private composerEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
 	private sendBtn!: HTMLButtonElement;
+	private loreBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
 	/** Shared visually-hidden live region announcing a successful copy to screen readers. */
 	private copyStatusEl!: HTMLElement;
@@ -73,6 +75,9 @@ export class ChatView extends ItemView {
 	/** The conversation whose turn is running, while one is. */
 	private liveConv: Conversation | null = null;
 	private lastStatus: { state: 'ok' | 'error' | 'checking'; title: string } | null = null;
+	/** The note and selection the context bar and Check lore button last showed. */
+	private shownContext: ActiveContext | null = null;
+	private readonly refreshSelection = debounce(() => this.refreshContextBar(), 100, true);
 	/** Serializes announcements to the shared copyStatusEl across concurrent copy clicks. */
 	private readonly copyAnnouncer = new CopyAnnouncer({
 		setTimeout: (fn, delayMs) => window.setTimeout(fn, delayMs),
@@ -126,10 +131,14 @@ export class ChatView extends ItemView {
 		this.composerEl = root.createDiv({ cls: 'dg-composer' });
 		this.buildComposer();
 		await this.openConversation(this.core.getSettings().lastConversationId);
-		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.renderContextBar()));
-		this.registerEvent(this.app.workspace.on('file-open', () => this.renderContextBar()));
+		this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.refreshContextBar()));
+		this.registerEvent(this.app.workspace.on('file-open', () => this.refreshContextBar()));
 		// Closing the tracked note's tab or popout fires neither event above.
-		this.registerEvent(this.app.workspace.on('layout-change', () => this.renderContextBar()));
+		this.registerEvent(this.app.workspace.on('layout-change', () => this.refreshContextBar()));
+		// Selecting fires no workspace event, and the note can be in any window.
+		const watchSelection = (win: Window) => this.registerDomEvent(win.document, 'selectionchange', this.refreshSelection);
+		this.app.workspace.iterateAllLeaves((leaf) => watchSelection(leaf.getContainer().win));
+		this.registerEvent(this.app.workspace.on('window-open', (_popout, win) => watchSelection(win)));
 		// A note edited behind a pending proposal makes the proposal stale; say so before Approve is clicked.
 		this.registerEvent(this.app.vault.on('modify', (file) => void this.onNoteModified(file)));
 		await this.renderHeader();
@@ -138,6 +147,7 @@ export class ChatView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.abort?.abort();
+		this.refreshSelection.cancel();
 		this.copyAnnouncer.dispose();
 		await this.core.store.flush();
 	}
@@ -364,7 +374,10 @@ export class ChatView extends ItemView {
 			const toolOnly = !m.content && !m.error && (!m.interrupted || opts.endAfterTools) && (m.toolCalls?.length ?? 0) > 0;
 			if (toolOnly) wrap.addClass('dg-msg-step');
 			if (m.thinking) this.renderThinking(wrap, 'Thinking', m.thinking);
-			if (m.draft && this.conv) {
+			if (m.loreCheck && this.conv) {
+				this.renderLoreMessage(this.conv, m, wrap);
+				if (sources?.list) renderSourcesList(wrap, sources.list);
+			} else if (m.draft && this.conv) {
 				this.renderDraftMessage(this.conv, m, wrap, sources);
 			} else if (m.content) {
 				const body = wrap.createDiv({ cls: 'dg-msg-body markdown-rendered' });
@@ -469,6 +482,43 @@ export class ChatView extends ItemView {
 		}
 	}
 
+	/** A reply that ended a lore check: the list of issues, in place of the reply's own text. */
+	private renderLoreMessage(conv: Conversation, m: StoredMessage, wrap: HTMLElement): void {
+		const card = wrap.createDiv();
+		card.dataset['loreCheck'] = m.id;
+		this.drawLoreCard(conv, m.id, card);
+	}
+
+	private drawLoreCard(conv: Conversation, messageId: string, card: HTMLElement): void {
+		const check = conv.messages.find((m) => m.id === messageId)?.loreCheck;
+		if (!check) return;
+		const redraw = () => this.redrawLoreCard(conv, messageId);
+		const act = async (run: () => Promise<unknown>): Promise<void> => {
+			try {
+				await run();
+			} catch (e) {
+				new Notice(e instanceof Error ? e.message : String(e), 8000);
+			}
+			redraw();
+		};
+		renderLoreCard(card, {
+			app: this.app,
+			core: this.core,
+			conv,
+			check,
+			fix: (issue) => act(() => this.core.fixLoreIssue(conv, messageId, issue.id)),
+			intentional: (issue) => act(() => this.core.markLoreIntentional(conv, messageId, issue.id)),
+			onChange: redraw,
+		});
+	}
+
+	/** Redraw one check's list in place, so a live turn is not disturbed. */
+	private redrawLoreCard(conv: Conversation, messageId: string): void {
+		if (this.conv !== conv) return;
+		const card = this.messagesEl.querySelector<HTMLElement>(`[data-lore-check="${messageId}"]`);
+		if (card) this.drawLoreCard(conv, messageId, card);
+	}
+
 	/** The Stopped note and usage line of a stopped reply, drawn after its tool results. */
 	private renderTurnEnd(m: StoredMessage, wrap: HTMLElement, turnUsage?: TurnUsage): void {
 		wrap.createDiv({ cls: 'dg-msg-note', text: 'Stopped.' });
@@ -532,7 +582,11 @@ export class ChatView extends ItemView {
 				// editor's save on blur fires this between the mousedown and mouseup of a click on Insert.
 				const thread = draft.dataset['draftThread'] ?? '';
 				renderProposalCard(this.app, this.core, conv, p, el, () => this.redrawDraft(conv, thread));
+				continue;
 			}
+			// As with a draft, only the review: a click on Fix it is what saved the note.
+			const lore = el.closest<HTMLElement>('[data-lore-check]')?.dataset['loreCheck'];
+			if (lore) renderProposalCard(this.app, this.core, conv, p, el, () => this.redrawLoreCard(conv, lore));
 		}
 	}
 
@@ -654,10 +708,17 @@ export class ChatView extends ItemView {
 
 	// ----------------------------------------------------------- context bar
 
+	/** Redraws only for a real change: clicking into this view fires the workspace events, and a redraw between mouse down and up would lose a click on a chip. */
+	private refreshContextBar(): void {
+		const { path, selection } = this.core.vault.getActiveContext();
+		if (path !== this.shownContext?.path || selection !== this.shownContext.selection) this.renderContextBar();
+	}
+
 	private renderContextBar(): void {
 		const bar = this.contextBarEl;
 		bar.empty();
 		const active = this.core.vault.getActiveContext();
+		this.shownContext = active;
 		const activeToggle = bar.createEl('button', {
 			cls: `dg-chip dg-chip-toggle${this.includeActive && active.path ? ' is-active' : ''}`,
 			text: active.path ? `Active note: ${active.path}` : 'No active note',
@@ -703,11 +764,14 @@ export class ChatView extends ItemView {
 		if (this.core.activeProviderIsRemote()) {
 			bar.createDiv({
 				cls: 'dg-privacy-note',
-				text: 'Highlighted context and your message are sent to the cloud provider you configured, with the opening of the open note while it is in the script folder.',
+				text: 'Highlighted context and your message are sent to the cloud provider you configured, with the sequel canon note and the opening of the open note while it is in the script folder.',
 			});
 		}
 		// The note an Insert would go into follows the active note.
 		labelInsertButtons(this.messagesEl, active.path);
+		this.loreBtn.setText(active.selection ? 'Check lore of selection' : 'Check lore');
+		this.loreBtn.disabled = !active.path || this.abort !== null;
+		this.loreBtn.setAttribute('aria-label', active.path ? `Check ${active.selection ? 'the selection in ' : ''}${active.path} against the vault's lore` : 'Open a script note to check its lore');
 	}
 
 	private selectionAlreadySent(active: ActiveContext): boolean {
@@ -748,6 +812,8 @@ export class ChatView extends ItemView {
 		// Enter and Shift+Enter insert a new line as in any textarea; the send
 		// shortcut is registered on the view scope in the constructor.
 		const row = c.createDiv({ cls: 'dg-composer-row' });
+		this.loreBtn = row.createEl('button', { cls: 'dg-lore-run', text: 'Check lore' });
+		this.loreBtn.addEventListener('click', () => void this.checkLore());
 		this.sendBtn = row.createEl('button', { cls: 'mod-cta dg-send', text: 'Send' });
 		this.sendBtn.addEventListener('click', () => void (this.abort ? this.stop() : this.submit()));
 	}
@@ -765,8 +831,37 @@ export class ChatView extends ItemView {
 		this.attachments = [];
 		const selection = context.find((c) => c.kind === 'selection');
 		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
+		await this.runTurn(conv, (signal, onEvent) =>
+			this.core.send(conv, {
+				text,
+				context,
+				signal,
+				onEvent,
+				approveWebSearch: (req, approvalSignal) => this.askWebSearch(conv, req, approvalSignal),
+			}),
+		);
+	}
+
+	/** The Check lore button: a turn of its own on the open note or its selection. */
+	private async checkLore(): Promise<void> {
+		const conv = this.conv;
+		if (!conv || this.abort) return;
+		let script: ContextItem;
+		try {
+			script = await this.core.loreScript();
+		} catch (e) {
+			new Notice(e instanceof Error ? e.message : String(e), 8000);
+			return;
+		}
+		const resolve = (link: string) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null;
+		await this.runTurn(conv, (signal, onEvent) => this.core.checkLore(conv, script, { signal, onEvent, resolve }));
+	}
+
+	/** Run one turn with the composer in its Stop state, rendering events as they arrive. */
+	private async runTurn(conv: Conversation, run: (signal: AbortSignal, onEvent: (ev: RunEvent) => void) => Promise<void>): Promise<void> {
 		this.abort = new AbortController();
 		this.liveConv = conv;
+		this.loreBtn.disabled = true;
 		this.sendBtn.setText('Stop');
 		this.sendBtn.removeClass('mod-cta');
 		this.sendBtn.addClass('mod-warning');
@@ -775,13 +870,7 @@ export class ChatView extends ItemView {
 		await this.refreshStatus(true, this.abort.signal);
 		if (this.messagesEl.querySelector('.dg-empty')) this.messagesEl.empty();
 		try {
-			await this.core.send(conv, {
-				text,
-				context,
-				signal: this.abort.signal,
-				onEvent: (ev) => this.onRunEvent(conv, ev),
-				approveWebSearch: (req, signal) => this.askWebSearch(conv, req, signal),
-			});
+			await run(this.abort.signal, (ev) => this.onRunEvent(conv, ev));
 		} finally {
 			this.abort = null;
 			this.liveConv = null;
@@ -856,7 +945,10 @@ export class ChatView extends ItemView {
 					this.liveEl.addClass('markdown-rendered');
 					const wrap = this.liveEl.parentElement;
 					const stored = conv.messages.find((m) => m.id === wrap?.dataset['id']);
-					if (stored?.draft && wrap) {
+					if (stored?.loreCheck && wrap) {
+						this.liveEl.remove();
+						this.renderLoreMessage(conv, stored, wrap);
+					} else if (stored?.draft && wrap) {
 						// The reply drafted scene text: show the draft card now, not after the turn.
 						this.liveEl.remove();
 						this.renderDraftMessage(conv, stored, wrap);

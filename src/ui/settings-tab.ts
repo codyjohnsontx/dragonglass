@@ -1,7 +1,7 @@
 import { App, Notice, PluginSettingTab, SettingDefinitionItem, SettingDefinitionRender } from 'obsidian';
 import type DragonglassPlugin from '../main';
 import { ProviderId } from '../providers/types';
-import { DragonglassSettings, MIN_NUM_CTX } from '../settings';
+import { DEFAULT_SETTINGS, DragonglassSettings, MIN_NUM_CTX } from '../settings';
 import { ModelSuggest } from './model-suggest';
 
 const CLOUD_MODEL_DESC = 'Pick from the list or type any model id. The list shows the chat models your key can use, or current models until the key works.';
@@ -255,6 +255,16 @@ export class DragonglassSettingTab extends PluginSettingTab {
 							validate: (v) => (v.trim().startsWith('/') || v.includes('..') ? 'Enter a folder path relative to the vault, such as Script or Writing/Script' : undefined),
 						},
 					},
+					{
+						name: 'Sequel canon note',
+						desc: 'The note that records deliberate changes to the original lore. The model is told it overrides the other notes for drafting and for the lore check, though it does not always follow it. Intentional on a lore check issue adds to it, creating it here if it does not exist. While it exists it is sent with every message. Empty uses Sequel canon.md.',
+						control: {
+							type: 'text',
+							key: 'canonNote',
+							placeholder: DEFAULT_SETTINGS.canonNote,
+							validate: (v) => (v.trim().startsWith('/') || v.includes('..') ? 'Enter a note path relative to the vault, such as Sequel canon.md or Writing/Sequel canon.md' : undefined),
+						},
+					},
 				],
 			},
 			{
@@ -314,7 +324,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'What is sent',
-						desc: 'Only your message, the context you attach (highlighted in the sidebar), the results of tools the model calls and the script sample below are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. With every message, while the open note is in the script folder or attached, a short sample of it (its first 1,200 characters) goes along so drafts can match its format; otherwise no part of it is sent. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
+						desc: 'Only your message, the context you attach (highlighted in the sidebar), the results of tools the model calls and the script sample and canon note below are sent, and only to the provider you configured. A web search you approve sends its search words to Tavily, and reading a result page fetches that page; nothing else goes to either. With every message, while the open note is in the script folder or attached, a short sample of it (its first 1,200 characters) goes along so drafts can match its format; otherwise no part of it is sent. The sequel canon note, while it exists, goes with every message. Check lore sends the open note or its selection, the notes it names (up to 12) and what the model looks up. The plugin never uploads the whole vault, collects telemetry, or contacts any other server. Conversations are stored in this vault\'s plugin folder.',
 					},
 				],
 			},

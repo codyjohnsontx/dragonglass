@@ -67,7 +67,6 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 	getMetadata(path: string): NoteMetadata | null {
 		const content = this.files.get(path);
 		if (content === undefined) return null;
-		const fm = parseFrontmatter(content);
 		const tags = [...content.matchAll(/(?:^|\s)(#[\w/-]+)/g)].map((m) => m[1] as string);
 		const headings = [...content.matchAll(/^(#{1,6})\s+(.+)$/gm)].map((m) => ({ level: (m[1] as string).length, text: m[2] as string }));
 		const outgoing: string[] = [];
@@ -84,7 +83,12 @@ export class MemoryVaultPort implements VaultPort, StoreBackend {
 				if (this.resolveLink(m[1] as string) === path) backlinks.push(other);
 			}
 		}
-		return { path, frontmatter: fm, tags, headings, outgoingLinks: [...new Set(outgoing)], unresolvedLinks: unresolved, backlinks: [...new Set(backlinks)].sort() };
+		return { path, frontmatter: this.getFrontmatter(path), tags, headings, outgoingLinks: [...new Set(outgoing)], unresolvedLinks: unresolved, backlinks: [...new Set(backlinks)].sort() };
+	}
+
+	getFrontmatter(path: string): Record<string, unknown> | null {
+		const content = this.files.get(path);
+		return content === undefined ? null : parseFrontmatter(content);
 	}
 
 	linkGraph(): NoteLinks[] {
