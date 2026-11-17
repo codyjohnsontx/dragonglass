@@ -18,6 +18,7 @@ import { parsePreferredSites, TavilySearch } from './web/search';
 import { draftingForSend, followsDraft, parseDraft, proposeDraftInsert, revisionReminder, threadForDraft } from './agent/drafting';
 import { canonContext, canonNotePath, groundLoreCheck, isLoreNote, loreForScript, LoreCheckRecord, LoreIssue, loreCheckRequest, parseLoreBlock, proposeCanonEntry, proposeLoreFix, RawIssue, shownPaths } from './agent/lore-check';
 import { ObsidianVaultPort } from './vault/obsidian-port';
+import type { ActiveContext } from './vault/port';
 import { baseName, normalizeVaultPath } from './vault/paths';
 import { ChangeProposal, ProposalEngine, ProposalError } from './vault/proposals';
 
@@ -353,9 +354,11 @@ export class DragonglassCore {
 	/**
 	 * What a lore check covers: the open note, or its selection when there is
 	 * one. Refuses, with a reason for the user, when there is nothing to check.
+	 * `active` is what was open at the click, which the chat view takes before
+	 * its connection check; another note may be open by the time this runs.
 	 */
-	async loreScript(): Promise<ContextItem> {
-		const { path, selection } = this.vault.getActiveContext();
+	async loreScript(active: ActiveContext = this.vault.getActiveContext()): Promise<ContextItem> {
+		const { path, selection } = active;
 		if (!path) throw new ProposalError('Open the script note to check, then try again.');
 		if (path === this.canonNote()) throw new ProposalError(`${baseName(path)} is the sequel canon note, so there is nothing to check it against.`);
 		const content = selection || (await this.vault.readNote(path));

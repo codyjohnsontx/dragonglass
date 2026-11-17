@@ -1,5 +1,5 @@
 import { debounce, ItemView, MarkdownRenderer, Notice, Platform, Scope, setIcon, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
-import { ContextItem } from '../agent/context';
+import { ContextChoice, ContextItem, readContext } from '../agent/context';
 import { draftVersions, parseDraft } from '../agent/drafting';
 import { AnswerSources, answerSources, linkWebMarkers, WebSource } from '../agent/sources';
 import { RunEvent } from '../agent/runtime';
@@ -782,22 +782,10 @@ export class ChatView extends ItemView {
 		return this.includeSelection && active.selection !== null && !this.selectionAlreadySent(active);
 	}
 
-	private async collectContext(): Promise<ContextItem[]> {
-		const items: ContextItem[] = [];
+	/** What the composer has chosen to send, as of now: take it at the click, before any await. */
+	private contextChoice(): ContextChoice {
 		const active = this.core.vault.getActiveContext();
-		if (this.includeActive && active.path) {
-			const content = await this.core.vault.readNote(active.path);
-			if (content !== null) items.push({ kind: 'active', label: 'Active note', path: active.path, content });
-		}
-		if (active.selection && this.selectionIncluded(active)) {
-			items.push({ kind: 'selection', label: 'Selection', path: active.path, content: active.selection });
-		}
-		for (const file of this.attachments) {
-			if (file.path === active.path && this.includeActive) continue;
-			const content = await this.core.vault.readNote(file.path);
-			if (content !== null) items.push({ kind: 'attachment', label: file.path, path: file.path, content });
-		}
-		return items;
+		return { active, includeActive: this.includeActive, includeSelection: this.selectionIncluded(active), attachments: this.attachments.map((f) => f.path) };
 	}
 
 	// -------------------------------------------------------------- composer
@@ -827,11 +815,11 @@ export class ChatView extends ItemView {
 		if (!text || !this.conv || this.abort) return;
 		const conv = this.conv;
 		this.inputEl.value = '';
+		const choice = this.contextChoice();
+		this.attachments = [];
+		if (choice.includeSelection && choice.active.selection) this.sentSelection = { path: choice.active.path, text: choice.active.selection };
 		await this.runTurn(conv, async (signal, onEvent) => {
-			const context = await this.collectContext();
-			this.attachments = [];
-			const selection = context.find((c) => c.kind === 'selection');
-			if (selection) this.sentSelection = { path: selection.path, text: selection.content };
+			const context = await readContext(this.core.vault, choice);
 			await this.core.send(conv, {
 				text,
 				context,
@@ -846,11 +834,12 @@ export class ChatView extends ItemView {
 	private async checkLore(): Promise<void> {
 		const conv = this.conv;
 		if (!conv || this.abort) return;
+		const active = this.core.vault.getActiveContext();
 		const resolve = (link: string) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null;
 		await this.runTurn(conv, async (signal, onEvent) => {
 			let script: ContextItem;
 			try {
-				script = await this.core.loreScript();
+				script = await this.core.loreScript(active);
 			} catch (e) {
 				new Notice(e instanceof Error ? e.message : String(e), 8000);
 				return;
@@ -862,7 +851,10 @@ export class ChatView extends ItemView {
 	/**
 	 * Run one turn with the composer in its Stop state, rendering events as they
 	 * arrive. It takes the Stop state before its first await, so a second click
-	 * cannot start another turn; anything the turn reads first belongs in `run`.
+	 * cannot start another turn. Callers take what the user chose (the open note,
+	 * selection and attachments) at the click, before calling this, since the
+	 * connection check comes first and the user can open another note meanwhile;
+	 * the reads that follow from that choice belong in `run`.
 	 */
 	private async runTurn(conv: Conversation, run: (signal: AbortSignal, onEvent: (ev: RunEvent) => void) => Promise<void>): Promise<void> {
 		this.abort = new AbortController();

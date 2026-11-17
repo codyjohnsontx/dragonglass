@@ -729,7 +729,7 @@ describe('the sources list of a lore check', () => {
 describe('a send through core', () => {
 	const CANON = 'Sequel canon.md';
 
-	/** A core over `files` with `open` as the open note, whose provider plays `replies` in order. */
+	/** A core over `files` with `open` as the open note, whose provider plays `replies` in order. `switchTo` opens another note. */
 	function setup(files: Record<string, string>, open: string, replies: StreamEvent[][], contextWindow?: number) {
 		const file = (path: string) => Object.assign(new TFile(), { path, basename: path.replace(/^.*\//, '').replace(/\.md$/, ''), extension: 'md', stat: { size: files[path]?.length ?? 0, mtime: 0 } });
 		const noEvent = () => ({});
@@ -762,7 +762,10 @@ describe('a send through core', () => {
 			},
 		} as unknown as Provider;
 		vi.spyOn(core, 'provider').mockReturnValue(provider);
-		return { core, requests, conv: newConversation('c', 0) };
+		const switchTo = (path: string) => {
+			open = path;
+		};
+		return { core, requests, conv: newConversation('c', 0), switchTo };
 	}
 	const say = (text: string): StreamEvent[] => [{ type: 'text', delta: text }, { type: 'done', finishReason: 'stop' }];
 	const read = (path: string): StreamEvent[] => [{ type: 'tool_call', call: { id: 'r', name: 'read_note', argumentsJson: JSON.stringify({ path }) } }, { type: 'done', finishReason: 'tool_calls' }];
@@ -777,6 +780,18 @@ describe('a send through core', () => {
 		expect(system?.content).toMatch(/When drafting, it overrides every other note/);
 		expect(user?.content).toContain(`<<<canon path="${CANON}">>>\n${text}`);
 		expect(conv.messages[0]?.context?.activeNotePath).toBe(CANON);
+	});
+
+	it('checks the note that was open at the click, though another note is opened before the script is read', async () => {
+		const files = { 'Script/Scene 13.md': 'She waits.', 'Script/Scene 12.md': 'He left.' };
+		const { core, conv, switchTo } = setup(files, 'Script/Scene 13.md', [say('```lore\n```')]);
+		const clicked = core.vault.getActiveContext();
+		// The chat view's connection check runs between the click and the read; the user opens Scene 12 meanwhile.
+		switchTo('Script/Scene 12.md');
+		const script = await core.loreScript(clicked);
+		expect(script).toMatchObject({ kind: 'active', path: 'Script/Scene 13.md', content: 'She waits.' });
+		await core.checkLore(conv, script, check);
+		expect(conv.messages.at(-1)?.loreCheck?.scriptPath).toBe('Script/Scene 13.md');
 	});
 
 	it('says nothing was checked when the model read only another script page', async () => {

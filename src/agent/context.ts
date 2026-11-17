@@ -5,7 +5,7 @@ import { DraftingOptions, draftingRules } from './drafting';
 import { canonRule, loreCheckRules } from './lore-check';
 import { formatNote, truncateContent } from '../tools/vault-tools';
 import { baseName } from '../vault/paths';
-import { VaultPort } from '../vault/port';
+import { ActiveContext, VaultPort } from '../vault/port';
 
 /**
  * Builds the system prompt and the provider message list from stored
@@ -20,6 +20,38 @@ export interface ContextItem {
 	content: string;
 	/** `canon` is the sequel canon note, which goes with every send, and `lore` a note a lore check named; the user attached neither. */
 	kind: 'active' | 'selection' | 'attachment' | 'canon' | 'lore';
+}
+
+/**
+ * What the user chose to send, taken at the click. The chat view checks the
+ * connection before it reads anything, and the user can open another note
+ * meanwhile, so the notes are read from this, not from what is open by then.
+ */
+export interface ContextChoice {
+	active: ActiveContext;
+	includeActive: boolean;
+	includeSelection: boolean;
+	/** Attached note paths. */
+	attachments: string[];
+}
+
+/** The context items for a send: the open note, its selection and the attachments, as chosen at the click. */
+export async function readContext(vault: VaultPort, choice: ContextChoice): Promise<ContextItem[]> {
+	const items: ContextItem[] = [];
+	const { active } = choice;
+	if (choice.includeActive && active.path) {
+		const content = await vault.readNote(active.path);
+		if (content !== null) items.push({ kind: 'active', label: 'Active note', path: active.path, content });
+	}
+	if (choice.includeSelection && active.selection) {
+		items.push({ kind: 'selection', label: 'Selection', path: active.path, content: active.selection });
+	}
+	for (const path of choice.attachments) {
+		if (path === active.path && choice.includeActive) continue;
+		const content = await vault.readNote(path);
+		if (content !== null) items.push({ kind: 'attachment', label: path, path, content });
+	}
+	return items;
 }
 
 export interface PromptOptions {
