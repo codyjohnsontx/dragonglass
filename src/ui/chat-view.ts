@@ -827,37 +827,43 @@ export class ChatView extends ItemView {
 		if (!text || !this.conv || this.abort) return;
 		const conv = this.conv;
 		this.inputEl.value = '';
-		const context = await this.collectContext();
-		this.attachments = [];
-		const selection = context.find((c) => c.kind === 'selection');
-		if (selection) this.sentSelection = { path: selection.path, text: selection.content };
-		await this.runTurn(conv, (signal, onEvent) =>
-			this.core.send(conv, {
+		await this.runTurn(conv, async (signal, onEvent) => {
+			const context = await this.collectContext();
+			this.attachments = [];
+			const selection = context.find((c) => c.kind === 'selection');
+			if (selection) this.sentSelection = { path: selection.path, text: selection.content };
+			await this.core.send(conv, {
 				text,
 				context,
 				signal,
 				onEvent,
 				approveWebSearch: (req, approvalSignal) => this.askWebSearch(conv, req, approvalSignal),
-			}),
-		);
+			});
+		});
 	}
 
 	/** The Check lore button: a turn of its own on the open note or its selection. */
 	private async checkLore(): Promise<void> {
 		const conv = this.conv;
 		if (!conv || this.abort) return;
-		let script: ContextItem;
-		try {
-			script = await this.core.loreScript();
-		} catch (e) {
-			new Notice(e instanceof Error ? e.message : String(e), 8000);
-			return;
-		}
 		const resolve = (link: string) => this.app.metadataCache.getFirstLinkpathDest(link, '')?.path ?? null;
-		await this.runTurn(conv, (signal, onEvent) => this.core.checkLore(conv, script, { signal, onEvent, resolve }));
+		await this.runTurn(conv, async (signal, onEvent) => {
+			let script: ContextItem;
+			try {
+				script = await this.core.loreScript();
+			} catch (e) {
+				new Notice(e instanceof Error ? e.message : String(e), 8000);
+				return;
+			}
+			await this.core.checkLore(conv, script, { signal, onEvent, resolve });
+		});
 	}
 
-	/** Run one turn with the composer in its Stop state, rendering events as they arrive. */
+	/**
+	 * Run one turn with the composer in its Stop state, rendering events as they
+	 * arrive. It takes the Stop state before its first await, so a second click
+	 * cannot start another turn; anything the turn reads first belongs in `run`.
+	 */
 	private async runTurn(conv: Conversation, run: (signal: AbortSignal, onEvent: (ev: RunEvent) => void) => Promise<void>): Promise<void> {
 		this.abort = new AbortController();
 		this.liveConv = conv;

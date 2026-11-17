@@ -186,8 +186,8 @@ const TRANSITION = /^[A-Z][A-Z .]*TO:$|^> ?[A-Z][A-Z .]*[.:]$/;
 /** A character cue: a few capitalized words, optionally with an extension such as (V.O.). */
 const CHARACTER_CUE = /^(?:[A-Z][A-Z0-9'.-]*)(?: [A-Z][A-Z0-9'.-]*){0,3}(?: \([A-Z.' ]+\))?$/;
 const MD_HEADING = /^#{1,6}\s+\S/;
-/** A Markdown screenplay cue: a bold name alone on a line, */
-const MD_BOLD_NAME = /^\*\*[^*\n]{1,40}\*\*:?\s*$/;
+/** A Markdown screenplay cue: a bold name alone on a line, optionally with a parenthetical such as (quietly), */
+const MD_BOLD_NAME = /^\*\*[^*\n]{1,40}\*\*:?(?: \([^()\n]{1,40}\))?\s*$/;
 /** or `**Name:**` leading a dialogue line. */
 const MD_BOLD_LEAD = /^\*\*[^*\n]{1,40}:\*\*\s/;
 

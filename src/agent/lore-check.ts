@@ -441,12 +441,22 @@ const CANON_INTRO = '# Sequel canon\n\nDeliberate changes to the original lore. 
 
 /** The canon note's path from the setting: `.md` added, and the default for an empty or refused path. */
 export function canonNotePath(setting: string, configDir: string): string {
+	return settingPath(setting, configDir) ?? DEFAULT_SETTINGS.canonNote;
+}
+
+/** Whether the setting names a path `canonNotePath` refuses, and so would replace with the default. Empty is not refused. */
+export function canonNoteRefused(setting: string, configDir: string): boolean {
+	return settingPath(setting, configDir) === null;
+}
+
+/** The setting as a note path, `.md` added; the default when empty, null when refused. */
+function settingPath(setting: string, configDir: string): string | null {
 	const path = normalizeVaultPath(setting);
 	if (path === '') return DEFAULT_SETTINGS.canonNote;
 	try {
 		return validateVaultPath(/\.md$/i.test(path) ? path : `${path}.md`, { configDir });
 	} catch (e) {
-		if (e instanceof InvalidPathError) return DEFAULT_SETTINGS.canonNote;
+		if (e instanceof InvalidPathError) return null;
 		throw e;
 	}
 }

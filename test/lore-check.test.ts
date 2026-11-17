@@ -6,6 +6,7 @@ import {
 	canonContext,
 	canonEntry,
 	canonNotePath,
+	canonNoteRefused,
 	groundLoreCheck,
 	inCanon,
 	loreForScript,
@@ -310,6 +311,7 @@ describe('groundLoreCheck', () => {
 		['at the end of the text', 'KAEL\nAgain.\n\nMIRA\n', 'Mira'],
 		['in bold', '**Mira**\n\nI saw Oren last week.\n', 'Mira'],
 		['in bold with a colon', '**Mira:**\nI saw Oren last week.\n', 'Mira'],
+		['in bold with a parenthetical', '**MIRA** (quietly)\nI saw Oren last week.\n', 'MIRA'],
 		['quoted as written', 'MIRA\nI saw Oren last week.\n', 'MIRA'],
 	])('leaves out a cue %s', (_, scope, line) => {
 		expect(groundLoreCheck([flag({ line })], ground({ scope }))).toEqual({ issues: [], leftOut: 1 });
@@ -547,6 +549,14 @@ describe('the canon note in a send', () => {
 		expect(canonNotePath('Writing/Canon', '.obsidian')).toBe('Writing/Canon.md');
 		expect(canonNotePath(' /Writing/Canon.md ', '.obsidian')).toBe('Writing/Canon.md');
 		for (const bad of ['', '   ', '../Canon', '.obsidian/Canon']) expect(canonNotePath(bad, '.obsidian')).toBe(DEFAULT_SETTINGS.canonNote);
+	});
+
+	it('refuses in the setting exactly the paths it would replace with the default', () => {
+		for (const ok of ['', 'Writing/Canon', ' /Writing/Canon.md ', 'Sequel canon.md']) expect(canonNoteRefused(ok, '.obsidian')).toBe(false);
+		for (const bad of ['../Canon', '.obsidian/Canon', '.obsidian/Sub/Canon.md']) {
+			expect(canonNoteRefused(bad, '.obsidian')).toBe(true);
+			expect(canonNotePath(bad, '.obsidian')).toBe(DEFAULT_SETTINGS.canonNote);
+		}
 	});
 
 	it('goes along while the note exists and has text', async () => {

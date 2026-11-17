@@ -1,4 +1,5 @@
 import { App, Notice, PluginSettingTab, SettingDefinitionItem, SettingDefinitionRender } from 'obsidian';
+import { canonNoteRefused } from '../agent/lore-check';
 import type DragonglassPlugin from '../main';
 import { ProviderId } from '../providers/types';
 import { DEFAULT_SETTINGS, DragonglassSettings, MIN_NUM_CTX } from '../settings';
@@ -262,7 +263,7 @@ export class DragonglassSettingTab extends PluginSettingTab {
 							type: 'text',
 							key: 'canonNote',
 							placeholder: DEFAULT_SETTINGS.canonNote,
-							validate: (v) => (v.trim().startsWith('/') || v.includes('..') ? 'Enter a note path relative to the vault, such as Sequel canon.md or Writing/Sequel canon.md' : undefined),
+							validate: (v) => (canonNoteRefused(v, this.app.vault.configDir) ? `Enter a note path relative to the vault and outside ${this.app.vault.configDir}, such as Sequel canon.md or Writing/Sequel canon.md` : undefined),
 						},
 					},
 				],
