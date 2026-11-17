@@ -248,7 +248,7 @@ its inside alone; the citations around it make the sources list under the
 draft; a draft that cites nothing lists the notes the turn's tools showed
 (`answerSources`, headed "Read for this draft").
 
-The format to match comes from the open note. `draftingForSend` reads it
+The format to match comes from the note open at the click. `draftingForSend` reads it
 only when it is inside the script folder or attached to the message (only a
 short sample goes out; otherwise nothing of it does and drafts default to
 Fountain), `inferFormat` counts a few line patterns (scene headings, forced

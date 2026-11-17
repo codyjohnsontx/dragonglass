@@ -30,6 +30,8 @@ import { ChangeProposal, ProposalEngine, ProposalError } from './vault/proposals
 export interface SendOptions {
 	text: string;
 	context: ContextItem[];
+	/** The note that was open at the click, which the drafting rules treat as the script. */
+	activePath: string | null;
 	signal: AbortSignal;
 	onEvent: (ev: RunEvent) => void;
 	/** Asks the user to approve a web search. Without it, or without a Tavily key, the model has no web tools. */
@@ -196,7 +198,7 @@ export class DragonglassCore {
 		const contextBlock = [formatContextBlock(context, this.settings.maxCharsPerNote, noteTokens), lore ? '' : revisionReminder(conv.messages)].filter(Boolean).join('\n\n');
 		const messages = toProviderMessages(conv.messages, contextBlock);
 		const map = vaultMap(this.vault, userMsg.context?.activeNotePath ?? null, this.scriptFolder());
-		const drafting = await draftingForSend(this.vault, opts.context, this.scriptFolder());
+		const drafting = await draftingForSend(this.vault, opts.activePath, opts.context, this.scriptFolder());
 		const webReady = this.webSearchKey() !== null && opts.approveWebSearch !== undefined;
 		const webSearch = webReady ? 'available' : 'needs-key';
 		const pastSources = conv.messages.map((m) => m.sources);
@@ -211,7 +213,7 @@ export class DragonglassCore {
 			tools: this.createTools(
 				contextWindow,
 				!lore && webReady && opts.approveWebSearch ? { approve: opts.approveWebSearch, firstNumber: nextWebNumber(pastSources) } : null,
-				lore !== undefined || followsDraft(conv.messages, this.vault.getActiveContext().path),
+				lore !== undefined || followsDraft(conv.messages, opts.activePath),
 			),
 			toolsEnabled: this.settings.toolsEnabled,
 			conversationId: conv.id,
@@ -369,7 +371,7 @@ export class DragonglassCore {
 	/** Lore check: a read-only turn on `script`; the result lands on the reply as a `LoreCheckRecord`. */
 	async checkLore(conv: Conversation, script: ContextItem, opts: LoreCheckOptions): Promise<void> {
 		const path = script.path ?? '';
-		await this.send(conv, { text: loreCheckRequest(path, script.kind === 'selection'), context: [script], signal: opts.signal, onEvent: opts.onEvent, loreCheck: { scriptPath: path, resolve: opts.resolve } });
+		await this.send(conv, { text: loreCheckRequest(path, script.kind === 'selection'), context: [script], activePath: script.path, signal: opts.signal, onEvent: opts.onEvent, loreCheck: { scriptPath: path, resolve: opts.resolve } });
 	}
 
 	/** The issue and its check, or an error for a list that is gone. */

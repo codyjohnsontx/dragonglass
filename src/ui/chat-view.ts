@@ -823,6 +823,7 @@ export class ChatView extends ItemView {
 			await this.core.send(conv, {
 				text,
 				context,
+				activePath: choice.active.path,
 				signal,
 				onEvent,
 				approveWebSearch: (req, approvalSignal) => this.askWebSearch(conv, req, approvalSignal),

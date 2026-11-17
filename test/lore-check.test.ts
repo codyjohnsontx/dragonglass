@@ -775,11 +775,25 @@ describe('a send through core', () => {
 	it('tells the drafter the canon note wins when it is the note the owner has open', async () => {
 		const text = 'Kael has a sister.';
 		const { core, conv, requests } = setup({ [CANON]: text }, CANON, [say('Noted.')]);
-		await core.send(conv, { ...run, text: 'Draft the gate scene', context: [{ kind: 'active', label: 'Active note', path: CANON, content: text }] });
+		await core.send(conv, { ...run, text: 'Draft the gate scene', context: [{ kind: 'active', label: 'Active note', path: CANON, content: text }], activePath: CANON });
 		const [system, user] = requests[0]!.messages;
 		expect(system?.content).toMatch(/When drafting, it overrides every other note/);
 		expect(user?.content).toContain(`<<<canon path="${CANON}">>>\n${text}`);
 		expect(conv.messages[0]?.context?.activeNotePath).toBe(CANON);
+	});
+
+	it('drafts for the note that was open at the click, though another note is opened before the send runs', async () => {
+		const files = { 'Script/Scene 13.md': 'INT. GATE - DAY\n\nShe waits.\n', 'Script/Scene 12.md': 'EXT. WALL - NIGHT\n\nHe left.\n' };
+		const { core, conv, requests, switchTo } = setup(files, 'Script/Scene 13.md', [say('```draft\nINT. GATE - DAY\n```'), say('Done.')]);
+		const clicked = core.vault.getActiveContext().path;
+		// The chat view's connection check runs between the click and the send; the user opens Scene 12 meanwhile.
+		switchTo('Script/Scene 12.md');
+		await core.send(conv, { ...run, text: 'Draft the gate scene', context: [], activePath: clicked });
+		const system = requests[0]?.messages[0]?.content;
+		expect(system).toContain('<<<sample path="Script/Scene 13.md">>>');
+		expect(system).not.toContain('Scene 12');
+		await core.send(conv, { ...run, text: 'Put it in Scene 13', context: [], activePath: clicked });
+		expect(requests[1]?.tools?.map((t) => t.name)).toContain('propose_edit_note');
 	});
 
 	it('checks the note that was open at the click, though another note is opened before the script is read', async () => {
