@@ -107,8 +107,10 @@ src/
 
 ## Data flow for one message
 
-1. `ChatView` collects context the user chose (active note, selection,
-   attachments) and calls `DragonglassCore.send`.
+1. `ChatView` takes what the user chose (active note, selection,
+   attachments) at the click (`contextChoice`), since the connection check
+   comes first and another note may be open by then; inside the turn it reads
+   those notes (`readContext`) and calls `DragonglassCore.send`.
 2. `core` appends the user message, builds the provider messages
    (`agent/context.ts`), and starts `runAgent`.
 3. `runAgent` adds the system prompt for whether tools are actually sent (the
@@ -303,10 +305,10 @@ go into and follows the active note.
 
 ## Lore check
 
-**Check lore** in the composer runs one read-only turn on the open note, or on
-its selection (`core.loreScript`, `core.checkLore`, which is `send` with a
+**Check lore** in the composer runs one read-only turn on the note open at the
+click, or on its selection (`core.loreScript`, `core.checkLore`, which is `send` with a
 `loreCheck` option). Nothing else about the note decides that it is the
-script: it is what is open. The note or selection goes as the turn's context,
+script: it is what was open. The note or selection goes as the turn's context,
 and `loreForScript` adds the notes it names, by note name or alias as whole
 words in any case, most mentioned first, up to 12, leaving out the script,
 script pages, blank notes and the canon note. They share what the script and the canon note
@@ -368,7 +370,8 @@ return, so a review left out of date by another fix is one Reject away from a
 fresh proposal.
 
 The **sequel canon note** is one note at the `canonNote` setting
-(`canonNotePath`: `.md` added, the default for an empty or refused path). It is
+(`canonNotePath`: `.md` added, the default for an empty or refused path; the
+setting shows an error for a refused one, `canonNoteRefused`). It is
 user-written or built through Intentional. While it exists and has text,
 `canonContext` adds it to every send as a `canon` context item, even when the
 note is also open or attached, so the rule below always has its block. It shares
