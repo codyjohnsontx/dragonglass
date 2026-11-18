@@ -25,6 +25,9 @@
  *                                             citing [[Kael]] and [[Ashfall]] (e2e vault lore notes)
  *   draft new <subject>                    -> the same, opening the block with ```draft new (a different scene)
  *   revise <instruction>                   -> a full rewrite of the scene in a new ```draft block, no tools
+ *   check the lore of <note>               -> read_note on Characters/Kael.md, then a ```lore block flagging whichever
+ *                                             lines of Script/Scene 13.md (e2e vault) are in the message's context,
+ *                                             with one more flag that cites a note that does not exist
  *   bad tool                               -> calls a tool that does not exist
  *   bad args                               -> read_note with missing arguments
  *   loop                                   -> keeps calling list_files forever (iteration cap test)
@@ -364,6 +367,10 @@ function plan(messages, toolsAvailable) {
 		return { text: draftReply(fresh ? 'draft new' : 'draft', subject, null) };
 	}
 	if ((m = /^revise\s+(.+)/i.exec(text))) return { text: draftReply('draft', null, m[1]) };
+	if (/^check the lore of /i.test(text)) {
+		if (!noTools && stage === 0) return { tool: { name: 'read_note', args: { path: 'Characters/Kael.md' } } };
+		return { text: loreReply(user) };
+	}
 	if ((m = /^cite\s+(.+)/i.exec(text))) {
 		if (noTools) return { text: `I cannot search without tools.` };
 		if (stage === 0) return { tool: { name: 'search_notes', args: { query: m[1] } } };
@@ -396,6 +403,17 @@ function plan(messages, toolsAvailable) {
 	}
 	if (lower.startsWith('loop')) return { tool: { name: 'list_files', args: {} } };
 	return { text: `You said: ${text}` };
+}
+
+/** Flags for the lines of the e2e script that are in `context`, in the record format the lore check rules ask for. */
+function loreReply(context) {
+	const flags = [
+		['I have always trusted this Council with my life.', 'Kael distrusts the Council.', 'Kael', 'I have never trusted this Council with anything.'],
+		['You were born in Frosthaven, Kael. Nobody here forgets it.', 'Kael grew up in Ashfall.', 'Kael', 'You were born in Ashfall, Kael. Nobody here forgets it.'],
+		['Frosthaven made me what I am.', 'An old plan placed Kael in the north.', 'Ghost note', 'Ashfall made me what I am.'],
+	];
+	const records = flags.filter(([line]) => context.includes(line)).map(([line, says, note, fix]) => `LINE: ${line}\nVAULT: ${says}\nNOTE: ${note}\nFIX: ${fix}`);
+	return `\`\`\`lore\n${records.join('\n\n')}\n\`\`\``;
 }
 
 /** A short Fountain scene, shaped by the lore notes, as the draft rules ask: lore cited outside the block, the scene alone inside. */

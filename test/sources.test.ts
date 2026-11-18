@@ -131,7 +131,7 @@ describe('answerSources', () => {
 			vault: [{ link: 'Ashfall', path: 'Places/Ashfall.md', status: 'read' }],
 			web: [],
 			webSources: [],
-			draftRead: true,
+			readFor: 'draft',
 		});
 	});
 

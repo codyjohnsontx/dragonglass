@@ -74,6 +74,8 @@ export interface VaultPort {
 	isFolder(path: string): boolean;
 	readNote(path: string): Promise<string | null>;
 	getMetadata(path: string): NoteMetadata | null;
+	/** A note's properties alone, from the metadata cache. Unlike `getMetadata` it costs one lookup, so it suits a walk over every note. */
+	getFrontmatter(path: string): Record<string, unknown> | null;
 	/** Every Markdown note's resolved links and tags, read from the metadata cache in one pass. */
 	linkGraph(): NoteLinks[];
 	/** Create a note; throws if the file already exists. Creates parent folders. */

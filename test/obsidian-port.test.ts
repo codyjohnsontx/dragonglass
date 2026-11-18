@@ -307,4 +307,9 @@ describe('ObsidianVaultPort.getMetadata', () => {
 		const { port } = fakeIndexedApp();
 		expect(port.getMetadata('Kael.md')?.frontmatter).toEqual({ position: 'Warden of the Gate' });
 	});
+
+	it('gives the same properties through getFrontmatter', () => {
+		const { port } = fakeIndexedApp();
+		expect(port.getFrontmatter('Kael.md')).toEqual({ position: 'Warden of the Gate' });
+	});
 });

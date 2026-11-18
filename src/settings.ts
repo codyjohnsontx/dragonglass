@@ -80,6 +80,12 @@ export interface DragonglassSettings {
 	 * when unset. The open note is the script being drafted into either way.
 	 */
 	scriptFolder: string;
+	/**
+	 * The sequel canon note: deliberate changes to the original lore, which
+	 * override it for drafting and the lore check. Read with every message
+	 * when it exists; see `canonNotePath`.
+	 */
+	canonNote: string;
 	/** Default toggles for new messages. */
 	includeActiveNote: boolean;
 	includeSelection: boolean;
@@ -114,6 +120,7 @@ export const DEFAULT_SETTINGS: DragonglassSettings = {
 	custom: { baseUrl: '', model: '', apiKeySecretId: '', auth: 'bearer', authHeader: '', streaming: true, toolCalling: true },
 	webSearch: { apiKeySecretId: '', preferredSites: '', baseUrl: 'https://api.tavily.com' },
 	scriptFolder: '',
+	canonNote: 'Sequel canon.md',
 	includeActiveNote: true,
 	includeSelection: true,
 	toolsEnabled: true,
@@ -167,6 +174,7 @@ export function mergeSettings(raw: unknown): DragonglassSettings {
 		}
 	}
 	if (typeof r['scriptFolder'] === 'string') out.scriptFolder = r['scriptFolder'];
+	if (typeof r['canonNote'] === 'string') out.canonNote = r['canonNote'];
 	for (const key of ['includeActiveNote', 'includeSelection', 'toolsEnabled', 'showUsage'] as const) {
 		if (typeof r[key] === 'boolean') out[key] = r[key];
 	}

@@ -1,5 +1,6 @@
 import { ToolCall, Usage } from '../providers/types';
 import type { DraftRecord } from '../agent/drafting';
+import type { LoreCheckRecord, LoreIssue } from '../agent/lore-check';
 import type { Source } from '../agent/sources';
 import { ChangeProposal, PROPOSAL_KINDS } from '../vault/proposals';
 
@@ -43,6 +44,12 @@ export interface StoredMessage {
 	 * plain reply; `content` still holds the whole reply for the model.
 	 */
 	draft?: DraftRecord;
+	/**
+	 * On the reply that ends a lore check: the issues it found, with the
+	 * proposals made from them. Shown as a list of issues, not a plain reply;
+	 * `content` still holds the whole reply for the model.
+	 */
+	loreCheck?: LoreCheckRecord;
 	/**
 	 * What the message showed the model, for the answer's sources list: for a
 	 * tool result the notes and web pages it returned, for a user message the
@@ -169,7 +176,7 @@ export function sanitizeConversation(raw: unknown): Conversation | null {
 	if (!raw || typeof raw !== 'object') return null;
 	const c = raw as Record<string, unknown>;
 	if (typeof c['id'] !== 'string' || !Array.isArray(c['messages'])) return null;
-	const messages = (c['messages'] as unknown[]).filter(isStoredMessage).map(sanitizeDraft);
+	const messages = (c['messages'] as unknown[]).filter(isStoredMessage).map(sanitizeDraft).map(sanitizeLoreCheck);
 	const proposalsRaw = c['proposals'];
 	const proposals: Record<string, ChangeProposal> = {};
 	if (proposalsRaw && typeof proposalsRaw === 'object') {
@@ -206,6 +213,40 @@ function sanitizeDraft(m: StoredMessage): StoredMessage {
 	if (typeof r['thread'] !== 'string' || typeof r['text'] !== 'string') return { ...m, draft: undefined };
 	const inserts = Array.isArray(r['inserts']) ? r['inserts'].filter((id): id is string => typeof id === 'string') : undefined;
 	return { ...m, draft: { thread: r['thread'], text: r['text'], ...(inserts?.length ? { inserts } : {}) } };
+}
+
+/** Drop a malformed lore check, or a malformed issue in one; the message then renders as a plain reply. */
+function sanitizeLoreCheck(m: StoredMessage): StoredMessage {
+	const c = m.loreCheck as unknown;
+	if (c === undefined) return m;
+	if (!c || typeof c !== 'object') return { ...m, loreCheck: undefined };
+	const r = c as Record<string, unknown>;
+	if (typeof r['scriptPath'] !== 'string' || !Array.isArray(r['issues'])) return { ...m, loreCheck: undefined };
+	const shown = shownRecord(r['shown']);
+	const canonShown = shownRecord(r['canonShown']);
+	return {
+		...m,
+		loreCheck: {
+			scriptPath: r['scriptPath'],
+			issues: r['issues'].filter(isLoreIssue),
+			...(r['readNoLore'] === true ? { readNoLore: true as const } : {}),
+			...(typeof r['leftOut'] === 'number' ? { leftOut: r['leftOut'] } : {}),
+			...(shown ? { shown } : {}),
+			...(canonShown ? { canonShown } : {}),
+			...(typeof r['loreCut'] === 'number' ? { loreCut: r['loreCut'] } : {}),
+		},
+	};
+}
+
+function shownRecord(v: unknown): { chars: number; of: number } | null {
+	const s = v as Record<string, unknown> | undefined;
+	return typeof s?.['chars'] === 'number' && typeof s['of'] === 'number' ? { chars: s['chars'], of: s['of'] } : null;
+}
+
+function isLoreIssue(v: unknown): v is LoreIssue {
+	if (!v || typeof v !== 'object') return false;
+	const i = v as Record<string, unknown>;
+	return ['id', 'line', 'says', 'note', 'notePath'].every((k) => typeof i[k] === 'string') && (i['fix'] === undefined || typeof i['fix'] === 'string') && (i['proposalId'] === undefined || typeof i['proposalId'] === 'string');
 }
 
 function isProposal(v: unknown): v is ChangeProposal {

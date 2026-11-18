@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateTokens, autoReadBudget, buildSystemPrompt, formatContextBlock, noteTokenBudget, toProviderMessages, vaultMap } from '../src/agent/context';
+import { allocateTokens, autoReadBudget, buildSystemPrompt, formatContextBlock, noteTokenBudget, readContext, toProviderMessages, vaultMap } from '../src/agent/context';
 import { estimateTokens } from '../src/providers/types';
 import { MemoryVaultPort } from './memory-vault';
 import { StoredMessage } from '../src/persistence/conversation';
@@ -153,5 +153,31 @@ describe('context building', () => {
 		expect(msgs[0]?.content).toBe('first');
 		expect(msgs[1]?.content).toBe('CTX\n\nsecond');
 		expect(msgs[3]).toEqual({ role: 'tool', content: 'r', toolCallId: 'c', toolName: 't' });
+	});
+});
+
+describe('readContext', () => {
+	const files = { 'Script/Scene 13.md': 'She waits.', 'Script/Scene 12.md': 'He left.', 'Characters/Kael.md': 'Kael is an only child.' };
+
+	it('reads the note, selection and attachments chosen at the click, though another note is opened before the read', async () => {
+		const vault = new MemoryVaultPort(files);
+		vault.active = { path: 'Script/Scene 13.md', selection: 'She waits' };
+		const choice = { active: vault.getActiveContext(), includeActive: true, includeSelection: true, attachments: ['Characters/Kael.md'] };
+		// The chat view's connection check runs between the click and the read; the user opens Scene 12 meanwhile.
+		vault.active = { path: 'Script/Scene 12.md', selection: 'He left' };
+		expect(await readContext(vault, choice)).toEqual([
+			{ kind: 'active', label: 'Active note', path: 'Script/Scene 13.md', content: 'She waits.' },
+			{ kind: 'selection', label: 'Selection', path: 'Script/Scene 13.md', content: 'She waits' },
+			{ kind: 'attachment', label: 'Characters/Kael.md', path: 'Characters/Kael.md', content: 'Kael is an only child.' },
+		]);
+	});
+
+	it('leaves out what was not chosen, and an attachment that is the open note already sent', async () => {
+		const vault = new MemoryVaultPort(files);
+		const active = { path: 'Script/Scene 13.md', selection: 'She waits' };
+		expect(await readContext(vault, { active, includeActive: false, includeSelection: false, attachments: [] })).toEqual([]);
+		expect(await readContext(vault, { active, includeActive: true, includeSelection: false, attachments: ['Script/Scene 13.md', 'Gone.md'] })).toEqual([
+			{ kind: 'active', label: 'Active note', path: 'Script/Scene 13.md', content: 'She waits.' },
+		]);
 	});
 });

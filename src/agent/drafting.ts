@@ -186,8 +186,10 @@ const TRANSITION = /^[A-Z][A-Z .]*TO:$|^> ?[A-Z][A-Z .]*[.:]$/;
 /** A character cue: a few capitalized words, optionally with an extension such as (V.O.). */
 const CHARACTER_CUE = /^(?:[A-Z][A-Z0-9'.-]*)(?: [A-Z][A-Z0-9'.-]*){0,3}(?: \([A-Z.' ]+\))?$/;
 const MD_HEADING = /^#{1,6}\s+\S/;
-/** A Markdown screenplay cue: a bold name alone on a line, or `**Name:**` leading a dialogue line. */
-const MD_BOLD_CUE = /^\*\*[^*\n]{1,40}\*\*:?\s*$|^\*\*[^*\n]{1,40}:\*\*\s/;
+/** A Markdown screenplay cue: a bold name alone on a line, optionally with a parenthetical such as (quietly), */
+const MD_BOLD_NAME = /^\*\*[^*\n]{1,40}\*\*:?(?: \([^()\n]{1,40}\))?\s*$/;
+/** or `**Name:**` leading a dialogue line. */
+const MD_BOLD_LEAD = /^\*\*[^*\n]{1,40}:\*\*\s/;
 
 /**
  * Which conventions a script note follows, from counting its tells: scene
@@ -208,7 +210,7 @@ export function inferFormat(content: string): DraftFormat {
 		if (SCENE_HEADING.test(line) || FORCED_HEADING.test(line)) fountain += 2;
 		else if (TRANSITION.test(line)) fountain += 1;
 		else if (CHARACTER_CUE.test(line) && hasDialogueUnder(lines, i)) fountain += 1;
-		if (MD_BOLD_CUE.test(line)) {
+		if (MD_BOLD_NAME.test(line) || MD_BOLD_LEAD.test(line)) {
 			markdown += 2;
 			boldCues++;
 		} else if (MD_HEADING.test(line)) markdown += 1;
@@ -222,6 +224,20 @@ export function inferFormat(content: string): DraftFormat {
 function hasDialogueUnder(lines: string[], i: number): boolean {
 	const next = lines[i + 1];
 	return next !== undefined && next.trim() !== '' && !CHARACTER_CUE.test(next);
+}
+
+/**
+ * Whether line `i` is a character cue with nothing else on it: a bold name, or
+ * a name in capitals, with or without a colon, over the line it speaks or at
+ * the end of the text. Capitals with a blank line under them can be a title
+ * such as TEN YEARS LATER, and are not a cue.
+ */
+export function isBareCue(lines: string[], i: number): boolean {
+	const line = lines[i]!.trim();
+	if (MD_BOLD_NAME.test(line)) return true;
+	if (SCENE_HEADING.test(line) || TRANSITION.test(line) || !CHARACTER_CUE.test(line.replace(/:$/, ''))) return false;
+	const next = lines[i + 1];
+	return next === undefined || next.trim() !== '';
 }
 
 /** The opening of the script note, frontmatter skipped, cut at a line end to about `SAMPLE_CHARS`. */
@@ -252,15 +268,14 @@ export function draftingFor(scriptNote: string | null, content: string | null): 
 }
 
 /**
- * The drafting options for a send. The open note is the script, but its
- * sample and format go to the model only when it is inside the script
- * folder or attached whole to this message (`context`), through the active
- * note toggle or the note picker; otherwise the rules
+ * The drafting options for a send. The open note (`open`, as it was at the
+ * click) is the script, but its sample and format go to the model only when
+ * it is inside the script folder or attached whole to this message
+ * (`context`), through the active note toggle or the note picker; otherwise the rules
  * fall back to Fountain, name no note, and tell the model no script note is
  * shared so it asks which note the scene is for when it should match one.
  */
-export async function draftingForSend(vault: VaultPort, context: readonly ContextItem[], scriptFolder: string): Promise<DraftingOptions> {
-	const open = vault.getActiveContext().path;
+export async function draftingForSend(vault: VaultPort, open: string | null, context: readonly ContextItem[], scriptFolder: string): Promise<DraftingOptions> {
 	if (!open) return draftingFor(null, null);
 	const attached = context.some((item) => item.kind !== 'selection' && item.path === open);
 	if (!attached && !isScriptNote(open, scriptFolder)) return { ...draftingFor(null, null), withheld: true };

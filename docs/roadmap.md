@@ -72,17 +72,25 @@ without redesigning the provider or tool architecture.
   rewrite with earlier versions a click away in the card; Insert puts the
   version shown over the selection or at the cursor of the open note through
   the normal review; an optional script folder keeps script pages out of lore
-  searches. Builds 2 and 3 follow below.
+  searches. Build 3 follows below.
+- **Writing assistant, build 2: lore check.** Check lore in the chat checks
+  the open note or its selection against the vault for contradictions of
+  relationships, timeline and voice. The notes the script names go with the
+  check, and each issue is listed with its line and the note it contradicts,
+  checked against the script and against what the model was shown. Fix it
+  proposes the corrected line through the review; Intentional proposes adding
+  the change to a sequel canon note, at a configurable path, created if absent.
+  That note goes with every message and the model is told it overrides the
+  lore for drafting and for the check; a line recorded through Intentional is
+  not flagged again, while canon in the owner's own words is not guaranteed
+  to hold (decision 22).
 
 ## Next
 
-1. **Writing assistant, build 2: lore check** against the vault, with a
-   sequel canon note. Flag contradictions in the script (relationships,
-   timeline, voice), each listed in the chat with the line and the vault note
-   it contradicts, and a per-issue "fix it" that proposes the corrected line
-   through the review. A "sequel canon" note, written by the owner or through
-   an "intentional" button, records deliberate changes and overrides the
-   original lore for the check and for drafting.
+1. **Sequel canon second pass**: test each lore flag and each draft against
+   the sequel canon note before it reaches the card, so canon in the owner's
+   own words holds (decision 22), and decide whether to withhold write tools
+   on draft requests.
 2. **Writing assistant, build 3: brainstorm cards**: 3 to 5 short pitch
    cards for a beat before drafting, each with a "draft this" button, and a
    way to combine pitches ("combine 2 and 4"). Punch-up and reader notes come
